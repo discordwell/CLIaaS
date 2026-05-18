@@ -41,6 +41,7 @@ export interface LogicAnim {
   attachedStructureIndex?: number;
   attachedTreeKey?: number;
   damageAccumRaw?: number;
+  createdLogicTick?: number;
   deleteOnNextProcess?: boolean;
   processedLogicTick?: number;
 }
@@ -167,6 +168,7 @@ export function spawnLogicAnim(
   attachedStructureIndex?: number,
   delay = 0,
   attachedTreeKey?: number,
+  createdLogicTick?: number,
 ): boolean {
   if (!animSlotReserved && reserveAnimSlot && !reserveAnimSlot()) return false;
 
@@ -183,6 +185,7 @@ export function spawnLogicAnim(
     logicIndexHint,
     attachedStructureIndex,
     attachedTreeKey,
+    createdLogicTick,
   };
   logicAnims.push(anim);
   if (render) {
@@ -197,7 +200,7 @@ export function spawnLogicAnim(
       spriteStart: 0,
     } as Effect);
   }
-  if (delay === 0) logicAnimStart(anim, logicAnims, effects, undefined, allocateLogicIndex, reserveAnimSlot);
+  if (delay === 0) logicAnimStart(anim, logicAnims, effects, undefined, allocateLogicIndex, reserveAnimSlot, createdLogicTick);
   return true;
 }
 
@@ -210,6 +213,7 @@ export function processLogicAnim(
   reserveAnimSlot?: ReserveAnimSlot,
   releaseTerrainLogicSlot?: ReleaseTerrainLogicSlot,
   damageAttachedStructure?: DamageAttachedStructure,
+  currentTick?: number,
 ): boolean {
   if (anim.deleteOnNextProcess) {
     fireOutAttachedTree(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot, releaseTerrainLogicSlot);
@@ -224,7 +228,7 @@ export function processLogicAnim(
 
   if (anim.delay > 0) {
     anim.delay--;
-    if (anim.delay === 0) logicAnimStart(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot);
+    if (anim.delay === 0) logicAnimStart(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot, currentTick);
     return true;
   }
 
@@ -249,7 +253,7 @@ export function processLogicAnim(
   }
 
   if (def.biggest > 0 && anim.stage === def.biggest) {
-    logicAnimMiddle(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot);
+    logicAnimMiddle(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot, currentTick);
   }
 
   // C++ anim.cpp:758 — while Loops > 1, loop at LoopEnd-Start; on the
@@ -271,7 +275,8 @@ export function processLogicAnim(
       anim.timer = chainDef.rate;
       anim.loops = chainDef.loops;
       anim.delay = 0;
-      logicAnimStart(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot);
+      anim.damageAccumRaw = 0;
+      logicAnimStart(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot, currentTick);
       return true;
     }
     fireOutAttachedTree(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot, releaseTerrainLogicSlot);
@@ -331,12 +336,13 @@ function logicAnimStart(
   map?: GameMap,
   allocateLogicIndex?: AllocateLogicIndex,
   reserveAnimSlot?: ReserveAnimSlot,
+  currentTick?: number,
 ): void {
   const def = LOGIC_ANIM_DEFS[anim.type];
   // C++ anim.cpp:914-916 — animations whose Biggest stage is frame 0 run Middle
   // immediately from Start(), including FIRE_MED spawning FIRE_SMALL.
   if (def.biggest === 0) {
-    logicAnimMiddle(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot);
+    logicAnimMiddle(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot, currentTick);
   }
 }
 
@@ -347,6 +353,7 @@ function logicAnimMiddle(
   map?: GameMap,
   allocateLogicIndex?: AllocateLogicIndex,
   reserveAnimSlot?: ReserveAnimSlot,
+  currentTick?: number,
 ): void {
   const def = LOGIC_ANIM_DEFS[anim.type];
 
@@ -371,18 +378,18 @@ function logicAnimMiddle(
       // then loop RNG. SCG07EA t182 verifies the successful allocation ordering.
       spawnScatteredLogicAnim(
         logicAnims, effects, 'fire_small', anim.x, anim.y, 0x0040,
-        true, false, allocateLogicIndex, reserveAnimSlot,
+        true, false, allocateLogicIndex, reserveAnimSlot, currentTick,
       );
       if (ScenarioRandom.percentChance(50)) {
         spawnScatteredLogicAnim(
           logicAnims, effects, 'fire_small', anim.x, anim.y, 0x00A0,
-          true, false, allocateLogicIndex, reserveAnimSlot,
+          true, false, allocateLogicIndex, reserveAnimSlot, currentTick,
         );
       }
       if (ScenarioRandom.percentChance(50)) {
         spawnScatteredLogicAnim(
           logicAnims, effects, 'fire_med', anim.x, anim.y, 0x0070,
-          true, false, allocateLogicIndex, reserveAnimSlot,
+          true, false, allocateLogicIndex, reserveAnimSlot, currentTick,
         );
       }
       break;
@@ -404,6 +411,7 @@ function logicAnimMiddle(
         allocateLogicIndex,
         reserveAnimSlot,
         anim.attachedStructureIndex,
+        currentTick,
       );
       break;
 
@@ -423,6 +431,7 @@ function spawnScatteredLogicAnim(
   brandNewAlreadyProcessed = false,
   allocateLogicIndex?: AllocateLogicIndex,
   reserveAnimSlot?: ReserveAnimSlot,
+  createdLogicTick?: number,
 ): boolean {
   // C++ source in this repo passes Coord_Scatter(...) and Random_Pick(1,2)
   // inline to new AnimClass(...). Allocation failure therefore skips both RNG
@@ -443,6 +452,10 @@ function spawnScatteredLogicAnim(
     allocateLogicIndex,
     reserveAnimSlot,
     true,
+    undefined,
+    0,
+    undefined,
+    createdLogicTick,
   );
 }
 
@@ -459,6 +472,7 @@ function spawnLogicAnimWithDeferredLoop(
   allocateLogicIndex?: AllocateLogicIndex,
   reserveAnimSlot?: ReserveAnimSlot,
   attachedStructureIndex?: number,
+  createdLogicTick?: number,
 ): boolean {
   // C++ new-expression allocation calls AnimClass::operator new before
   // evaluating constructor arguments. FIRE_MED passes Random_Pick(1,2) inline,
@@ -478,6 +492,9 @@ function spawnLogicAnimWithDeferredLoop(
     reserveAnimSlot,
     true,
     attachedStructureIndex,
+    0,
+    undefined,
+    createdLogicTick,
   );
 }
 

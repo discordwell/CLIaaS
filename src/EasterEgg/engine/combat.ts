@@ -605,6 +605,9 @@ function submitBuildingFireSmall(
       ctx.reserveAnimSlot,
       true,
       attachedStructureIndex,
+      0,
+      undefined,
+      ctx.tick,
     );
     return;
   }
@@ -619,6 +622,7 @@ function submitBuildingFireSmall(
     isBrandNew: ctx.logicAnimsAlreadyProcessed !== true,
     logicIndexHint: ctx.logicIndexHintForNewObject?.(),
     attachedStructureIndex,
+    createdLogicTick: ctx.tick,
   });
   ctx.effects.push({
     type: 'explosion',
@@ -652,6 +656,9 @@ function submitBuildingFireMedium(
       ctx.reserveAnimSlot,
       true,
       attachedStructureIndex,
+      0,
+      undefined,
+      ctx.tick,
     );
     return;
   }
@@ -666,6 +673,7 @@ function submitBuildingFireMedium(
     isBrandNew: ctx.logicAnimsAlreadyProcessed !== true,
     logicIndexHint: ctx.logicIndexHintForNewObject?.(),
     attachedStructureIndex,
+    createdLogicTick: ctx.tick,
   });
   submitBuildingFireEffect(ctx, 'fire2', x, y, delay, 12);
 }
@@ -708,6 +716,9 @@ function submitBuildingAttachedLogicAnim(
     ctx.reserveAnimSlot,
     true,
     attachedStructureIndex,
+    0,
+    undefined,
+    ctx.tick,
   );
 }
 
@@ -733,6 +744,7 @@ function submitOilfieldBurn(
     isBrandNew: ctx.logicAnimsAlreadyProcessed !== true,
     logicIndexHint: ctx.logicIndexHintForNewObject?.(),
     attachedStructureIndex,
+    createdLogicTick: ctx.tick,
   });
   ctx.effects.push({
     type: 'explosion',
@@ -956,6 +968,7 @@ function submitBuildingFballEffect(
     delay,
     isBrandNew: ctx.logicAnimsAlreadyProcessed !== true,
     logicIndexHint: ctx.logicIndexHintForNewObject?.(),
+    createdLogicTick: ctx.tick,
   });
   ctx.effects.push({
     type: 'explosion',
@@ -1026,6 +1039,7 @@ function submitTreeBurnAnim(ctx: CombatContext, tree: MapTree, type: LogicAnimTy
     undefined,
     delay,
     treeKey(tree),
+    ctx.tick,
   );
 }
 
@@ -2338,6 +2352,11 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
         ctx.logicIndexHintForNewObject?.(),
         ctx.logicIndexHintForNewObject,
         ctx.reserveAnimSlot,
+        false,
+        undefined,
+        0,
+        undefined,
+        ctx.tick,
       );
     }
   }
@@ -3176,6 +3195,8 @@ function spawnProjectileTrailAnim(ctx: CombatContext, proj: InflightProjectile):
     false,
     undefined,
     1,
+    undefined,
+    ctx.tick,
   );
   if (!spawned) {
     projectileTrace({
@@ -4275,6 +4296,11 @@ export function applySplashDamage(
               ctx.logicIndexHintForNewObject?.(),
               ctx.logicIndexHintForNewObject,
               ctx.reserveAnimSlot,
+              false,
+              undefined,
+              0,
+              undefined,
+              ctx.tick,
             );
           }
           if (bridgeResult.fullyDestroyed) {

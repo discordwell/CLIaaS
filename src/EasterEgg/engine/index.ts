@@ -2647,7 +2647,7 @@ export class Game {
         _updateInflightProjectiles(ctx, maxLogicIndexHint);
         this.inflightProjectiles = ctx.inflightProjectiles;
       };
-      const skipShiftedLogicObject = (effectiveLogicIdx: number): boolean => {
+      const skipShiftedLogicObject = (effectiveLogicIdx: number, createdLogicTick?: number): boolean => {
         const skipRange = ctx.shiftedLogicSkipRanges?.find(range =>
           effectiveLogicIdx > range.after && effectiveLogicIdx <= range.through);
         const skipAfter = skipRange?.after ?? ctx.shiftedLogicSkipHintAfter ?? -Infinity;
@@ -2657,18 +2657,22 @@ export class Game {
             effectiveLogicIdx > skipThrough) {
           return false;
         }
+        // Deletion skip ranges only cover objects that existed when the earlier
+        // slot was removed. AnimClass constructors can insert new logic objects
+        // later in the same pass; C++ still gives those new anims their first turn.
+        if (createdLogicTick === this.tick) return false;
         logicIdx = Math.max(logicIdx + 1, effectiveLogicIdx + 1);
         return true;
       };
-	      const processLogicAnimsThrough = (maxLogicIndexHint: number) => {
-	        const processAll = maxLogicIndexHint === Infinity;
-	        const releaseProcessedLogicObject = (logicIndexHint: number | undefined, kind: string) => {
-	          if (logicIndexHint === undefined) return;
-	          this.traceCppLogicRelease(kind, logicIndexHint);
-	          this.shiftCppLogicHintsAfter(logicIndexHint);
-	          logicIdx = Math.min(logicIdx, logicIndexHint);
-	        };
-	        while (true) {
+      const processLogicAnimsThrough = (maxLogicIndexHint: number) => {
+        const processAll = maxLogicIndexHint === Infinity;
+        const releaseProcessedLogicObject = (logicIndexHint: number | undefined, kind: string) => {
+          if (logicIndexHint === undefined) return;
+          this.traceCppLogicRelease(kind, logicIndexHint);
+          this.shiftCppLogicHintsAfter(logicIndexHint);
+          logicIdx = Math.min(logicIdx, logicIndexHint);
+        };
+        while (true) {
           let bestAnimIndex = -1;
           let bestParachuteEntity: Entity | undefined;
           let bestLogicIdx = Infinity;
@@ -2704,7 +2708,7 @@ export class Game {
             ? (anim.logicIndexHint ?? logicIdx)
             : (bestParachuteEntity!.fallParachuteAnimLogicIndexHint ?? logicIdx);
           updateProjectilesThrough(effectiveLogicIdx - 1);
-          if (skipShiftedLogicObject(effectiveLogicIdx)) {
+          if (skipShiftedLogicObject(effectiveLogicIdx, anim?.createdLogicTick)) {
             if (anim) {
               anim.processedLogicTick = this.tick;
             } else {
@@ -2731,23 +2735,24 @@ export class Game {
                 if (!structure?.alive) return true;
                 return ctx.damageStructure(structure, damage, undefined, 'Fire');
               },
-	            )) {
-	              const deletedHint = anim.logicIndexHint;
-	              anim.logicIndexHint = undefined;
-	              this.logicAnims.splice(bestAnimIndex, 1);
-	              releaseProcessedLogicObject(deletedHint, 'anim');
-	            } else {
-	              anim.processedLogicTick = this.tick;
-	            }
-	          } else {
-	            const parachuteEntity = bestParachuteEntity!;
-	            const parachuteHint = parachuteEntity.fallParachuteAnimLogicIndexHint;
-	            processFallingParachuteAnim(parachuteEntity);
-	            parachuteEntity.fallParachuteAnimProcessedTick = this.tick;
-	            if (parachuteHint !== undefined && !parachuteEntity.fallParachuteAnimActive) {
-	              releaseProcessedLogicObject(parachuteHint, 'parachute');
-	            }
-	          }
+              this.tick,
+            )) {
+              const deletedHint = anim.logicIndexHint;
+              anim.logicIndexHint = undefined;
+              this.logicAnims.splice(bestAnimIndex, 1);
+              releaseProcessedLogicObject(deletedHint, 'anim');
+            } else {
+              anim.processedLogicTick = this.tick;
+            }
+          } else {
+            const parachuteEntity = bestParachuteEntity!;
+            const parachuteHint = parachuteEntity.fallParachuteAnimLogicIndexHint;
+            processFallingParachuteAnim(parachuteEntity);
+            parachuteEntity.fallParachuteAnimProcessedTick = this.tick;
+            if (parachuteHint !== undefined && !parachuteEntity.fallParachuteAnimActive) {
+              releaseProcessedLogicObject(parachuteHint, 'parachute');
+            }
+          }
         }
         if (!processAll) updateProjectilesThrough(maxLogicIndexHint);
       };
@@ -14257,6 +14262,11 @@ export class Game {
         this.logicIndexHintForNewObject(),
         () => this.logicIndexHintForNewObject(),
         () => this.reserveCppAnimSlot(),
+        false,
+        undefined,
+        0,
+        undefined,
+        this.tick,
       );
     }
 

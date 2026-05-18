@@ -475,6 +475,50 @@ async function tsAttachedFireBarrelState(adapter: unknown) {
   });
 }
 
+async function wasmProjectileSpawnedFireState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const fire = (state.anims ?? []).find((anim: any) =>
+      anim.name === 'FIRE2' && anim.cx === 113 && anim.cy === 63);
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      fire: fire
+        ? {
+            stage: fire.stage,
+            loops: fire.loops,
+            rate: fire.rate,
+            about: fire.about,
+          }
+        : null,
+    };
+  });
+}
+
+async function tsProjectileSpawnedFireState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const fire = (game.logicAnims ?? []).find((anim: any) =>
+      anim.type === 'fire_med' &&
+      Math.floor(anim.x / 24) === 113 &&
+      Math.floor(anim.y / 24) === 63);
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      fire: fire
+        ? {
+            stage: fire.stage,
+            delay: fire.delay,
+            loops: fire.loops,
+            timer: fire.timer,
+            isBrandNew: fire.isBrandNew,
+          }
+        : null,
+    };
+  });
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCA04 infantry reservation pathing', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -706,6 +750,32 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCA04 infantry reservation 
       expect(ts.tick).toBe(cpp.tick);
       expect(ts.barrel).toBeNull();
       expect(ts.animTypesAtBarrel).toEqual(expect.arrayContaining(['fball1', 'fire_med', 'fire_small']));
+      expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
+    }, { wasmSeed: 0 });
+  }, 180_000);
+
+  it('processes projectile-spawned delayed fires in the same logic pass', async () => {
+    await withDualScenario('SCA04EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      const result = await stepBoth(handle, 172);
+      expect(result.ts.state.tick).toBe(result.wasm.state.tick);
+
+      const cpp = await wasmProjectileSpawnedFireState(handle.wasm);
+      const ts = await tsProjectileSpawnedFireState(handle.ts);
+
+      expect(cpp.tick).toBe(172);
+      expect(cpp.fire).toMatchObject({
+        stage: 0,
+        loops: 3,
+      });
+
+      expect(ts.tick).toBe(cpp.tick);
+      expect(ts.fire).toMatchObject({
+        stage: cpp.fire?.stage,
+        delay: 0,
+        loops: cpp.fire?.loops,
+      });
       expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
     }, { wasmSeed: 0 });
   }, 180_000);
