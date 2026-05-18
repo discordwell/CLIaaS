@@ -11464,11 +11464,11 @@ export class Game {
                 this.assignDriveDestinationNone(entity);
                 clearedCloseEnoughNavCom = true;
               }
-              if (entryMove === MoveResult.DESTROYABLE &&
-                  this.overrideDriveDestroyableBlocker(entity, chainCell.cx, chainCell.cy)) {
-                break;
-              }
               if (clearedCloseEnoughNavCom) break;
+            }
+            if (entryMove === MoveResult.DESTROYABLE &&
+                this.overrideDriveDestroyableBlocker(entity, chainCell.cx, chainCell.cy)) {
+              break;
             }
             if (entryMove !== MoveResult.OCCUPIED) {
               this.clearDrivePath(entity);

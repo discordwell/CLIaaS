@@ -70,6 +70,92 @@ function parseIniBool(raw: string | undefined): boolean | undefined {
   return undefined;
 }
 
+function clearProjectileDerivedWeaponFields(base: WeaponStats): void {
+  delete base.projectileSpeed;
+  delete base.projectileROT;
+  delete base.isArcing;
+  delete base.isHigh;
+  delete base.isDropping;
+  delete base.isInaccurate;
+  delete base.isInvisible;
+  delete base.isFueled;
+  delete base.isAntiAir;
+  delete base.isAntiGround;
+  delete base.isSubSurface;
+  delete base.isAntiSub;
+  delete base.isFlameEquipped;
+}
+
+function applyProjectileOverride(base: WeaponStats, projectileRaw: string | undefined): void {
+  if (!projectileRaw) return;
+  const projectile = projectileRaw.trim().toLowerCase();
+
+  clearProjectileDerivedWeaponFields(base);
+
+  switch (projectile) {
+    case 'invisible':
+    case 'inivisble':
+      base.isInvisible = true;
+      break;
+    case 'heatseeker':
+      base.projectileROT = 5;
+      base.isAntiAir = true;
+      base.isHigh = true;
+      base.isFueled = true;
+      break;
+    case 'aamissile':
+      base.projectileROT = 20;
+      base.isAntiAir = true;
+      base.isAntiGround = false;
+      base.isHigh = true;
+      base.isFueled = true;
+      break;
+    case 'laserguided':
+      base.projectileROT = 20;
+      base.isAntiAir = true;
+      base.isHigh = true;
+      base.isFueled = true;
+      break;
+    case 'frog':
+      base.projectileROT = 5;
+      base.isHigh = true;
+      base.isFueled = true;
+      base.isInaccurate = true;
+      break;
+    case 'lobbed':
+    case 'ballistic':
+      base.isArcing = true;
+      base.isHigh = true;
+      base.isInaccurate = true;
+      break;
+    case 'catapult':
+      base.isArcing = true;
+      base.isHigh = true;
+      base.isInaccurate = true;
+      base.isAntiGround = false;
+      break;
+    case 'bomblet':
+    case 'parachute':
+      base.isDropping = true;
+      base.isHigh = true;
+      break;
+    case 'fireball':
+      base.isFlameEquipped = true;
+      break;
+    case 'torpedo':
+      base.projectileSpeed = 1.0;
+      base.isSubSurface = true;
+      base.isAntiSub = true;
+      break;
+    case 'leapdog':
+      base.projectileROT = 20;
+      break;
+    case 'cannon':
+    default:
+      break;
+  }
+}
+
 export function buildScenarioRuleOverrides(
   rawSections: Map<string, Map<string, string>>,
 ): ScenarioRuleOverrides {
@@ -138,6 +224,8 @@ export function buildScenarioRuleOverrides(
     if (section.has('Damage')) base.damage = Number.parseInt(section.get('Damage')!, 10);
     if (section.has('ROF')) base.rof = Number.parseInt(section.get('ROF')!, 10);
     if (section.has('Range')) base.range = Number.parseFloat(section.get('Range')!);
+    if (section.has('Speed')) base.projSpeed = Number.parseInt(section.get('Speed')!, 10);
+    if (section.has('Projectile')) applyProjectileOverride(base, section.get('Projectile'));
     if (section.has('Warhead')) base.warhead = section.get('Warhead')! as WarheadType;
     if (section.has('Burst')) base.burst = Number.parseInt(section.get('Burst')!, 10);
     if (section.has('Supress')) {

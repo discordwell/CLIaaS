@@ -51,6 +51,14 @@ async function wasmAnt3(adapter: unknown) {
       desiredFacing: ant.pfd,
       isDriving: ant.drv,
       navCell: { cx: ant.ncx, cy: ant.ncy },
+      arm: ant.arm,
+      weapon: ant.wpn,
+      targetLeptons: { lx: ant.tlx, ly: ant.tly },
+      scatterLog: (state.bulletScatterLog ?? []).filter((entry: any) =>
+        entry.frame === 83 &&
+        entry.wh === 5 &&
+        entry.pbx === 28544 &&
+        entry.pby === 16768),
     };
   });
 }
@@ -77,11 +85,20 @@ async function tsAnt3(adapter: unknown) {
       primaryFacing: ant.bodyFacing256,
       desiredFacing: ant.desiredFacing256,
       isDriving: ant.isDriving,
+      attackCooldown: ant.attackCooldown,
       moveTarget: ant.moveTarget
         ? { cx: Math.floor(ant.moveTarget.lx / 256), cy: Math.floor(ant.moveTarget.ly / 256) }
         : null,
       target: ant.target
         ? { type: ant.target.type, cx: ant.target.cell.cx, cy: ant.target.cell.cy }
+        : null,
+      weapon: ant.weapon
+        ? {
+            name: ant.weapon.name,
+            projSpeed: ant.weapon.projSpeed,
+            isInvisible: ant.weapon.isInvisible,
+            isDropping: ant.weapon.isDropping,
+          }
         : null,
     };
   });
@@ -124,6 +141,37 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCA04 infantry reservation 
 
       result = await stepBoth(handle, 10);
       expect(result.ts.state.tick).toBe(80);
+      expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
+    }, { wasmSeed: 0 });
+  }, 180_000);
+
+  it('overrides HUNT to ATTACK when the next track cell is an enemy infantry blocker', async () => {
+    await withDualScenario('SCA04EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      const result = await stepBoth(handle, 84);
+      expect(result.ts.state.tick).toBe(result.wasm.state.tick);
+
+      const cpp = await wasmAnt3(handle.wasm);
+      const ts = await tsAnt3(handle.ts);
+
+      expect(cpp.tick).toBe(84);
+      expect(cpp.mission).toBe(1); // MISSION_ATTACK
+      expect(cpp.arm).toBe(24);
+      expect(cpp.weapon).toBe('Napalm');
+      expect(cpp.scatterLog).toHaveLength(1);
+
+      expect(ts.tick).toBe(cpp.tick);
+      expect(ts.mission).toBe('ATTACK');
+      expect(ts.attackCooldown).toBe(cpp.arm);
+      expect(ts.moveTarget).toBeNull();
+      expect(ts.target).toEqual({ type: 'E1', cx: 112, cy: 65 });
+      expect(ts.weapon).toEqual({
+        name: 'Napalm',
+        projSpeed: 100,
+        isInvisible: true,
+        isDropping: undefined,
+      });
       expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
     }, { wasmSeed: 0 });
   }, 180_000);
