@@ -2028,8 +2028,15 @@ export class Team {
         if (unit.stats.isInfantry) {
           // Phase 2: route through assignMission (C++ mission.cpp:379-390)
           // — no-op when already in MOVE, queues otherwise.
+          const targetLXlepton = targetLepton.lx;
+          const targetLYlepton = targetLepton.ly;
+          const targetChanged =
+            !unit.moveTarget ||
+            unit.moveTargetEntityRef !== null ||
+            unit.moveTarget.lx !== targetLXlepton ||
+            unit.moveTarget.ly !== targetLYlepton;
           assignMission(unit, Mission.MOVE);
-          if (!unit.moveTarget) {
+          if (targetChanged) {
             // C++ Coordinate_Move calls InfantryClass::Assign_Destination.
             // infantry.cpp:1046 stops an already-driving, non-formation infantry
             // before FootClass::Assign_Destination writes the new legal NavCom;
@@ -2048,7 +2055,7 @@ export class Team {
             }
             unit.path = [];
             unit.pathIndex = 0;
-            unit.moveTarget = { ...targetLepton };
+            unit.moveTarget = { lx: targetLXlepton, ly: targetLYlepton };
             unit.moveTargetEntityRef = null;
             unit.pathThreshold = 1;
           }
