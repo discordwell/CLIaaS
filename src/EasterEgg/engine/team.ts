@@ -220,6 +220,9 @@ export class Team {
   /** Has composition changed since last check? (C++ IsAltered) */
   isAltered = true;
 
+  /** Composition changed this tick and should not feed HouseClass production. */
+  justAltered = false;
+
   /** Should advance to next mission? (C++ IsNextMission) */
   isNextMission = true;
 
@@ -425,8 +428,10 @@ export class Team {
     // recruits before older members are processed.
     // (In C++ this means "has reached team center and is an active participant")
 
-    // Mark team composition as altered for re-evaluation
+    // Mark team composition as altered for re-evaluation.
+    // C++ TeamClass::Add sets both IsAltered and JustAltered.
     this.isAltered = true;
+    this.justAltered = true;
 
     if (this.zone === null && entity.alive) {
       this.calcCenter();
@@ -656,7 +661,9 @@ export class Team {
     entity.teamInitiated = false;
     // C++ team.cpp:2285-2289 — clears IsFormationMove when member is removed/dies
     this.clearFormationMove(entity);
+    // C++ TeamClass::Remove sets both IsAltered and JustAltered.
     this.isAltered = true;
+    this.justAltered = true;
 
     // C++ team.cpp:1139 — a member that breaks off a team immediately runs
     // its virtual Enter_Idle_Mode(). If it still has NavCom, this is a MOVE
@@ -745,6 +752,10 @@ export class Team {
           // Non-reinforceable teams: only under-strength before first activation
           this.isUnderStrength = !this.isHasBeen;
         }
+
+        // C++ team.cpp:559 clears both flags only in the Total>0 branch.
+        this.isAltered = false;
+        this.justAltered = false;
       } else {
         this.isUnderStrength = true;
         this.isFullStrength = false;
@@ -762,7 +773,6 @@ export class Team {
         this.isReforming = true;
       }
 
-      this.isAltered = false;
     }
 
     // ── Regroup when under strength (C++ team.cpp:577-621) ──
@@ -3006,6 +3016,7 @@ export function suspendTeamsByPriority(
       team.remove(team.members[0], ctx);
     }
     team.isAltered = true;
+    team.justAltered = true;
     team.suspendTimer = suspendDelayTicks;
     team.suspended = true;
   }

@@ -256,6 +256,7 @@ export interface AIContext {
     readonly isForcedActive: boolean;
     readonly isHasBeen: boolean;
     readonly isAltered: boolean;
+    readonly justAltered: boolean;
   }[];
   destroyedTeams: Set<number>;
   /** C++ TeamTypeClass::Number — active instance count per team type index */
@@ -282,9 +283,8 @@ function aiTeamNeedsProduction(
   // C++ HouseClass::AI_Unit/Vessel/Infantry:
   //   (IsReinforcable && !IsFullStrength)
   //   || (!IsForcedActive && !IsHasBeen && !JustAltered)
-  // TS tracks JustAltered with isAltered for the composition window.
   return (team.isReinforcable && !team.isFullStrength) ||
-    (!team.isForcedActive && !team.isHasBeen && !team.isAltered);
+    (!team.isForcedActive && !team.isHasBeen && !team.justAltered);
 }
 
 function activeTeamTypeCount(ctx: AIContext, teamIdx: number): number {
