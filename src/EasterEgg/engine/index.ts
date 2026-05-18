@@ -17291,7 +17291,9 @@ export class Game {
 
   /** C++ BuildingClass::Mission_Unload uses Open_Door/Close_Door(8, 5).
    *  DoorClass stores stages-1 internally, so the logical control stage runs
-   *  0..4 while Door_Stage renders 0..3. */
+   *  0..4 while Door_Stage renders 0..3. CDTimerClass starts from the current
+   *  frame, so the same TechnoClass::AI pass that calls Open_Door does not
+   *  spend the first tick of the delay. */
   private static readonly WEAP_DOOR_RATE_TICKS = 8;
 
   private openWeapDoor(s: MapStructure): void {
@@ -17302,7 +17304,7 @@ export class Game {
     if (state === CLOSED || state === CLOSING) {
       s.weapDoorState = OPENING;
       s.weapDoorStage = 0;
-      s.weapDoorTimer = Game.WEAP_DOOR_RATE_TICKS;
+      s.weapDoorTimer = Game.WEAP_DOOR_RATE_TICKS + 1;
       this.syncWeapDoorFrame(s);
     }
   }
@@ -17316,7 +17318,7 @@ export class Game {
     if (state === OPEN || state === OPENING) {
       s.weapDoorState = CLOSING;
       s.weapDoorStage = 0;
-      s.weapDoorTimer = Game.WEAP_DOOR_RATE_TICKS;
+      s.weapDoorTimer = Game.WEAP_DOOR_RATE_TICKS + 1;
       this.syncWeapDoorFrame(s);
     }
   }

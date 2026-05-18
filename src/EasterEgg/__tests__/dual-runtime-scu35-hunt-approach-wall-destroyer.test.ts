@@ -978,6 +978,35 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU35 HUNT approach wall de
     }, { wasmSeed: 0 });
   }, 300_000);
 
+  it('keeps WEAP products waiting for the C++ door-open retry', async () => {
+    await withDualScenario('SCU35EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBoth(handle, 793);
+      const cells = [{ cx: 50, cy: 62 }];
+      const cpp = await wasmGreekWeapExitTanks(handle.wasm, cells);
+      const ts = await tsGreekWeapExitTanks(handle.ts, cells);
+
+      expect(cpp.tick).toBe(793);
+      expect(ts.tick).toBe(cpp.tick);
+      expect(cpp.tanks).toEqual([
+        {
+          type: '2TNK',
+          house: 'Greece',
+          cell: { cx: 50, cy: 62 },
+          lx: 12928,
+          ly: 15872,
+          mission: 'GUARD',
+          missionQueue: null,
+          missionTimer: 8,
+          isDriving: false,
+        },
+      ]);
+      expect(ts.tanks).toEqual(cpp.tanks);
+      expect(ts.rngState >>> 0).toBe(cpp.rngState >>> 0);
+    }, { wasmSeed: 0 });
+  }, 300_000);
+
   it('waits until the next DriveClass pass to rotate after a factory track finishes', async () => {
     await withDualScenario('SCU35EA', async (handle) => {
       await handle.ts.syncRngSeed(handle.wasmState.rngState!);
