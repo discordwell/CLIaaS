@@ -293,6 +293,88 @@ async function tsGreekSpySnapshots(adapter: unknown) {
   }>>;
 }
 
+async function wasmUkraineC3Snapshot(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const row = (state.logicLayer ?? []).find((entry: any[]) =>
+      entry[1] === 'C3' && entry[2] === 'Ukraine');
+    if (!row) throw new Error('C++ SCG20EA Ukraine C3 missing');
+
+    const unit = [...(state.units ?? []), ...(state.enemies ?? [])]
+      .find((entry: any) => entry.id === row[6]);
+    if (!unit) throw new Error('C++ SCG20EA Ukraine C3 detail missing');
+
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      logicIndex: row[0],
+      mission: row[7],
+      missionTimer: row[8],
+      isDriving: row[10],
+      lx: row[12],
+      ly: row[13],
+      nav: unit.nlx !== undefined && unit.nly !== undefined
+        ? { lx: unit.nlx, ly: unit.nly }
+        : null,
+      headTo: unit.hlx !== undefined && unit.hly !== undefined
+        ? { lx: unit.hlx, ly: unit.hly }
+        : null,
+      primaryFacing: unit.pf,
+    };
+  }) as Promise<{
+    tick: number;
+    rngState: number;
+    logicIndex: number;
+    mission: number;
+    missionTimer: number;
+    isDriving: boolean;
+    lx: number;
+    ly: number;
+    nav: { lx: number; ly: number } | null;
+    headTo: { lx: number; ly: number } | null;
+    primaryFacing: number;
+  }>;
+}
+
+async function tsUkraineC3Snapshot(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const entity = game.entities.find((e: any) =>
+      e.type === 'C3' && e.house === 'Ukraine');
+    if (!entity) throw new Error('TS SCG20EA Ukraine C3 missing');
+
+    return {
+      tick: game.tick,
+      rngState: (window as any).__agentState().rngState,
+      logicIndexHint: entity.logicIndexHint,
+      mission: entity.mission,
+      missionTimer: entity.missionTimer,
+      isDriving: entity.isDriving,
+      lx: entity.leptonX,
+      ly: entity.leptonY,
+      nav: entity.moveTarget
+        ? { lx: entity.moveTarget.lx, ly: entity.moveTarget.ly }
+        : null,
+      headTo: entity.headToLX || entity.headToLY
+        ? { lx: entity.headToLX, ly: entity.headToLY }
+        : null,
+      bodyFacing256: entity.bodyFacing256,
+    };
+  }) as Promise<{
+    tick: number;
+    rngState: number;
+    logicIndexHint: number;
+    mission: string;
+    missionTimer: number;
+    isDriving: boolean;
+    lx: number;
+    ly: number;
+    nav: { lx: number; ly: number } | null;
+    headTo: { lx: number; ly: number } | null;
+    bodyFacing256: number;
+  }>;
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCG20 dying enemy infantry blocks movement', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -414,6 +496,33 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCG20 dying enemy infantry 
           path: [cppSpiesAfter[i].path[0]],
         });
       }
+    }, { wasmSeed: 0 });
+  }, 300_000);
+
+  it('lets civilian scatter enter V03 overlap cells that are not in the C++ Occupy_List', async () => {
+    await withDualScenario('SCG20EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBothInCppSizedChunks(handle, 437);
+      const cppC3 = await wasmUkraineC3Snapshot(handle.wasm);
+      const tsC3 = await tsUkraineC3Snapshot(handle.ts);
+
+      expect(cppC3.tick).toBe(437);
+      expect(tsC3.tick).toBe(cppC3.tick);
+      expect(cppC3.logicIndex).toBe(104);
+      expect(tsC3.logicIndexHint).toBe(cppC3.logicIndex);
+      expect(cppC3.mission).toBe(2);
+      expect(tsC3.mission).toBe('MOVE');
+      expect(cppC3.isDriving).toBe(true);
+      expect(tsC3.isDriving).toBe(true);
+
+      expect(tsC3.rngState >>> 0).toBe(cppC3.rngState >>> 0);
+      expect(tsC3.nav).toEqual(cppC3.nav);
+      expect(tsC3.headTo).toEqual(cppC3.headTo);
+      expect(tsC3.lx).toBe(cppC3.lx);
+      expect(tsC3.ly).toBe(cppC3.ly);
+      expect(tsC3.bodyFacing256).toBe(cppC3.primaryFacing);
+      expect(cppC3.ly).toBeGreaterThan(10688);
     }, { wasmSeed: 0 });
   }, 300_000);
 });

@@ -1850,6 +1850,9 @@ const RECT_1X1: readonly StructureOffset[] = [[0, 0]];
 const RECT_2X1: readonly StructureOffset[] = [[0, 0], [1, 0]];
 const RECT_1X2: readonly StructureOffset[] = [[0, 0], [0, 1]];
 const RECT_2X2: readonly StructureOffset[] = [[0, 0], [1, 0], [0, 1], [1, 1]];
+const RECT_2X2_BOTTOM_ROW: readonly StructureOffset[] = [[0, 1], [1, 1]];
+const RECT_2X2_EXCEPT_NW: readonly StructureOffset[] = [[1, 0], [0, 1], [1, 1]];
+const RECT_2X2_EXCEPT_SW: readonly StructureOffset[] = [[0, 0], [1, 0], [1, 1]];
 const RECT_3X2: readonly StructureOffset[] = [[0, 0], [1, 0], [2, 0], [0, 1], [1, 1], [2, 1]];
 const RECT_3X3: readonly StructureOffset[] = [
   [0, 0], [1, 0], [2, 0],
@@ -1888,7 +1891,14 @@ export const STRUCTURE_OCCUPY_OFFSETS: Record<string, readonly StructureOffset[]
   SILO: RECT_1X1, MINP: RECT_1X1, MINV: RECT_1X1,
   BARL: RECT_1X1, BRL3: RECT_1X1,
   SBAG: RECT_1X1, FENC: RECT_1X1, BARB: RECT_1X1, BRIK: RECT_1X1, WOOD: RECT_1X1, CYCL: RECT_1X1,
-  ...Object.fromEntries(CIVILIAN_STRUCTURE_2X2.map(type => [type, RECT_2X2] as const)),
+  V01: RECT_2X2_BOTTOM_ROW,
+  V02: RECT_2X2_BOTTOM_ROW,
+  V03: RECT_2X2_EXCEPT_NW,
+  V04: RECT_2X2_BOTTOM_ROW,
+  V20: RECT_2X2_BOTTOM_ROW,
+  V21: RECT_2X2_EXCEPT_SW,
+  V24: RECT_2X2_BOTTOM_ROW,
+  V25: RECT_2X2_EXCEPT_NW,
   ...Object.fromEntries(CIVILIAN_STRUCTURE_2X1.map(type => [type, RECT_2X1] as const)),
   ...Object.fromEntries(CIVILIAN_STRUCTURE_1X1.map(type => [type, RECT_1X1] as const)),
   ...Object.fromEntries(CIVILIAN_STRUCTURE_4X2.map(type => [type, [[0, 0], [1, 0], [2, 0], [3, 0], [0, 1], [1, 1], [2, 1], [3, 1]]] as const)),
