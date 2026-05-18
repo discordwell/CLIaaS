@@ -1597,18 +1597,20 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
           } as Effect);
         }
 
-        // R8: Impact explosion sprite via C++ Combat_Anim — damage-scaled selection
-        const impactCell = worldToCell(impactX, impactY);
-        const impactExpSet = ctx.getWarheadProps(activeWeapon.warhead)?.explosionSet ?? 0;
-        const impactLand: 'ground' | 'water' | 'air' =
-          (entity.target.isAirUnit && entity.target.flightAltitude > 0) ? 'air' :
-          (ctx.map.getTerrain(impactCell.cx, impactCell.cy) === Terrain.WATER && !entity.target.isNavalUnit) ? 'water' : 'ground';
-        const impactSprite = combatAnim(activeWeapon.damage, impactExpSet, impactLand);
-        if (impactSprite) {
-          ctx.effects.push({ type: 'explosion', x: impactX, y: impactY, frame: 0,
-            maxFrames: EXPLOSION_FRAMES[impactSprite] ?? 17, size: 8,
-            sprite: impactSprite, spriteStart: 0 } as Effect);
-          if (!activeWeapon.projectileSpeed) {
+        if (!isProjectileWeapon) {
+          // R8: Impact explosion sprite via C++ Combat_Anim — damage-scaled selection.
+          // Projectile weapons create their impact AnimClass from BulletClass::AI
+          // on detonation, not from TechnoClass::Fire_At on launch.
+          const impactCell = worldToCell(impactX, impactY);
+          const impactExpSet = ctx.getWarheadProps(activeWeapon.warhead)?.explosionSet ?? 0;
+          const impactLand: 'ground' | 'water' | 'air' =
+            (entity.target.isAirUnit && entity.target.flightAltitude > 0) ? 'air' :
+            (ctx.map.getTerrain(impactCell.cx, impactCell.cy) === Terrain.WATER && !entity.target.isNavalUnit) ? 'water' : 'ground';
+          const impactSprite = combatAnim(activeWeapon.damage, impactExpSet, impactLand);
+          if (impactSprite) {
+            ctx.effects.push({ type: 'explosion', x: impactX, y: impactY, frame: 0,
+              maxFrames: EXPLOSION_FRAMES[impactSprite] ?? 17, size: 8,
+              sprite: impactSprite, spriteStart: 0 } as Effect);
             spawnLogicAnimForSprite(
               ctx.logicAnims,
               ctx.effects,

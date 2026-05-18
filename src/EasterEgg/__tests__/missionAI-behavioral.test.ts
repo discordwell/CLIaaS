@@ -375,6 +375,26 @@ describe('updateAttack projectile fire gates', () => {
     expect(shooter.target).toBe(harvester);
     expect(shooter.ammo).toBe(9);
   });
+
+  it('does not create projectile impact AnimClass at fire time for projSpeed weapons', () => {
+    const shooter = makeEntity(UnitType.I_C7, House.USSR, 10 * CELL_SIZE + CELL_SIZE / 2, 10 * CELL_SIZE + CELL_SIZE / 2);
+    const target = makeEntity(UnitType.I_E1, House.Greece, 12 * CELL_SIZE + CELL_SIZE / 2, 10 * CELL_SIZE + CELL_SIZE / 2);
+    shooter.mission = Mission.ATTACK;
+    shooter.target = target;
+    shooter.attackCooldown = 0;
+    shooter.weapon = WEAPON_STATS.Sniper;
+    shooter.firePrepActive = true;
+    shooter.firePrepStage = 8;
+    shooter.firePrepUsesDoingStage = false;
+
+    const ctx = makeMockContext({ entities: [shooter, target] });
+
+    updateAttack(ctx, shooter);
+
+    expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+    expect(ctx.logicAnims.some(anim => anim.type === 'art-exp1')).toBe(false);
+    expect(ctx.effects.some(effect => effect.type === 'explosion' && effect.sprite === 'art-exp1')).toBe(false);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

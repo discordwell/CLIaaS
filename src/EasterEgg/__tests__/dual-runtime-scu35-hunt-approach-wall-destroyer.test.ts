@@ -197,6 +197,57 @@ async function tsVolkovSniperBulletSnapshot(adapter: unknown) {
   >;
 }
 
+async function wasmRuntimeSnapshot(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      anims: (state.anims ?? []).map((entry: any) => ({
+        logicIndex: entry.logicIndex,
+        name: entry.name,
+        stage: entry.stage,
+        loops: entry.loops,
+      })),
+    };
+  }) as Promise<{
+    tick: number;
+    rngState: number;
+    anims: Array<{ logicIndex: number; name: string; stage: number; loops: number }>;
+  }>;
+}
+
+async function tsRuntimeSnapshot(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    return {
+      tick: game.tick,
+      rngState: (window as any).__agentState().rngState,
+      logicAnims: game.logicAnims.map((entry: any) => ({
+        logicIndex: entry.logicIndexHint,
+        type: entry.type,
+        x: entry.x,
+        y: entry.y,
+        stage: entry.stage,
+        loops: entry.loops,
+      })),
+      cppSlotEffects: game.effects
+        .filter((entry: any) => entry.cppLogicSlot === true)
+        .map((entry: any) => ({
+          logicIndex: entry.logicIndexHint,
+          sprite: entry.sprite,
+          frame: entry.frame,
+          loops: entry.loops,
+        })),
+    };
+  }) as Promise<{
+    tick: number;
+    rngState: number;
+    logicAnims: Array<{ logicIndex: number; type: string; x: number; y: number; stage: number; loops: number }>;
+    cppSlotEffects: Array<{ logicIndex: number; sprite?: string; frame: number; loops?: number }>;
+  }>;
+}
+
 async function wasmBadrSnapshot(adapter: unknown) {
   return adapterPage(adapter).evaluate(() => {
     const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
@@ -555,6 +606,28 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU35 HUNT approach wall de
         headToLY: 20800,
         speed: 253,
       });
+    }, { wasmSeed: 0 });
+  }, 300_000);
+
+  it('keeps projectile and smoke AnimClass traversal in sync through tick 210', async () => {
+    await withDualScenario('SCU35EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBoth(handle, 210);
+      const cpp = await wasmRuntimeSnapshot(handle.wasm);
+      const ts = await tsRuntimeSnapshot(handle.ts);
+
+      expect(cpp.tick).toBe(210);
+      expect(ts.tick).toBe(cpp.tick);
+      expect(ts.rngState >>> 0).toBe(cpp.rngState >>> 0);
+      expect(cpp.anims.some(anim => anim.name === 'SMOKE_M')).toBe(true);
+      expect(ts.logicAnims.some(anim => anim.type === 'smoke_m')).toBe(true);
+      expect(ts.cppSlotEffects.some(effect => effect.sprite === 'smoke_m')).toBe(false);
+      expect(ts.logicAnims.some(anim =>
+        anim.type === 'art-exp1' &&
+        Math.round(anim.x) === 618 &&
+        Math.round(anim.y) === 1950
+      )).toBe(false);
     }, { wasmSeed: 0 });
   }, 300_000);
 });

@@ -1240,12 +1240,16 @@ describe('Splash damage matches C++ Explosion_Damage (combat.cpp:162-271)', () =
     expect(ScenarioRandom._seedLog.map(([seed]) => seed).slice(0, 5)).toEqual([
       4271759253, 1167444138, 2707844251, 1217767480, 3561611281,
     ]);
-    expect(ctx.logicAnims).toHaveLength(0);
+    expect(ctx.logicAnims).toHaveLength(1);
+    expect(ctx.logicAnims[0]).toMatchObject({
+      type: 'smoke_m',
+      delay: 2,
+      loops: 12,
+    });
     expect(ctx.effects.find(e => e.sprite === 'smoke_m')).toMatchObject({
       frame: -2,
       spriteStart: 0,
       loops: 12,
-      cppLogicSlot: true,
     });
     expect(ctx.map.decals).toHaveLength(1);
   });

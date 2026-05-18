@@ -993,6 +993,25 @@ function submitBuildingSmokeEffect(
   animSlotReserved = false,
 ): void {
   if (!animSlotReserved && !reserveBuildingAnimSlot(ctx)) return;
+  const logicAnims = ctx.logicAnims ?? (ctx.logicAnims = []);
+  spawnLogicAnim(
+    logicAnims,
+    ctx.effects,
+    'smoke_m',
+    x,
+    y,
+    loop,
+    false,
+    ctx.logicAnimsAlreadyProcessed === true,
+    ctx.logicIndexHintForNewObject?.(),
+    ctx.logicIndexHintForNewObject,
+    ctx.reserveAnimSlot,
+    true,
+    undefined,
+    delay,
+    undefined,
+    ctx.tick,
+  );
   ctx.effects.push({
     type: 'explosion',
     x,
@@ -1005,8 +1024,6 @@ function submitBuildingSmokeEffect(
     loopStart: 67,
     loopEnd: EXPLOSION_FRAMES.smoke_m ?? 91,
     loops: Math.max(1, loop) * 6,
-    cppLogicSlot: true,
-    logicIndexHint: ctx.logicIndexHintForNewObject?.(),
   } as Effect);
 }
 
