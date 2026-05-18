@@ -3611,7 +3611,7 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
     const skipRange = proj.logicIndexHint === undefined
       ? undefined
       : skipLogicHintRanges.find(range =>
-          proj.logicIndexHint! > range.after && proj.logicIndexHint! <= range.through);
+          proj.logicIndexHint! >= range.after && proj.logicIndexHint! <= range.through);
     if (!spawnedThisPass.has(proj) &&
         proj.logicIndexHint !== undefined &&
         skipRange !== undefined) {
