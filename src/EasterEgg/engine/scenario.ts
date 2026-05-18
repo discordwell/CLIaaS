@@ -3012,8 +3012,11 @@ export interface TriggerGameState {
   unitsLeftMap: number;        // count of units that have left the map
   // Building existence check (for BUILDING_EXISTS)
   structureTypes: Set<string>; // set of alive structure type names
-  // Per-house structure types alive (C++ tevent.cpp: BQuantity check uses trigger.house)
-  structureTypesByHouse: Map<number, Set<string>>; // houseIdx → set of alive structure types
+  // Per-house raw BScan structure types alive.
+  structureTypesByHouse: Map<number, Set<string>>; // houseIdx -> set of alive structure types
+  // Per-house ActiveBScan structure types alive. BUILDING_EXISTS uses this;
+  // NOFACTORIES intentionally uses the raw BScan above.
+  activeStructureTypesByHouse?: Map<number, Set<string>>;
   // House index of the trigger being evaluated (C++ trigger.cpp: Class->House)
   triggerHouse: number;
   // Structure types player has built during this game (for TEVENT_BUILD)
@@ -3094,10 +3097,6 @@ export function checkTriggerEvent(
     case TEVENT_ALL_DESTROYED: {
       // All units/structures of the specified house destroyed (event.data = RA house index)
       // RA source: HouseClass::As_Pointer(Event.Data.House)->Is_All_Destroyed()
-      // C++ parity: don't fire during early game when the player may start with no units
-      // and receive reinforcements via triggers (e.g. SCG27EA). C++ ScenarioInit flag
-      // prevents triggers from firing during initialization.
-      if (state.gameTick < 100) return false;
       const houseIdx = event.data;
       return !(state.houseAlive.get(houseIdx) ?? false);
     }
@@ -3123,7 +3122,8 @@ export function checkTriggerEvent(
         24: 'FIX',  25: 'BIO',  26: 'MISS', 27: 'SYRD', 28: 'SPEN', 29: 'MSLO',
         30: 'FCOM', 31: 'TSLA', 32: 'QUEE', 33: 'LAR1', 34: 'LAR2',
       };
-      const houseStructs = state.structureTypesByHouse.get(state.triggerHouse);
+      const houseStructs = (state.activeStructureTypesByHouse ?? state.structureTypesByHouse)
+        .get(state.triggerHouse);
       const btype = STRUCT_TYPES[event.data];
       if (btype) return houseStructs?.has(btype) ?? false;
       return (houseStructs?.size ?? 0) > 0; // fallback: any building

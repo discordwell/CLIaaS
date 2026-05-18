@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Game } from '../engine/index';
 import { Entity, resetEntityIds } from '../engine/entity';
-import type { ScenarioTrigger } from '../engine/scenario';
+import type { MapStructure, ScenarioTrigger } from '../engine/scenario';
 import { CELL_SIZE, House, Mission, RESFACTOR, UnitType } from '../engine/types';
 
 class FakeAudio {
@@ -23,8 +23,13 @@ class FakeAudio {
 interface TriggerHouseSnapshot {
   houseAlive: Map<number, boolean>;
   houseUnitsAlive: Map<number, boolean>;
+  houseBuildingsAlive: Map<number, boolean>;
+  structureTypesByHouse: Map<number, Set<string>>;
+  activeStructureTypesByHouse: Map<number, Set<string>>;
+  buildingsDestroyedByHouse: Map<number, boolean>;
 }
 
+const HOUSE_SPAIN = 0;
 const HOUSE_GREECE = 1; // C++ HousesType index, used by TEVENT_ALL_DESTROYED data.
 
 function createCanvas(): HTMLCanvasElement {
@@ -45,10 +50,38 @@ function addEntity(game: Game, entity: Entity): void {
   game.entityById.set(entity.id, entity);
 }
 
+function addStructure(game: Game, structure: MapStructure): void {
+  game.structures.push(structure);
+}
+
+function makeStructure(type: string, house: House, cx: number, cy: number): MapStructure {
+  return {
+    type,
+    image: type.toLowerCase(),
+    house,
+    cx,
+    cy,
+    hp: 256,
+    maxHp: 256,
+    alive: true,
+    rubble: false,
+    attackCooldown: 0,
+    ammo: -1,
+    maxAmmo: -1,
+    missionTimer: 0,
+  } as MapStructure;
+}
+
 function buildTriggerSharedSnapshot(game: Game): TriggerHouseSnapshot {
   return (game as unknown as {
     buildTriggerSharedSnapshot(): TriggerHouseSnapshot;
   }).buildTriggerSharedSnapshot();
+}
+
+function markPlayerMappedSight(game: Game, cx: number, cy: number, radius: number): void {
+  (game as unknown as {
+    markPlayerMappedSight(cx: number, cy: number, radius: number): boolean;
+  }).markPlayerMappedSight(cx, cy, radius);
 }
 
 function cleanupCompletedInfantryDeathAnimations(game: Game): void {
@@ -115,6 +148,7 @@ describe('Trigger house active scan parity', () => {
   it('counts zero-strength infantry death animations as house-active until Logic removal', () => {
     const game = createGame();
     const corpse = new Entity(UnitType.I_E1, House.Greece, 70 * CELL_SIZE, 59 * CELL_SIZE);
+    corpse.isLocked = true;
     corpse.alive = false;
     corpse.hp = 0;
     corpse.mission = Mission.DIE;
@@ -139,5 +173,49 @@ describe('Trigger house active scan parity', () => {
     expect(game.entityById.has(corpse.id)).toBe(false);
     expect(snapshot.houseAlive.get(HOUSE_GREECE)).not.toBe(true);
     expect(snapshot.houseUnitsAlive.get(HOUSE_GREECE)).not.toBe(true);
+  });
+
+  it('does not let undiscovered human-house buildings satisfy ActiveBScan', () => {
+    const game = createGame();
+    game.playerHouse = House.Spain;
+    addStructure(game, makeStructure('FACT', House.Spain, 80, 80));
+
+    const snapshot = buildTriggerSharedSnapshot(game);
+
+    expect(snapshot.structureTypesByHouse.get(HOUSE_SPAIN)?.has('FACT')).toBe(true);
+    expect(snapshot.activeStructureTypesByHouse.get(HOUSE_SPAIN)?.has('FACT')).not.toBe(true);
+    expect(snapshot.houseAlive.get(HOUSE_SPAIN)).not.toBe(true);
+    expect(snapshot.houseBuildingsAlive.get(HOUSE_SPAIN)).not.toBe(true);
+    expect(snapshot.buildingsDestroyedByHouse.get(HOUSE_SPAIN)).toBe(true);
+  });
+
+  it('counts mapped human-house buildings in ActiveBScan', () => {
+    const game = createGame();
+    game.playerHouse = House.Spain;
+    addStructure(game, makeStructure('FACT', House.Spain, 20, 20));
+    markPlayerMappedSight(game, 20, 20, 1);
+
+    const snapshot = buildTriggerSharedSnapshot(game);
+
+    expect(snapshot.activeStructureTypesByHouse.get(HOUSE_SPAIN)?.has('FACT')).toBe(true);
+    expect(snapshot.houseAlive.get(HOUSE_SPAIN)).toBe(true);
+    expect(snapshot.houseBuildingsAlive.get(HOUSE_SPAIN)).toBe(true);
+    expect(snapshot.buildingsDestroyedByHouse.get(HOUSE_SPAIN)).not.toBe(true);
+  });
+
+  it('does not let barrel-class structures keep a house active', () => {
+    const game = createGame();
+    game.playerHouse = House.Spain;
+    addStructure(game, makeStructure('BARL', House.Spain, 20, 20));
+    addStructure(game, makeStructure('BRL3', House.Spain, 21, 20));
+    markPlayerMappedSight(game, 20, 20, 3);
+
+    const snapshot = buildTriggerSharedSnapshot(game);
+
+    expect(snapshot.structureTypesByHouse.get(HOUSE_SPAIN)?.has('BARL')).toBe(true);
+    expect(snapshot.structureTypesByHouse.get(HOUSE_SPAIN)?.has('BRL3')).toBe(true);
+    expect(snapshot.activeStructureTypesByHouse.get(HOUSE_SPAIN)).toBeUndefined();
+    expect(snapshot.houseAlive.get(HOUSE_SPAIN)).not.toBe(true);
+    expect(snapshot.houseBuildingsAlive.get(HOUSE_SPAIN)).not.toBe(true);
   });
 });

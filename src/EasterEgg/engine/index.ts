@@ -351,6 +351,12 @@ export const DIFFICULTIES: Difficulty[] = ['easy', 'normal', 'hard'];
 const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK', 'WOOD', 'CYCL']);
 const CRUSHABLE_WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'WOOD', 'CYCL']);
 const WOODEN_WALL_TYPES = new Set(['WOOD']);
+const ACTIVE_BSCAN_TYPES = new Set([
+  'ATEK', 'IRON', 'WEAP', 'PDOX', 'PBOX', 'HBOX', 'DOME', 'GAP',
+  'GUN', 'AGUN', 'FTUR', 'FACT', 'PROC', 'SILO', 'HPAD', 'SAM',
+  'AFLD', 'POWR', 'APWR', 'STEK', 'HOSP', 'BARR', 'TENT', 'KENN',
+  'FIX', 'BIO', 'MISS', 'SYRD', 'SPEN', 'MSLO', 'FCOM', 'TSLA',
+]);
 
 
 
@@ -13719,10 +13725,43 @@ export class Game {
     // death animations remain in Logic until their final stage and still keep
     // the owning house active even with Strength == 0.
     if (!entity.occupiesCppLogic()) return;
+    if (!entity.isLocked) return;
+    if (this.isCppHumanHouseForActiveScan(entity.house) &&
+        !this.isEntityDiscoveredForActiveScan(entity)) {
+      return;
+    }
     const hi = Game.HOUSE_TO_INDEX[entity.house];
     if (hi === undefined) return;
-    houseAlive.set(hi, true);
-    houseUnitsAlive.set(hi, true);
+    if (!entity.isAirUnit) {
+      houseAlive.set(hi, true);
+    }
+    if (!entity.isAirUnit && !entity.stats.isVessel) {
+      houseUnitsAlive.set(hi, true);
+    }
+  }
+
+  private isCppHumanHouseForActiveScan(house: House): boolean {
+    // C++ HouseClass::Recalc_Attributes gates Active*Scan by House->IsHuman,
+    // not by IsPlayerControl. In campaign play only PlayerPtr has IsHuman set.
+    return house === this.playerHouse;
+  }
+
+  private isEntityDiscoveredForActiveScan(entity: Entity): boolean {
+    if (entity.house !== this.playerHouse) return this.discoveredEntityIds.has(entity.id);
+    return this.isCellMappedForPlayer(entity.cell.cx, entity.cell.cy);
+  }
+
+  private isStructureDiscoveredForActiveScan(structure: MapStructure, index: number): boolean {
+    if (structure.house !== this.playerHouse) return this.discoveredStructureIds.has(index);
+    return this.isStructureFootprintMappedForPlayer(structure);
+  }
+
+  private isStructureActiveForHouseScan(structure: MapStructure, index: number): boolean {
+    if (!structure.alive) return false;
+    if (!ACTIVE_BSCAN_TYPES.has(structure.type)) return false;
+    if (!this.map.inBounds(structure.cx, structure.cy)) return false;
+    return !this.isCppHumanHouseForActiveScan(structure.house) ||
+      this.isStructureDiscoveredForActiveScan(structure, index);
   }
 
   /**
@@ -13844,6 +13883,7 @@ export class Game {
     buildingsDestroyedByHouse: Map<number, boolean>; fakesExist: boolean;
     unitsLostByHouse: Map<number, number>; buildingsLostByHouse: Map<number, number>;
     structureTypesByHouse: Map<number, Set<string>>;
+    activeStructureTypesByHouse: Map<number, Set<string>>;
     builtStructureTypesByHouse: Map<number, Set<string>>;
   }): TriggerGameState {
     return {
@@ -13868,6 +13908,7 @@ export class Game {
       unitsLeftMap: this.unitsLeftMap,
       structureTypes: shared.structureTypes,
       structureTypesByHouse: shared.structureTypesByHouse,
+      activeStructureTypesByHouse: shared.activeStructureTypesByHouse,
       triggerHouse: trigger.house,
       destroyedTriggerNames: shared.destroyedTriggerNames,
       attackedTriggerNames: this.attackedTriggerNames,
@@ -13950,21 +13991,24 @@ export class Game {
     buildingsDestroyedByHouse: Map<number, boolean>; fakesExist: boolean;
     unitsLostByHouse: Map<number, number>; buildingsLostByHouse: Map<number, number>;
     structureTypesByHouse: Map<number, Set<string>>;
+    activeStructureTypesByHouse: Map<number, Set<string>>;
     builtStructureTypesByHouse: Map<number, Set<string>>;
   } {
     const structureTypes = new Set<string>();
     const structureTypesByHouse = new Map<number, Set<string>>();
+    const activeStructureTypesByHouse = new Map<number, Set<string>>();
     const destroyedTriggerNames = new Set<string>(this.destroyedTriggerNames);
     const houseAlive = new Map<number, boolean>();
     const houseUnitsAlive = new Map<number, boolean>();
     const houseBuildingsAlive = new Map<number, boolean>();
-    const housesWithBuildings = new Set<number>();
+    const housesWithActiveBuildings = new Set<number>();
     let playerFactories = 0;
     let enemyUnitsAlive = 0;
     let fakesExist = false;
     const FAKE_TYPES = new Set(['FACF', 'DOMF', 'WEAF']);
 
-    for (const s of this.structures) {
+    for (let si = 0; si < this.structures.length; si++) {
+      const s = this.structures[si];
       if (s.alive) {
         structureTypes.add(s.type);
         if (this.isAllied(s.house, this.playerHouse) &&
@@ -13974,14 +14018,20 @@ export class Game {
         }
         const hi = Game.HOUSE_TO_INDEX[s.house];
         if (hi !== undefined) {
-          houseAlive.set(hi, true);
-          if (!WALL_TYPES.has(s.type)) {
-            houseBuildingsAlive.set(hi, true);
-            housesWithBuildings.add(hi);
-          }
           let hset = structureTypesByHouse.get(hi);
           if (!hset) { hset = new Set<string>(); structureTypesByHouse.set(hi, hset); }
           hset.add(s.type);
+          if (this.isStructureActiveForHouseScan(s, si)) {
+            houseAlive.set(hi, true);
+            houseBuildingsAlive.set(hi, true);
+            housesWithActiveBuildings.add(hi);
+            let activeSet = activeStructureTypesByHouse.get(hi);
+            if (!activeSet) {
+              activeSet = new Set<string>();
+              activeStructureTypesByHouse.set(hi, activeSet);
+            }
+            activeSet.add(s.type);
+          }
         }
         if (FAKE_TYPES.has(s.type)) fakesExist = true;
       } else if (s.triggerName) {
@@ -14000,7 +14050,7 @@ export class Game {
     const buildingsDestroyedByHouse = new Map<number, boolean>();
     for (const s of this.structures) {
       const hi = Game.HOUSE_TO_INDEX[s.house];
-      if (hi !== undefined && !WALL_TYPES.has(s.type) && !housesWithBuildings.has(hi)) {
+      if (hi !== undefined && ACTIVE_BSCAN_TYPES.has(s.type) && !housesWithActiveBuildings.has(hi)) {
         buildingsDestroyedByHouse.set(hi, true);
       }
     }
@@ -14010,6 +14060,7 @@ export class Game {
       houseAlive, houseUnitsAlive, houseBuildingsAlive,
       builtStructureTypes: this.builtStructureTypes,
       buildingsDestroyedByHouse, fakesExist, structureTypesByHouse,
+      activeStructureTypesByHouse,
       unitsLostByHouse: this.unitsLostByHouse,
       buildingsLostByHouse: this.buildingsLostByHouse,
       builtStructureTypesByHouse: this.builtStructureTypesByHouse,
@@ -14790,68 +14841,8 @@ export class Game {
   ): void {
     // Mission timer now decrements per-tick in update() for C++ FrameTimerClass parity.
 
-    // Precompute shared state once for all triggers (avoids O(N*M) recomputation)
-    const structureTypes = new Set<string>();
-    // C++ tevent.cpp: BUILDING_EXISTS checks HouseClass::BQuantity[type] > 0 for trigger.house.
-    const structureTypesByHouse = new Map<number, Set<string>>();
-    // Start with persistent destroyed trigger names, then add currently-dead entities/structures
-    const destroyedTriggerNames = new Set<string>(this.destroyedTriggerNames);
-    const houseAlive = new Map<number, boolean>();
-    const houseUnitsAlive = new Map<number, boolean>();
-    const houseBuildingsAlive = new Map<number, boolean>();
-    const housesWithBuildings = new Set<number>(); // houses that currently have alive buildings
-    let playerFactories = 0;
-    let fakesExist = false;
-    const FAKE_TYPES = new Set(['FACF', 'DOMF', 'WEAF']);
-    for (const s of this.structures) {
-      if (s.alive) {
-        structureTypes.add(s.type);
-        if (this.isAllied(s.house, this.playerHouse) &&
-            (s.type === 'FACT' || s.type === 'WEAP' || s.type === 'BARR' || s.type === 'TENT' || s.type === 'AFLD' || s.type === 'HPAD' || s.type === 'SYRD' || s.type === 'SPEN')) {
-          playerFactories++;
-        }
-        const hi = Game.HOUSE_TO_INDEX[s.house];
-        if (hi !== undefined) {
-          houseAlive.set(hi, true);
-          if (!WALL_TYPES.has(s.type)) {
-            houseBuildingsAlive.set(hi, true);
-            housesWithBuildings.add(hi);
-          }
-          let hset = structureTypesByHouse.get(hi);
-          if (!hset) { hset = new Set<string>(); structureTypesByHouse.set(hi, hset); }
-          hset.add(s.type);
-        }
-        if (FAKE_TYPES.has(s.type)) fakesExist = true;
-      } else if (s.triggerName) {
-        destroyedTriggerNames.add(s.triggerName);
-      }
-    }
-    let enemyUnitsAlive = 0;
-    for (const e of this.entities) {
-      if (e.alive && !this.isPlayerControlled(e) && !e.isCivilian) enemyUnitsAlive++;
-      this.addEntityHouseActiveScan(e, houseAlive, houseUnitsAlive);
-      if (!e.alive && e.triggerName) {
-        destroyedTriggerNames.add(e.triggerName);
-      }
-    }
-    // Compute per-house buildings destroyed: house had buildings at some point but has none now
-    const buildingsDestroyedByHouse = new Map<number, boolean>();
-    // Check all house indices — if structures existed for a house but none are alive now
-    for (const s of this.structures) {
-      const hi = Game.HOUSE_TO_INDEX[s.house];
-      if (hi !== undefined && !WALL_TYPES.has(s.type) && !housesWithBuildings.has(hi)) {
-        buildingsDestroyedByHouse.set(hi, true);
-      }
-    }
-    const shared = {
-      structureTypes, destroyedTriggerNames, enemyUnitsAlive, playerFactories,
-      houseAlive, houseUnitsAlive, houseBuildingsAlive,
-      builtStructureTypes: this.builtStructureTypes,
-      buildingsDestroyedByHouse, fakesExist, structureTypesByHouse,
-      unitsLostByHouse: this.unitsLostByHouse,
-      buildingsLostByHouse: this.buildingsLostByHouse,
-      builtStructureTypesByHouse: this.builtStructureTypesByHouse,
-    };
+    // Precompute shared state once for all triggers (avoids O(N*M) recomputation).
+    const shared = this.buildTriggerSharedSnapshot();
 
     // C++ Spring() parity: count NEW deaths per trigger name.
     // Each death increments pendingDestroyedCount so the trigger fires once per death.
@@ -15381,11 +15372,10 @@ export class Game {
   /** Check win/lose conditions */
   private checkVictoryConditions(): void {
     if (this.state !== 'playing') return;
-    if (this.tick < GAME_TICKS_PER_SEC * 3) return;
-
     // C++ house.cpp:945-972 — process deferred win/lose (BorrowedTime countdown)
     this.applyDeferredWinLose();
     if (this.state !== 'playing') return;
+    if (this.tick < GAME_TICKS_PER_SEC * 3) return;
 
     // C++ parity: loss conditions come from triggers (TACTION_LOSE), not from
     // hardcoded "all units dead" checks. C++ has no equivalent auto-lose —

@@ -1819,13 +1819,13 @@ describe('timer constants — C++ tevent.cpp:187, defines.h', () => {
 
 describe('edge cases and boundary conditions', () => {
 
-  it('TEVENT_ALL_DESTROYED is suppressed during early game (gameTick < 100)', () => {
-    // C++ parity: ScenarioInit flag prevents triggers from firing during initialization.
-    // TS uses gameTick < 100 as the guard.
+  it('TEVENT_ALL_DESTROYED can fire immediately after scenario initialization', () => {
+    // C++ ScenarioInit prevents trigger springs while the scenario is loading,
+    // but the normal LogicTriggers.Spring(TEVENT_TIME) pass can fire on frame 1.
     const state = createState({ gameTick: 50, houseAlive: new Map([[3, false]]) });
-    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.ALL_DESTROYED, 3), state)).toBe(false);
+    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.ALL_DESTROYED, 3), state)).toBe(true);
 
-    state.gameTick = 100;
+    state.gameTick = 1;
     expect(checkTriggerEvent(makeEvent(CPP_TEVENT.ALL_DESTROYED, 3), state)).toBe(true);
   });
 
