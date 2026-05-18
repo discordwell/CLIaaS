@@ -487,6 +487,10 @@ export class Game {
    *  structure timers; entities with index >= _preBuildingEntityCount are
    *  processed AFTER structure timers. */
   _preBuildingEntityCount = 0;
+  /** Number of original scenario buildings that live in the pre-runtime
+   *  building block of C++ Logic. Runtime-created buildings carry explicit
+   *  logicIndexHint values and interleave with other runtime Logic objects. */
+  _scenarioStructureCount = 0;
   /** Count of C++ TerrainClass objects from [TERRAIN].
    *  They occupy the first Logic slots before units/buildings, even when only
    *  terrain mines have active AI work in TS. */
@@ -957,6 +961,11 @@ export class Game {
         terrain.logicIndexHint--;
       }
     }
+    for (const structure of this.structures) {
+      if (structure.logicIndexHint !== undefined && structure.logicIndexHint > deletedHint) {
+        structure.logicIndexHint--;
+      }
+    }
     for (const entity of this.entities) {
       if (entity !== excludedEntity &&
           entity.logicIndexHint !== undefined &&
@@ -1153,6 +1162,9 @@ export class Game {
     count += this._terrainLogicCount;
     for (const structure of this.structures) {
       if (structure.alive || (!structure.debrisDropped && structure.debrisCountdown !== undefined)) count++;
+      if (structure.logicIndexHint !== undefined) {
+        maxExistingHint = Math.max(maxExistingHint, structure.logicIndexHint);
+      }
     }
     count += inflightProjectiles.length;
     count += logicAnims.length;
@@ -1529,6 +1541,7 @@ export class Game {
       playSound: (n) => this.audio.play(n as SoundName),
       getAvailableItems: () => this.getAvailableItems(),
       findPassableSpawn: (cx, cy, scx, scy, fw, fh) => this.findPassableSpawn(cx, cy, scx, scy, fw, fh),
+      logicIndexHintForNewObject: () => this.logicIndexHintForNewObject(),
     };
   }
 
@@ -1688,6 +1701,7 @@ export class Game {
       isAllied: (a, b) => this.isAllied(a, b),
       isPlayerControlled: (e) => this.isPlayerControlled(e),
       clearStructureFootprint: (s) => this.clearStructureFootprint(s),
+      logicIndexHintForNewObject: () => this.logicIndexHintForNewObject(),
     };
   }
 
@@ -1917,6 +1931,7 @@ export class Game {
     // They were added to the C++ Logic array before buildings during Read_Scenario_INI.
     // Entities added later (reinforcements, created teams) go after buildings.
     this._preBuildingEntityCount = scenario.entities.length;
+    this._scenarioStructureCount = scenario.structures.length;
     this._terrainLogicCount = scenario.terrainLogicCount ?? scenario.terrainMineCount ?? 0;
     this._terrainMineCount = scenario.terrainMineCount ?? 0;
     this._terrainMineSpreadCells = scenario.terrainMineSpreadCells ?? [];
@@ -2801,9 +2816,9 @@ export class Game {
         if (!processAll) updateProjectilesThrough(maxLogicIndexHint);
       };
 
-      // C++ Logic.AI (logic.cpp:284) processes objects in Logic array order:
-      // Units → Vessels → Infantry → Buildings → reinforcements.
-      // Entities (pre-building) process FIRST, then structures.
+      // C++ Logic.AI (logic.cpp:284) processes objects in Logic array order.
+      // Scenario INI units/infantry are loaded before the scenario building
+      // block; runtime-created objects then interleave by their Logic slot.
 
       // ── Phase 1: pre-building entities (scenario INI units + infantry, skip aircraft) ──
       for (let i = 0; i < this._preBuildingEntityCount; i++) {
@@ -2828,17 +2843,72 @@ export class Game {
         this._processGroundEntity(entity);
       }
 
-      // ── Phase 2: ALL structures (timer tick + combat + HPAD helicopter) ──
+      // ── Phase 2: structures plus earlier runtime objects ──
       // C++ BuildingClass::AI() processes timer tick + Firing_AI sequentially PER
       // BUILDING. HPAD helicopters sit in the Logic array right after their HPAD
       // building and are processed between buildings.
       const GUARD_NORMAL_DELAY = 42;
       const GUARD_AA_DELAY = 14;
       const isLowPower = ctx.powerConsumed > ctx.powerProduced;
+      let runtimeEntityCursor = this._preBuildingEntityCount;
+      const processRuntimeEntitiesThrough = (maxLogicIndexHint: number) => {
+        for (; runtimeEntityCursor < this.entities.length; runtimeEntityCursor++) {
+          const entity = this.entities[runtimeEntityCursor];
+          if (!entity) continue;
+
+          if (entity.isAirUnit) {
+            if (!entity.occupiesCppLogic()) continue;
+            if (entity._processedInBuildingPass) {
+              entity._processedInBuildingPass = false; // reset for next tick
+              continue;
+            }
+            const effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
+            if (effectiveLogicIdx > maxLogicIndexHint) break;
+            processLogicAnimsThrough(effectiveLogicIdx - 1);
+            if (skipShiftedLogicObject(effectiveLogicIdx)) {
+              entity.lastLogicProcessedTick = this.tick;
+              continue;
+            }
+            if (ScenarioRandom._tagLogging) {
+              ScenarioRandom._sourceTag = 13000 + effectiveLogicIdx;
+              ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
+            }
+            logicIdx = Math.max(logicIdx + 1, effectiveLogicIdx + 1);
+            entity.rotTickedThisFrame = false;
+            entity.turretRotTickedThisFrame = false;
+            if (entity.isInRecoilState) entity.isInRecoilState = false;
+            if (entity.inLimbo) continue;
+            this.updateEntity(entity);
+            entity.tickAnimation();
+            continue;
+          }
+
+          if (!entity.occupiesCppLogic()) continue;
+
+          const effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
+          if (effectiveLogicIdx > maxLogicIndexHint) break;
+          processLogicAnimsThrough(effectiveLogicIdx - 1);
+          if (skipShiftedLogicObject(effectiveLogicIdx)) {
+            entity.lastLogicProcessedTick = this.tick;
+            continue;
+          }
+          if (ScenarioRandom._tagLogging) {
+            ScenarioRandom._sourceTag = entity.stats.isInfantry
+              ? 10000 + effectiveLogicIdx
+              : entity.isNavalUnit
+                ? 14000 + effectiveLogicIdx
+                : 11000 + effectiveLogicIdx;
+            ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
+          }
+          logicIdx = Math.max(logicIdx + 1, effectiveLogicIdx + 1);
+          this._processGroundEntity(entity);
+        }
+      };
 
       for (let structureIndex = 0; structureIndex < this.structures.length; structureIndex++) {
         const s = this.structures[structureIndex];
-        const effectiveLogicIdx = logicIdx;
+        const effectiveLogicIdx = s.logicIndexHint ?? logicIdx;
+        processRuntimeEntitiesThrough(effectiveLogicIdx - 1);
         updateProjectilesThrough(effectiveLogicIdx - 1);
         if (skipShiftedLogicObject(effectiveLogicIdx)) continue;
 		        if (ScenarioRandom._tagLogging) {
@@ -2853,11 +2923,11 @@ export class Game {
             // LogicClass::AI decrements its loop index when the current object
             // moved itself out. The shifted object is processed this frame at
             // the same Logic index/source tag.
-	            this.traceCppLogicRelease('structure', effectiveLogicIdx, {
-	              type: s.type,
-	              house: s.house,
-	              cell: [s.cx, s.cy],
-	            });
+            this.traceCppLogicRelease('structure', effectiveLogicIdx, {
+              type: s.type,
+              house: s.house,
+              cell: [s.cx, s.cy],
+            });
             this.shiftCppLogicHintsAfter(
               effectiveLogicIdx,
               undefined,
@@ -2865,6 +2935,9 @@ export class Game {
               ctx.logicAnims,
               ctx.effects,
             );
+            if (structureIndex < this._scenarioStructureCount) {
+              this._scenarioStructureCount = Math.max(0, this._scenarioStructureCount - 1);
+            }
             this.structures.splice(structureIndex, 1);
             structureIndex--;
             logicIdx--;
@@ -3072,58 +3145,7 @@ export class Game {
       // position. SCG08EA tick 794 depends on a BADR submitted before a later
       // paradropped E1 consuming its Mission_Hunt jitter first; batching all
       // ground reinforcements before all aircraft gives the E1 the BADR's RNG.
-      let runtimeEntityCursor = this._preBuildingEntityCount;
-      const processRuntimeEntities = () => {
-        for (; runtimeEntityCursor < this.entities.length; runtimeEntityCursor++) {
-          const entity = this.entities[runtimeEntityCursor];
-          if (!entity) continue;
-
-          if (entity.isAirUnit) {
-            if (!entity.occupiesCppLogic()) continue;
-            if (entity._processedInBuildingPass) {
-              entity._processedInBuildingPass = false; // reset for next tick
-              continue;
-            }
-            const effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
-            processLogicAnimsThrough(effectiveLogicIdx - 1);
-            if (skipShiftedLogicObject(effectiveLogicIdx)) {
-              entity.lastLogicProcessedTick = this.tick;
-              continue;
-            }
-            if (ScenarioRandom._tagLogging) {
-              ScenarioRandom._sourceTag = 13000 + effectiveLogicIdx;
-              ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
-            }
-            logicIdx = Math.max(logicIdx + 1, effectiveLogicIdx + 1);
-            entity.rotTickedThisFrame = false;
-            entity.turretRotTickedThisFrame = false;
-            if (entity.isInRecoilState) entity.isInRecoilState = false;
-            if (entity.inLimbo) continue;
-            this.updateEntity(entity);
-            entity.tickAnimation();
-            continue;
-          }
-
-          if (!entity.occupiesCppLogic()) continue;
-
-          const effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
-          processLogicAnimsThrough(effectiveLogicIdx - 1);
-          if (skipShiftedLogicObject(effectiveLogicIdx)) {
-            entity.lastLogicProcessedTick = this.tick;
-            continue;
-          }
-			        if (ScenarioRandom._tagLogging) {
-			          ScenarioRandom._sourceTag = entity.stats.isInfantry
-			            ? 10000 + effectiveLogicIdx
-		            : entity.isNavalUnit
-		              ? 14000 + effectiveLogicIdx
-		              : 11000 + effectiveLogicIdx;
-		          ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
-		        }
-          logicIdx = Math.max(logicIdx + 1, effectiveLogicIdx + 1);
-          this._processGroundEntity(entity);
-        }
-      };
+      const processRuntimeEntities = () => processRuntimeEntitiesThrough(Infinity);
       const processLateUnlimboedRuntimeEntities = () => {
         let processed = false;
         for (const entity of this.entities) {
@@ -16256,6 +16278,7 @@ export class Game {
       maxAmmo: -1,
       mission: Mission.CONSTRUCTION,
       missionTimer: 0,
+      logicIndexHint: this.logicIndexHintForNewObject(),
       footprintTerrain: captureStructureFootprintTerrain(this.map, type, cx, cy),
       // C++ TechnoClass::Unlimbo immediately calls Enter_Idle_Mode(true) and
       // Commence() for the factory product, so its construction state has

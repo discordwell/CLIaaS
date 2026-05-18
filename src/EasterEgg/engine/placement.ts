@@ -82,6 +82,7 @@ export interface PlacementContext {
   playSound(name: string): void;
   getAvailableItems(): ProductionItem[];
   findPassableSpawn(cx: number, cy: number, structCX: number, structCY: number, fw: number, fh: number): { cx: number; cy: number };
+  logicIndexHintForNewObject?(): number;
 }
 
 // ── Mutating functions ───────────────────────────────────────────────────────
@@ -160,6 +161,7 @@ export function placeStructure(ctx: PlacementContext, cx: number, cy: number): b
     ammo: -1,
     maxAmmo: -1,
     missionTimer: 0,
+    logicIndexHint: ctx.logicIndexHintForNewObject?.(),
     footprintTerrain: captureStructureFootprintTerrain(ctx.map, item.type, cx, cy),
     buildProgress: isWall ? undefined : 0, // walls appear instantly
   };
@@ -204,6 +206,7 @@ export function placeStructure(ctx: PlacementContext, cx: number, cy: number): b
     const harv = new Entity(UnitType.V_HARV, ctx.playerHouse,
       harvSpawn.cx * CELL_SIZE + CELL_SIZE / 2, harvSpawn.cy * CELL_SIZE + CELL_SIZE / 2);
     harv.harvesterState = 'idle';
+    harv.logicIndexHint = ctx.logicIndexHintForNewObject?.();
     ctx.entities.push(harv);
     ctx.entityById.set(harv.id, harv);
   }
@@ -246,6 +249,7 @@ export function deployMCV(ctx: PlacementContext, entity: Entity): boolean {
     ammo: -1,
     maxAmmo: -1,
     missionTimer: 0,
+    logicIndexHint: ctx.logicIndexHintForNewObject?.(),
     deployedFromMCV: true, // C++ ArchiveTarget parity: tracks MCV origin for sell reversion
     footprintTerrain: captureStructureFootprintTerrain(ctx.map, 'FACT', cx, cy),
     // C++ bdata.cpp:3131 Init_Anim(BSTATE_CONSTRUCTION): MCV deploy plays the MAKE buildup anim.

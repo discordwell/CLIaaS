@@ -1453,6 +1453,9 @@ export interface MapStructure {
   house: House;
   cx: number;         // cell position
   cy: number;
+  /** C++ Logic vector index for runtime-created buildings.
+   *  Scenario INI buildings are kept in structures[] order and leave this unset. */
+  logicIndexHint?: number;
   hp: number;         // current HP (0-256 scale)
   maxHp: number;      // max HP (256 = full)
   armor?: ArmorType;   // C++ bdata.cpp Armor= from rules.ini (wood/light/heavy per building)

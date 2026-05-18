@@ -271,6 +271,7 @@ export interface AIContext {
   isAllied(a: House, b: House): boolean;
   isPlayerControlled(e: Entity): boolean;
   clearStructureFootprint(s: MapStructure): void;
+  logicIndexHintForNewObject?(): number;
 }
 
 // ── Pure helper functions ────────────────────────────────────────────────
@@ -999,6 +1000,7 @@ export function spawnAIStructure(ctx: AIContext, type: string, house: House, cx:
     ammo: -1,
     maxAmmo: -1,
     missionTimer: 0,
+    logicIndexHint: ctx.logicIndexHintForNewObject?.(),
     footprintTerrain: captureStructureFootprintTerrain(ctx.map, type, cx, cy),
     buildProgress: 0,
   });
