@@ -44,6 +44,8 @@ async function wasmGreekE3Snapshot(adapter: unknown, logicIndex = 99) {
     return {
       tick: state.tick,
       rngState: state.rngState,
+      hp: infantry.hp,
+      maxHp: infantry.mhp,
       mission: row[7],
       missionTimer: row[8],
       isDriving: row[10],
@@ -68,6 +70,8 @@ async function wasmGreekE3Snapshot(adapter: unknown, logicIndex = 99) {
   }, logicIndex) as Promise<{
     tick: number;
     rngState: number;
+    hp: number;
+    maxHp: number;
     mission: number;
     missionTimer: number;
     isDriving: boolean;
@@ -93,6 +97,9 @@ async function tsGreekE3Snapshot(adapter: unknown, logicIndex = 99) {
     return {
       tick: game.tick,
       rngState: (window as any).__agentState().rngState,
+      alive: entity.alive,
+      hp: entity.hp,
+      maxHp: entity.maxHp,
       mission: entity.mission,
       missionTimer: entity.missionTimer,
       isDriving: entity.isDriving,
@@ -123,6 +130,9 @@ async function tsGreekE3Snapshot(adapter: unknown, logicIndex = 99) {
   }, logicIndex) as Promise<{
     tick: number;
     rngState: number;
+    alive: boolean;
+    hp: number;
+    maxHp: number;
     mission: string;
     missionTimer: number;
     isDriving: boolean;
@@ -138,6 +148,53 @@ async function tsGreekE3Snapshot(adapter: unknown, logicIndex = 99) {
     headTo: { lx: number; ly: number } | null;
     facings: number[];
   }>;
+}
+
+async function wasmVolkovSniperBulletSnapshot(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const bullet = (state.bullets ?? [])
+      .find((entry: any) => entry.type === 'Invisible' && entry.str === 100 && entry.wh === 1);
+    return bullet
+      ? {
+          tick: state.tick,
+          exists: true,
+          lx: bullet.lx,
+          ly: bullet.ly,
+          tx: bullet.tx,
+          ty: bullet.ty,
+          timer: bullet.timer,
+          max: bullet.max,
+        }
+      : { tick: state.tick, exists: false };
+  }) as Promise<
+    | { tick: number; exists: true; lx: number; ly: number; tx: number; ty: number; timer: number; max: number }
+    | { tick: number; exists: false }
+  >;
+}
+
+async function tsVolkovSniperBulletSnapshot(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const volkov = game.entities.find((e: any) => e.type === 'GNRL' && e.house === 'USSR');
+    const projectile = game.inflightProjectiles.find((entry: any) =>
+      entry.weapon.name === 'Sniper' && entry.attackerId === volkov?.id);
+    return projectile
+      ? {
+          tick: game.tick,
+          exists: true,
+          logicalLX: projectile.logicalLX,
+          logicalLY: projectile.logicalLY,
+          headToLX: projectile.headToLX,
+          headToLY: projectile.headToLY,
+          fuseTimer: projectile.fuseTimer,
+          speed: projectile.speed,
+        }
+      : { tick: game.tick, exists: false };
+  }) as Promise<
+    | { tick: number; exists: true; logicalLX: number; logicalLY: number; headToLX: number; headToLY: number; fuseTimer: number; speed: number }
+    | { tick: number; exists: false }
+  >;
 }
 
 async function wasmBadrSnapshot(adapter: unknown) {
@@ -462,6 +519,42 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU35 HUNT approach wall de
           missionTimer: cpp[1].missionTimer,
         }),
       ]);
+    }, { wasmSeed: 0 });
+  }, 300_000);
+
+  it('keeps Volkov sniper fire as an in-flight bullet when scenario Speed is inherited', async () => {
+    await withDualScenario('SCU35EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBoth(handle, 204);
+      const cppTarget = await wasmGreekE3Snapshot(handle.wasm, 100);
+      const tsTarget = await tsGreekE3Snapshot(handle.ts, 100);
+      const cppBullet = await wasmVolkovSniperBulletSnapshot(handle.wasm);
+      const tsBullet = await tsVolkovSniperBulletSnapshot(handle.ts);
+
+      expect(cppTarget).toMatchObject({
+        tick: 204,
+        hp: 45,
+      });
+      expect(tsTarget).toMatchObject({
+        tick: cppTarget.tick,
+        alive: true,
+        hp: cppTarget.hp,
+      });
+      expect(cppBullet).toMatchObject({
+        tick: 204,
+        exists: true,
+        tx: 6592,
+        ty: 20800,
+        max: 253,
+      });
+      expect(tsBullet).toMatchObject({
+        tick: cppBullet.tick,
+        exists: true,
+        headToLX: 6592,
+        headToLY: 20800,
+        speed: 253,
+      });
     }, { wasmSeed: 0 });
   }, 300_000);
 });

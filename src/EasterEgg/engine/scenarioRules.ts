@@ -70,6 +70,19 @@ function parseIniBool(raw: string | undefined): boolean | undefined {
   return undefined;
 }
 
+function iniSpeedToMph(rawSpeed: number): number {
+  return Math.max(0, Math.min(255, Math.trunc((rawSpeed * 256) / 100)));
+}
+
+function inheritedScenarioSpeed(rawSpeed: number): number {
+  // C++ WeaponTypeClass::Read_INI always calls Get_MPHType when the weapon
+  // section exists. If Speed is omitted, Get_MPHType converts the inherited
+  // MPH default back to a 0-100 integer and then rescales it, so Speed=100
+  // round-trips as 255 -> 99 -> 253 rather than staying light-speed.
+  const inheritedMph = iniSpeedToMph(rawSpeed);
+  return Math.trunc((inheritedMph * 100) / 256);
+}
+
 function clearProjectileDerivedWeaponFields(base: WeaponStats): void {
   delete base.projectileSpeed;
   delete base.projectileROT;
@@ -224,7 +237,11 @@ export function buildScenarioRuleOverrides(
     if (section.has('Damage')) base.damage = Number.parseInt(section.get('Damage')!, 10);
     if (section.has('ROF')) base.rof = Number.parseInt(section.get('ROF')!, 10);
     if (section.has('Range')) base.range = Number.parseFloat(section.get('Range')!);
-    if (section.has('Speed')) base.projSpeed = Number.parseInt(section.get('Speed')!, 10);
+    if (section.has('Speed')) {
+      base.projSpeed = Number.parseInt(section.get('Speed')!, 10);
+    } else if (base.projSpeed !== undefined) {
+      base.projSpeed = inheritedScenarioSpeed(base.projSpeed);
+    }
     if (section.has('Projectile')) applyProjectileOverride(base, section.get('Projectile'));
     if (section.has('Warhead')) base.warhead = section.get('Warhead')! as WarheadType;
     if (section.has('Burst')) base.burst = Number.parseInt(section.get('Burst')!, 10);
