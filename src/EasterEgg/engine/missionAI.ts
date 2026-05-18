@@ -1167,6 +1167,10 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       // FIRE_REARM and FIRE_RANGE stop this tick's shot but leave the selected
       // weapon intact for approach/path-shortening decisions.
       if (!entity.canWeaponTarget(entity.target, activeWeapon)) return;
+      // C++ TechnoClass::Can_Fire (techno.cpp:2723-2727): falling objects keep
+      // TarCom, but cannot start a new firing sequence until ObjectClass::AI
+      // lands them and clears IsFalling.
+      if (entity.isFalling) return;
       if (entity.attackCooldown > 0) return;
       if (!entity.inRangeWith(entity.target, activeWeapon)) return;
 
@@ -3618,6 +3622,10 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
       return;
     }
 
+    if (!entity.firePrepActive && entity.isFalling) {
+      return;
+    }
+
     if (entity.stats.isInfantry) {
       entity.desiredFacing = directionTo(entity.pos, structPos);
       entity.desiredFacing256 = (entity.desiredFacing * 32) & 0xff;
@@ -3819,6 +3827,7 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
     return;
   }
 
+  if (!entity.firePrepActive && entity.isFalling) return;
   if (entity.attackCooldown > 0) return;
   if (entity.ammo === 0) return;
 
