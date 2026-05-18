@@ -8937,6 +8937,12 @@ export class Game {
       this.isPrimaryFacingRotating(entity);
   }
 
+  private entityOccupiesDriveCell(entity: Entity): boolean {
+    if (entity.inLimbo) return false;
+    if (entity.isAirUnit && entity.flightAltitude > 0) return false;
+    return entity.occupiesCppLogic();
+  }
+
   private isHeadOnMovingAllyBlocker(mover: Entity, occupant: Entity): boolean {
     if (!this.entitiesAllied(mover, occupant)) return false;
     if (!this.isMovingCanEnterBlocker(occupant)) return false;
@@ -10059,9 +10065,7 @@ export class Game {
 
     const blocker = this.entities.find(other =>
       other.id !== entity.id &&
-      other.alive &&
-      !other.inLimbo &&
-      !(other.isAirUnit && other.flightAltitude > 0) &&
+      this.entityOccupiesDriveCell(other) &&
       other.cell.cx === cx &&
       other.cell.cy === cy &&
       !this.entitiesAllied(entity, other));
@@ -10070,7 +10074,7 @@ export class Game {
     const wallMove = blocker || structure ? null : this.wallOverlayCanEnterResult(entity, cx, cy);
 
     if (blocker) {
-      entity.target = blocker;
+      entity.target = blocker.alive && !blocker.inLimbo ? blocker : null;
       entity.targetStructure = null;
       entity.forceFirePos = null;
     } else if (structure && structure.alive && !this.isAllied(entity.house, structure.house)) {
@@ -10179,7 +10183,7 @@ export class Game {
     const occupantId = this.map.getOccupancy(cx, cy);
     if (occupantId > 0 && occupantId !== entity.id) {
       const occupant = this.entityById.get(occupantId);
-      if (occupant?.alive) {
+      if (occupant && this.entityOccupiesDriveCell(occupant)) {
         const physicalOccupier = occupant.cell.cx === cx && occupant.cell.cy === cy;
         if (occupant.stats.isInfantry && !physicalOccupier) {
           // C++ UnitClass::Can_Enter_Cell walks Cell_Occupier() for physical
@@ -10230,8 +10234,7 @@ export class Game {
       }
     }
     for (const other of this.entities) {
-      if (other.id === entity.id || !other.alive || other.inLimbo) continue;
-      if (other.isAirUnit && other.flightAltitude > 0) continue;
+      if (other.id === entity.id || !this.entityOccupiesDriveCell(other)) continue;
       if (other.cell.cx !== cx || other.cell.cy !== cy) continue;
       if (this.entitiesAllied(entity, other)) {
         const moving = this.isMovingCanEnterBlocker(other);

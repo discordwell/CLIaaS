@@ -159,6 +159,83 @@ async function tsHuntAnt11164(adapter: unknown) {
   });
 }
 
+async function wasmDeadInfantryBlockerAnt11164(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const ant = [
+      ...(state.units ?? []),
+      ...(state.enemies ?? []),
+      ...(state.vessels ?? []),
+    ].find((u: any) => u.t === 'ANT3' && u.house === 'Germany' && u.cx === 111 && u.cy === 64);
+    const blocker = (state.logicLayer ?? []).find((row: any[]) =>
+      row[1] === 'E1' && row[2] === 'England' && row[3] === 112 && row[4] === 65);
+    if (!ant || !blocker) throw new Error('C++ SCA04EA dead-infantry blocker probe not found');
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      mission: ant.m,
+      missionTimer: ant.mt,
+      isDriving: ant.drv,
+      path: [ant.p0, ant.p1, ant.p2, ant.p3],
+      pathThreshold: ant.pth,
+      targetCell: ant.tlx === undefined ? null : {
+        cx: Math.floor(ant.tlx / 256),
+        cy: Math.floor(ant.tly / 256),
+      },
+      navCell: ant.nlx === undefined ? null : {
+        cx: ant.ncx,
+        cy: ant.ncy,
+      },
+      blocker: {
+        hp: blocker[14],
+        mission: blocker[7],
+        cell: { cx: blocker[3], cy: blocker[4] },
+      },
+    };
+  });
+}
+
+async function tsDeadInfantryBlockerAnt11164(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const ant = game.entities.find((entity: any) =>
+      entity.alive !== false &&
+      entity.type === 'ANT3' &&
+      entity.house === 'Germany' &&
+      entity.cell?.cx === 111 &&
+      entity.cell?.cy === 64);
+    const blocker = game.entities.find((entity: any) =>
+      entity.type === 'E1' &&
+      entity.house === 'England' &&
+      entity.cell?.cx === 112 &&
+      entity.cell?.cy === 65);
+    if (!ant || !blocker) throw new Error('TS SCA04EA dead-infantry blocker probe not found');
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      mission: ant.mission,
+      missionTimer: ant.missionTimer,
+      isDriving: ant.isDriving,
+      path: ant.path.slice(0, 4).map((cell: any) => ({ cx: cell.cx, cy: cell.cy })),
+      pathThreshold: ant.pathThreshold,
+      moveTarget: ant.moveTarget
+        ? { cx: Math.floor(ant.moveTarget.lx / 256), cy: Math.floor(ant.moveTarget.ly / 256) }
+        : null,
+      target: ant.target
+        ? { type: ant.target.type, cx: ant.target.cell.cx, cy: ant.target.cell.cy }
+        : null,
+      blocker: {
+        hp: blocker.hp,
+        alive: blocker.alive,
+        mission: blocker.mission,
+        deathComplete: blocker.isInfantryDeathAnimationComplete?.(),
+        cell: { cx: blocker.cell.cx, cy: blocker.cell.cy },
+      },
+    };
+  });
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCA04 infantry reservation pathing', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -256,6 +333,47 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCA04 infantry reservation 
       expect(ts.isDriving).toBe(cpp.isDriving);
       expect(ts.target).toEqual({ type: 'GNRL', cx: 116, cy: 64 });
       expect(ts.weapon).toBe(cpp.weapon);
+      expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
+    }, { wasmSeed: 0 });
+  }, 180_000);
+
+  it('treats a dying infantry Cell_Occupier as a DriveClass MOVE_DESTROYABLE blocker', async () => {
+    await withDualScenario('SCA04EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      const result = await stepBoth(handle, 108);
+      expect(result.ts.state.tick).toBe(result.wasm.state.tick);
+
+      const cpp = await wasmDeadInfantryBlockerAnt11164(handle.wasm);
+      const ts = await tsDeadInfantryBlockerAnt11164(handle.ts);
+
+      expect(cpp.tick).toBe(108);
+      expect(cpp.blocker).toEqual({
+        hp: 0,
+        mission: 5,
+        cell: { cx: 112, cy: 65 },
+      });
+      expect(cpp.mission).toBe(1); // MISSION_ATTACK from DriveClass::Override_Mission
+      expect(cpp.missionTimer).toBe(0);
+      expect(cpp.isDriving).toBe(false);
+      expect(cpp.path[0]).toBe(-1);
+      expect(cpp.targetCell).toBeNull();
+      expect(cpp.navCell).toBeNull();
+
+      expect(ts.tick).toBe(cpp.tick);
+      expect(ts.blocker).toMatchObject({
+        hp: 0,
+        alive: false,
+        deathComplete: false,
+        cell: { cx: 112, cy: 65 },
+      });
+      expect(ts.mission).toBe('ATTACK');
+      expect(ts.missionTimer).toBe(cpp.missionTimer);
+      expect(ts.isDriving).toBe(false);
+      expect(ts.path).toEqual([]);
+      expect(ts.pathThreshold).toBe(cpp.pathThreshold);
+      expect(ts.moveTarget).toBeNull();
+      expect(ts.target).toBeNull();
       expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
     }, { wasmSeed: 0 });
   }, 180_000);
