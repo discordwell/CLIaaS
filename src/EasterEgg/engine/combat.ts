@@ -1251,6 +1251,8 @@ export interface CombatContext {
   isRevealedToHouse?(cx: number, cy: number, houseIdx: number): boolean;
   /** C++ InfantryClass::Stop_Driver, used by InfantryClass::Assign_Destination. */
   stopInfantryDriver?(entity: Entity): void;
+  /** C++ InfantryClass::Can_Enter_Cell, used by survivor Scatter(0,true). */
+  infantryCanEnterCell?(entity: Entity, cx: number, cy: number, facing?: number): MoveResult;
   /** C++ Clear_Occupy_Bit(Coord) anonymous infantry bit clear. */
   clearInfantryOccupyBit?(cellIdx: number, subCell: number): void;
   /** C++ InfantryClass::Assign_Destination line 1046 clear-current-cell predicate. */
@@ -1484,17 +1486,27 @@ function scatterVehicleCrew(ctx: CombatContext, crew: Entity): void {
   const startFacing = ((baseFacing + offset) % DIR_COUNT + DIR_COUNT) % DIR_COUNT;
 
   let chosen: { cx: number; cy: number } | null = null;
+  let bridgeFallback: { cx: number; cy: number } | null = null;
   const cx = crew.cell.cx;
   const cy = crew.cell.cy;
   for (let face = 0; face < DIR_COUNT; face++) {
     const dir = (startFacing + face) % DIR_COUNT;
     const ncx = cx + DIR_DX[dir];
     const ncy = cy + DIR_DY[dir];
-    if (ncx >= 0 && ncx < MAP_CELLS && ncy >= 0 && ncy < MAP_CELLS && ctx.map.isPassable(ncx, ncy)) {
-      chosen = { cx: ncx, cy: ncy };
+    if (ncx < 0 || ncx >= MAP_CELLS || ncy < 0 || ncy >= MAP_CELLS) continue;
+    const canEnter = ctx.infantryCanEnterCell
+      ? ctx.infantryCanEnterCell(crew, ncx, ncy, dir)
+      : (ctx.map.isPassable(ncx, ncy) ? MoveResult.OK : MoveResult.IMPASSABLE);
+    if (canEnter !== MoveResult.OK) continue;
+
+    const cell = { cx: ncx, cy: ncy };
+    if (!bridgeFallback) bridgeFallback = cell;
+    if (!ctx.map.isBridgeCell(ncx, ncy)) {
+      chosen = cell;
       break;
     }
   }
+  chosen ??= bridgeFallback;
   if (chosen) {
     // InfantryClass::Scatter assigns ::As_Target(newcell); As_Coord() reads
     // that back as cell*256+0x88, not the visual center.

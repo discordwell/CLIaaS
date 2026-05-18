@@ -833,6 +833,7 @@ export class Game {
       isDiscoveredByPlayer: (e) => e.house === this.playerHouse || this.discoveredEntityIds.has(e.id),
       isRevealedToHouse: (cx, cy, hi) => this.isRevealedToHouse(cx, cy, hi),
       stopInfantryDriver: (e) => this.stopInfantryDriver(e),
+      infantryCanEnterCell: (e, cx, cy, facing) => this.infantryCanEnterCell(e, cx, cy, facing),
       clearInfantryOccupyBit: (cellIdx, subCell) => this.clearInfantryOccupyBit(cellIdx, subCell),
       canStopInfantryDriverForAssignDestination: (e) => this.canStopInfantryDriverForAssignDestination(e),
       startDriveClassMove: (e) => this.startDriveClassMove(e),
