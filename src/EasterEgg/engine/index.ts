@@ -2726,6 +2726,11 @@ export class Game {
               () => this.logicIndexHintForNewObject(),
               () => this.reserveCppAnimSlot(),
               (terrain) => this.releaseTerrainLogicSlot(terrain),
+              (attachedStructureIndex, damage) => {
+                const structure = this.structures[attachedStructureIndex];
+                if (!structure?.alive) return true;
+                return ctx.damageStructure(structure, damage, undefined, 'Fire');
+              },
 	            )) {
 	              const deletedHint = anim.logicIndexHint;
 	              anim.logicIndexHint = undefined;

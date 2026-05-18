@@ -40,6 +40,7 @@ export interface LogicAnim {
   logicIndexHint?: number;
   attachedStructureIndex?: number;
   attachedTreeKey?: number;
+  damageAccumRaw?: number;
   deleteOnNextProcess?: boolean;
   processedLogicTick?: number;
 }
@@ -47,6 +48,7 @@ export interface LogicAnim {
 type AllocateLogicIndex = () => number | undefined;
 type ReserveAnimSlot = () => boolean;
 type ReleaseTerrainLogicSlot = (terrain: MapTree) => void;
+type DamageAttachedStructure = (attachedStructureIndex: number, damage: number) => boolean;
 
 interface LogicAnimDef {
   sprite: string;
@@ -59,6 +61,7 @@ interface LogicAnimDef {
   loopStart?: number;
   loopEnd?: number;
   chainTo?: LogicAnimType;
+  damageRawPerTick?: number;
 }
 
 const LOGIC_ANIM_DEFS: Record<LogicAnimType, LogicAnimDef> = {
@@ -71,20 +74,20 @@ const LOGIC_ANIM_DEFS: Record<LogicAnimType, LogicAnimDef> = {
   // ChainTo=ANIM_FIRE_MED.
   elect_die: { sprite: 'electro', biggest: 0, stages: 14, loops: 5, rate: 1, scorcher: true, loopStart: 0, loopEnd: 3, chainTo: 'fire_med' },
   // C++ adata.cpp: ANIM_FIRE_SMALL is FIRE3 and does not scorch; FIRE_MED/FIRE_MED2 do.
-  fire_small: { sprite: 'fire3', biggest: 0, stages: 15, loops: 2, rate: 1, scorcher: false },
-  fire_med: { sprite: 'fire2', biggest: 0, stages: 15, loops: 3, rate: 1, scorcher: true },
-  fire_med2: { sprite: 'fire1', biggest: 0, stages: 15, loops: 3, rate: 1, scorcher: true },
+  fire_small: { sprite: 'fire3', biggest: 0, stages: 15, loops: 2, rate: 1, scorcher: false, damageRawPerTick: 8 },
+  fire_med: { sprite: 'fire2', biggest: 0, stages: 15, loops: 3, rate: 1, scorcher: true, damageRawPerTick: 16 },
+  fire_med2: { sprite: 'fire1', biggest: 0, stages: 15, loops: 3, rate: 1, scorcher: true, damageRawPerTick: 16 },
   // C++ adata.cpp: ANIM_BURN_* are generic burn anims used by TerrainClass::Catch_Fire.
   // They use the same SHP files as ON_FIRE_* but do not chain down into smaller fires/smoke.
-  burn_small: { sprite: 'burn-s', biggest: 13, stages: 65, loops: 4, rate: 2, scorcher: false, loopStart: 30, loopEnd: 62 },
-  burn_med: { sprite: 'burn-m', biggest: 13, stages: 67, loops: 4, rate: 2, scorcher: false, loopStart: 30, loopEnd: 62 },
-  burn_big: { sprite: 'burn-l', biggest: 13, stages: 67, loops: 4, rate: 2, scorcher: true, loopStart: 30, loopEnd: 62 },
+  burn_small: { sprite: 'burn-s', biggest: 13, stages: 65, loops: 4, rate: 2, scorcher: false, loopStart: 30, loopEnd: 62, damageRawPerTick: 8 },
+  burn_med: { sprite: 'burn-m', biggest: 13, stages: 67, loops: 4, rate: 2, scorcher: false, loopStart: 30, loopEnd: 62, damageRawPerTick: 16 },
+  burn_big: { sprite: 'burn-l', biggest: 13, stages: 67, loops: 4, rate: 2, scorcher: true, loopStart: 30, loopEnd: 62, damageRawPerTick: 25 },
   // C++ adata.cpp: ANIM_ON_FIRE_* are attached building/vehicle burn anims.
   // They are distinct from FIRE1/2/3: delayed frame rate, Biggest=13, long
   // loop band, and chain down into smoke/smaller burn classes.
-  on_fire_small: { sprite: 'burn-s', biggest: 13, stages: 65, loops: 4, rate: 2, scorcher: false, loopStart: 30, loopEnd: 62, chainTo: 'smoke_m' },
-  on_fire_med: { sprite: 'burn-m', biggest: 13, stages: 67, loops: 4, rate: 2, scorcher: false, loopStart: 30, loopEnd: 62, chainTo: 'on_fire_small' },
-  on_fire_big: { sprite: 'burn-l', biggest: 13, stages: 67, loops: 4, rate: 2, scorcher: true, loopStart: 30, loopEnd: 62, chainTo: 'on_fire_med' },
+  on_fire_small: { sprite: 'burn-s', biggest: 13, stages: 65, loops: 4, rate: 2, scorcher: false, loopStart: 30, loopEnd: 62, chainTo: 'smoke_m', damageRawPerTick: 8 },
+  on_fire_med: { sprite: 'burn-m', biggest: 13, stages: 67, loops: 4, rate: 2, scorcher: false, loopStart: 30, loopEnd: 62, chainTo: 'on_fire_small', damageRawPerTick: 16 },
+  on_fire_big: { sprite: 'burn-l', biggest: 13, stages: 67, loops: 4, rate: 2, scorcher: true, loopStart: 30, loopEnd: 62, chainTo: 'on_fire_med', damageRawPerTick: 25 },
   // C++ adata.cpp: ANIM_OILFIELD_BURN (FLMSPT) uses an unsigned-char loop
   // counter, so Class->Loops=65535 is observed as 255 in the heap dump.
   oilfield_burn: { sprite: 'flmspt', biggest: 58, stages: 66, loops: 255, rate: 1, scorcher: false, loopStart: 33, loopEnd: 99 },
@@ -206,6 +209,7 @@ export function processLogicAnim(
   allocateLogicIndex?: AllocateLogicIndex,
   reserveAnimSlot?: ReserveAnimSlot,
   releaseTerrainLogicSlot?: ReleaseTerrainLogicSlot,
+  damageAttachedStructure?: DamageAttachedStructure,
 ): boolean {
   if (anim.deleteOnNextProcess) {
     fireOutAttachedTree(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot, releaseTerrainLogicSlot);
@@ -232,6 +236,17 @@ export function processLogicAnim(
   // and reset it to the animation Rate.
   anim.stage++;
   anim.timer = def.rate;
+
+  if (anim.attachedStructureIndex !== undefined && def.damageRawPerTick !== undefined) {
+    anim.damageAccumRaw = (anim.damageAccumRaw ?? 0) + def.damageRawPerTick;
+    const damage = Math.trunc(anim.damageAccumRaw / 256);
+    if (damage > 0) {
+      anim.damageAccumRaw -= damage * 256;
+      if (damageAttachedStructure?.(anim.attachedStructureIndex, damage)) {
+        return false;
+      }
+    }
+  }
 
   if (def.biggest > 0 && anim.stage === def.biggest) {
     logicAnimMiddle(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot);

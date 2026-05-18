@@ -435,6 +435,46 @@ async function tsSameHouseTeamTargetFireState(adapter: unknown) {
   });
 }
 
+async function wasmAttachedFireBarrelState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const barrel = (state.structures ?? []).find((structure: any) =>
+      structure.t === 'BARL' && structure.cx === 112 && structure.cy === 64);
+    const animNamesAtBarrel = (state.anims ?? [])
+      .filter((anim: any) => anim.cx === 112 && anim.cy === 64)
+      .map((anim: any) => anim.name)
+      .sort();
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      barrel: barrel ? { hp: barrel.hp } : null,
+      animNamesAtBarrel,
+    };
+  });
+}
+
+async function tsAttachedFireBarrelState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const barrel = game.structures.find((structure: any) =>
+      structure.type === 'BARL' &&
+      structure.cx === 112 &&
+      structure.cy === 64 &&
+      structure.alive !== false);
+    const animTypesAtBarrel = (game.logicAnims ?? [])
+      .filter((anim: any) => Math.floor(anim.x / 24) === 112 && Math.floor(anim.y / 24) === 64)
+      .map((anim: any) => anim.type)
+      .sort();
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      barrel: barrel ? { hp: barrel.hp } : null,
+      animTypesAtBarrel,
+    };
+  });
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCA04 infantry reservation pathing', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -645,6 +685,27 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCA04 infantry reservation 
       });
       expect(ts.friendlyAnt.hp).toBe(cpp.friendlyAnt.hp);
       expect(ts.barrel.hp).toBe(cpp.barrel.hp);
+      expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
+    }, { wasmSeed: 0 });
+  }, 180_000);
+
+  it('lets attached fire damage destroy the low-health barrel', async () => {
+    await withDualScenario('SCA04EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      const result = await stepBoth(handle, 161);
+      expect(result.ts.state.tick).toBe(result.wasm.state.tick);
+
+      const cpp = await wasmAttachedFireBarrelState(handle.wasm);
+      const ts = await tsAttachedFireBarrelState(handle.ts);
+
+      expect(cpp.tick).toBe(161);
+      expect(cpp.barrel).toBeNull();
+      expect(cpp.animNamesAtBarrel).toEqual(expect.arrayContaining(['FBALL1', 'FIRE2', 'FIRE3']));
+
+      expect(ts.tick).toBe(cpp.tick);
+      expect(ts.barrel).toBeNull();
+      expect(ts.animTypesAtBarrel).toEqual(expect.arrayContaining(['fball1', 'fire_med', 'fire_small']));
       expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
     }, { wasmSeed: 0 });
   }, 180_000);
