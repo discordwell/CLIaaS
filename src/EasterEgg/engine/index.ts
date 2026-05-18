@@ -2495,7 +2495,7 @@ export class Game {
         // occupy bit; SCG04EA's destroyed MNLY at (88,52) must not block a
         // civilian Scatter() into that cell.
         const cellIdx = entity.cell.cy * MAP_CELLS + entity.cell.cx;
-        if (entity.driveTrackFlagClearedCellIdx === cellIdx) {
+        if (entity.driveTrackFlagClearedCellIdx === cellIdx && !entity.isDriving) {
           this.map.setOccupancy(entity.cell.cx, entity.cell.cy, entity.id);
         } else {
           entity.driveTrackFlagClearedCellIdx = -1;
@@ -8521,7 +8521,7 @@ export class Game {
    *  Used by UnitClass::Enter_Idle_Mode when IsToScatter was set by LST
    *  unload. UnitClass overrides the zero-threat branch and uses
    *  Map.Nearby_Location; it does not consume the Scenario RNG. */
-	  private unitClassScatterNoThreat(
+  private unitClassScatterNoThreat(
     entity: Entity,
     nokidding = false,
     nearbyFrame = Math.max(0, this.tick - 1),
@@ -9032,7 +9032,12 @@ export class Game {
     return !!warhead && this.getWarheadMeta(warhead).destroysWalls === true;
   }
 
-  private nearbyLocationClearToMove(entity: Entity, cx: number, cy: number): boolean {
+  private nearbyLocationClearToMove(
+    entity: Entity,
+    cx: number,
+    cy: number,
+    rejectPhysicalMovingOccupierWithoutVehicleFlag = false,
+  ): boolean {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
     if (entity.stats.speedClass === SpeedClass.WINGED) return true;
 
@@ -9050,6 +9055,17 @@ export class Game {
         occupant.cell.cy === cy &&
         !occupant.isDriving;
       if (!vehicleFlagCleared) return false;
+    } else if (rejectPhysicalMovingOccupierWithoutVehicleFlag) {
+      const occupantId = this.map.getOccupancy(cx, cy);
+      const occupant = occupantId > 0 ? this.entityById.get(occupantId) : undefined;
+      if (occupant?.alive &&
+          !occupant.inLimbo &&
+          !occupant.stats.isInfantry &&
+          occupant.isDriving &&
+          occupant.cell.cx === cx &&
+          occupant.cell.cy === cy) {
+        return false;
+      }
     }
     if (!entity.isNavalUnit && (this.map.isTreeOccupied(cx, cy) || this.map.isTerrainObjectOccupied(cx, cy))) {
       return false;
@@ -9156,7 +9172,7 @@ export class Game {
       entity.isNavalUnit,
       Math.max(0, this.tick - 1),
       (cx, cy) => nearbyZone[cy * MAP_CELLS + cx] !== 0 &&
-        this.nearbyLocationClearToMove(entity, cx, cy),
+        this.nearbyLocationClearToMove(entity, cx, cy, true),
     );
     if (!nearby) return goal;
     const goalLX = goal.cx * LEPTON_SIZE + (LEPTON_SIZE >> 1);
@@ -9842,12 +9858,10 @@ export class Game {
     this.map.setVehicleTrackReservation(cellIdx, entity.id);
   }
 
-  /** C++ DriveClass::Mark_Track(MARK_DOWN): reserve head-to and unpassed midpoint. */
-  private markDriveTrack(entity: Entity, headToLX: number, headToLY: number): void {
-    if (headToLX <= 0 || headToLY <= 0) return;
-
+  private driveTrackMarkCells(entity: Entity, headToLX: number, headToLY: number): number[] {
+    if (headToLX <= 0 || headToLY <= 0) return [];
+    const cells: number[] = [];
     const headCellIdx = ((headToLY >> 8) & 0x7F) * MAP_CELLS + ((headToLX >> 8) & 0x7F);
-    const currentCellIdx = entity.cell.cy * MAP_CELLS + entity.cell.cx;
 
     if (entity.trackNumber > 0) {
       const raw = RAW_TRACKS[entity.trackNumber - 1];
@@ -9859,22 +9873,28 @@ export class Game {
           const midLX = headToLX + mid.x;
           const midLY = headToLY + mid.y;
           const midCellIdx = ((midLY >> 8) & 0x7F) * MAP_CELLS + ((midLX >> 8) & 0x7F);
-          this.reserveDriveTrackCell(entity, midCellIdx);
-          if (midCellIdx === currentCellIdx) {
-            this.releaseDriveTrackReservation(entity, midCellIdx);
-          }
+          cells.push(midCellIdx);
         }
       }
     }
 
-    this.reserveDriveTrackCell(entity, headCellIdx);
-    if (headCellIdx === currentCellIdx) {
-      // C++ stores physical vehicle occupation and DriveClass::Mark_Track
-      // reservations in one CellClass::Flag.Occupy.Vehicle bit. When the
-      // reserved head cell is also the unit's current physical cell, there is
-      // no separate owner-tracked reservation for later Can_Enter_Cell calls;
-      // the physical occupier chain is the only blocker.
-      this.releaseDriveTrackReservation(entity, headCellIdx);
+    cells.push(headCellIdx);
+    return [...new Set(cells)];
+  }
+
+  /** C++ DriveClass::Mark_Track(MARK_DOWN): reserve head-to and unpassed midpoint. */
+  private markDriveTrack(entity: Entity, headToLX: number, headToLY: number): void {
+    const currentCellIdx = entity.cell.cy * MAP_CELLS + entity.cell.cx;
+    for (const cellIdx of this.driveTrackMarkCells(entity, headToLX, headToLY)) {
+      this.reserveDriveTrackCell(entity, cellIdx);
+      if (cellIdx === currentCellIdx) {
+        // C++ stores physical vehicle occupation and DriveClass::Mark_Track
+        // reservations in one CellClass::Flag.Occupy.Vehicle bit. When the
+        // reserved head cell is also the unit's current physical cell, there is
+        // no separate owner-tracked reservation for later Can_Enter_Cell calls;
+        // the physical occupier chain is the only blocker.
+        this.releaseDriveTrackReservation(entity, cellIdx);
+      }
     }
   }
 
@@ -12928,7 +12948,15 @@ export class Game {
 
                   // C++ drive.cpp:772 Stop_Driver releases old head-to
                   // reservation after switching TrackNumber/TrackIndex.
+                  const cxxStopDriverMarkCells = this.driveTrackMarkCells(
+                    entity,
+                    entity.headToLX,
+                    entity.headToLY,
+                  );
                   this.stopDriveTrack(entity);
+                  for (const cellIdx of cxxStopDriverMarkCells) {
+                    this.releaseDriveTrackReservation(entity, cellIdx);
+                  }
 
                   // === Track-jump PCP_END (C++ drive.cpp:773) ===
                   // C++ sequence at the track-jump site:
