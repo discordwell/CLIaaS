@@ -15343,7 +15343,7 @@ export class Game {
     // Decrement BorrowedTime each tick
     if (this.borrowedTime > 0) {
       this.borrowedTime--;
-      return; // still counting down
+      if (this.borrowedTime > 0) return; // still counting down
     }
     // C++ house.cpp:945-951 — IsToWin fires when BorrowedTime == 0 && Blockage <= 0
     if (this.isToWin && this.allowWin <= 0) {
