@@ -6433,9 +6433,6 @@ export class Game {
             // non-timer harvester pass after movement for arrival bookkeeping.
             this._runHarvester(ctx => _updateHarvester(ctx, entity, true));
             if (entity.mission !== Mission.HARVEST) {
-              if (entity.missionTimer <= 0 && entity.mission === Mission.GUARD) {
-                entity.missionTimer = 42 + ScenarioRandom.nextInRange(0, 2);
-              }
               break;
             }
             const startedCurrentCellHarvest =

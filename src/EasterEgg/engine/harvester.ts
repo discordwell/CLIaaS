@@ -323,11 +323,12 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity, missionTi
     }
     case 'goingtoidle': {
       if (!missionTimerFired) break;
-      // C++ unit.cpp:2909-2918: GOINGTOIDLE assigns GUARD, then falls through
-      // to MissionControl[GUARD].Normal_Delay()+Random_Pick(0,2) in the caller.
+      // C++ unit.cpp:2909-2918 queues GUARD with Assign_Mission(). UnitClass::AI
+      // post-DriveClass Commence pops that queue later in the same object tick,
+      // resetting Timer to 0; Mission_Guard's delay/RNG belongs to the next tick.
       entity.harvesterState = 'idle';
       entity.isHarvesterMining = false;
-      entity.mission = Mission.GUARD;
+      assignMission(entity, Mission.GUARD);
       break;
     }
     case 'seeking': {
