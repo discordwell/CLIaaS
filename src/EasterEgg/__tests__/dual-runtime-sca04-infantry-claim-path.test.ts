@@ -519,6 +519,48 @@ async function tsProjectileSpawnedFireState(adapter: unknown) {
   });
 }
 
+async function wasmShiftedProjectileSlotAnimState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const napalm = (state.anims ?? []).find((anim: any) =>
+      anim.name === 'NAPALM3' && anim.cx === 111 && anim.cy === 64);
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      napalm: napalm
+        ? {
+            stage: napalm.stage,
+            loops: napalm.loops,
+            rate: napalm.rate,
+          }
+        : null,
+    };
+  });
+}
+
+async function tsShiftedProjectileSlotAnimState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const napalm = (game.logicAnims ?? []).find((anim: any) =>
+      anim.type === 'napalm3' &&
+      Math.floor(anim.x / 24) === 111 &&
+      Math.floor(anim.y / 24) === 64);
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      napalm: napalm
+        ? {
+            stage: napalm.stage,
+            delay: napalm.delay,
+            loops: napalm.loops,
+            timer: napalm.timer,
+          }
+        : null,
+    };
+  });
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCA04 infantry reservation pathing', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -775,6 +817,32 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCA04 infantry reservation 
         stage: cpp.fire?.stage,
         delay: 0,
         loops: cpp.fire?.loops,
+      });
+      expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
+    }, { wasmSeed: 0 });
+  }, 180_000);
+
+  it('skips existing anims shifted into a deleted projectile logic slot', async () => {
+    await withDualScenario('SCA04EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      const result = await stepBoth(handle, 169);
+      expect(result.ts.state.tick).toBe(result.wasm.state.tick);
+
+      const cpp = await wasmShiftedProjectileSlotAnimState(handle.wasm);
+      const ts = await tsShiftedProjectileSlotAnimState(handle.ts);
+
+      expect(cpp.tick).toBe(169);
+      expect(cpp.napalm).toMatchObject({
+        stage: 0,
+        loops: 1,
+      });
+
+      expect(ts.tick).toBe(cpp.tick);
+      expect(ts.napalm).toMatchObject({
+        stage: cpp.napalm?.stage,
+        delay: 0,
+        loops: cpp.napalm?.loops,
       });
       expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
     }, { wasmSeed: 0 });

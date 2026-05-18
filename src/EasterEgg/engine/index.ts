@@ -2649,17 +2649,18 @@ export class Game {
       };
       const skipShiftedLogicObject = (effectiveLogicIdx: number, createdLogicTick?: number): boolean => {
         const skipRange = ctx.shiftedLogicSkipRanges?.find(range =>
-          effectiveLogicIdx > range.after && effectiveLogicIdx <= range.through);
+          effectiveLogicIdx >= range.after && effectiveLogicIdx <= range.through);
         const skipAfter = skipRange?.after ?? ctx.shiftedLogicSkipHintAfter ?? -Infinity;
         const skipThrough = skipRange?.through ?? ctx.shiftedLogicSkipHintThrough;
         if (skipThrough === undefined ||
-            effectiveLogicIdx <= skipAfter ||
+            effectiveLogicIdx < skipAfter ||
             effectiveLogicIdx > skipThrough) {
           return false;
         }
-        // Deletion skip ranges only cover objects that existed when the earlier
-        // slot was removed. AnimClass constructors can insert new logic objects
-        // later in the same pass; C++ still gives those new anims their first turn.
+        // Deletion skip ranges cover objects that existed when the current slot
+        // was removed and the C++ Logic loop advanced past the shifted entries.
+        // AnimClass constructors can insert new logic objects later in the same
+        // pass; C++ still gives those new anims their first turn.
         if (createdLogicTick === this.tick) return false;
         logicIdx = Math.max(logicIdx + 1, effectiveLogicIdx + 1);
         return true;
