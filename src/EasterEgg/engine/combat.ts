@@ -3767,7 +3767,10 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
     const liveAfter = countLiveProjectilePredecessors(ctx, predecessors);
     const earlierDeletes = Math.max(0, liveBefore - liveAfter);
     if (proj.logicIndexHint !== undefined) {
-      const skipLogicHintAfter = proj.logicIndexHint;
+      // Deleting an earlier Logic predecessor can decrement following hints
+      // before this local projectile skip is applied. Cover both the original
+      // cursor neighborhood and the already-shifted representation.
+      const skipLogicHintAfter = Math.max(0, proj.logicIndexHint - earlierDeletes);
       const skipLogicHintThrough = proj.logicIndexHint + earlierDeletes;
       if (skipLogicHintThrough > skipLogicHintAfter) {
         const range = { after: skipLogicHintAfter, through: skipLogicHintThrough };

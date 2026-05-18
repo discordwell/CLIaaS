@@ -1,10 +1,10 @@
 /**
- * Dual-runtime check for C++ Logic cursor shifts caused by projectile deletes.
+ * Dual-runtime checks for C++ Logic cursor shifts caused by projectile deletes.
  *
- * In SCU14EA a SCUD detonates during the runtime object pass. Its blast deletes
- * an earlier logic object, which shifts the following 2TNK behind the active C++
- * Logic cursor. C++ skips that tank until the next frame; TS must not keep
- * processing it just because it still appears later in the JS entity array.
+ * SCU14EA has SCUD detonations that delete earlier Logic objects while the
+ * runtime pass is active. DynamicVector compaction can move the following object
+ * under the active cursor, so C++ skips it until the next frame. TS must mirror
+ * that cursor behavior for both projectiles and regular unit logic.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -28,6 +28,86 @@ function adapterPage(adapter: unknown): EvalPage {
   const page = (adapter as { page?: EvalPage }).page;
   if (!page) throw new Error('Adapter page is not available');
   return page;
+}
+
+async function stepBothOneTickAtATime(
+  handle: Parameters<typeof stepBoth>[0],
+  ticks: number,
+): Promise<void> {
+  for (let i = 0; i < ticks; i++) {
+    await stepBoth(handle, 1);
+  }
+}
+
+async function wasmProjectileState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const ballistic = (state.bullets ?? []).find((bullet: any) =>
+      bullet.type === 'Ballistic' &&
+      bullet.tx === 23936 &&
+      bullet.ty === 20864);
+    const scud = (state.bullets ?? []).find((bullet: any) =>
+      bullet.type === 'FROG' &&
+      bullet.tx === 24704 &&
+      bullet.ty === 20096);
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      ballistic: ballistic
+        ? {
+            lx: ballistic.lx,
+            ly: ballistic.ly,
+            timer: ballistic.timer,
+            payback: ballistic.pb,
+          }
+        : null,
+      scud: scud
+        ? {
+            lx: scud.lx,
+            ly: scud.ly,
+            timer: scud.timer,
+          }
+        : null,
+    };
+  });
+}
+
+async function tsProjectileState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const ballistic = (game.inflightProjectiles ?? []).find((projectile: any) =>
+      projectile.weapon?.name === '155mm' &&
+      projectile.headToLX === 23936 &&
+      projectile.headToLY === 20864);
+    const scud = (game.inflightProjectiles ?? []).find((projectile: any) =>
+      projectile.weapon?.name === 'SCUD' &&
+      projectile.headToLX === 24704 &&
+      projectile.headToLY === 20096);
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      ballistic: ballistic
+        ? {
+            hint: ballistic.logicIndexHint,
+            currentFrame: ballistic.currentFrame,
+            lx: ballistic.logicalLX,
+            ly: ballistic.logicalLY,
+            fuseTimer: ballistic.fuseTimer,
+            processedLogicTick: ballistic.processedLogicTick,
+          }
+        : null,
+      scud: scud
+        ? {
+            hint: scud.logicIndexHint,
+            currentFrame: scud.currentFrame,
+            lx: scud.logicalLX,
+            ly: scud.logicalLY,
+            fuseTimer: scud.fuseTimer,
+          }
+        : null,
+    };
+  });
 }
 
 async function wasmDeleteShiftState(adapter: unknown) {
@@ -100,7 +180,7 @@ async function tsDeleteShiftState(adapter: unknown) {
   });
 }
 
-describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 projectile delete shifts', () => {
+describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 projectile delete shift', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
   }, 180_000);
@@ -108,6 +188,57 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 projectile delete shi
   afterAll(async () => {
     await stopParityServer(serverHandle);
   }, 20_000);
+
+  it('skips the Ballistic shell shifted by a prior SCUD deletion', async () => {
+    await withDualScenario('SCU14EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBothOneTickAtATime(handle, 922);
+      const cppBefore = await wasmProjectileState(handle.wasm);
+      const tsBefore = await tsProjectileState(handle.ts);
+      expect(cppBefore.tick).toBe(922);
+      expect(tsBefore.tick).toBe(cppBefore.tick);
+      expect(cppBefore.scud).not.toBeNull();
+      expect(tsBefore.scud).not.toBeNull();
+      expect(cppBefore.ballistic).toMatchObject({ lx: 24160, ly: 20479, timer: 41 });
+      expect(tsBefore.ballistic).toMatchObject({
+        currentFrame: 12,
+        lx: 24160,
+        ly: 20479,
+        fuseTimer: 41,
+      });
+
+      await stepBoth(handle, 1);
+      const cppSkipped = await wasmProjectileState(handle.wasm);
+      const tsSkipped = await tsProjectileState(handle.ts);
+      expect(cppSkipped.tick).toBe(923);
+      expect(tsSkipped.tick).toBe(cppSkipped.tick);
+      expect(cppSkipped.scud).toBeNull();
+      expect(tsSkipped.scud).toBeNull();
+      expect(cppSkipped.ballistic).toMatchObject({ lx: 24160, ly: 20479, timer: 41 });
+      expect(tsSkipped.ballistic).toMatchObject({
+        currentFrame: 12,
+        lx: 24160,
+        ly: 20479,
+        fuseTimer: 41,
+        processedLogicTick: 923,
+      });
+      expect(tsSkipped.rngState).toBe(cppSkipped.rngState);
+
+      await stepBoth(handle, 1);
+      const cppAdvanced = await wasmProjectileState(handle.wasm);
+      const tsAdvanced = await tsProjectileState(handle.ts);
+      expect(cppAdvanced.tick).toBe(924);
+      expect(tsAdvanced.tick).toBe(cppAdvanced.tick);
+      expect(cppAdvanced.ballistic).toMatchObject({ lx: 24140, ly: 20546, timer: 40 });
+      expect(tsAdvanced.ballistic).toMatchObject({
+        currentFrame: 13,
+        lx: 24140,
+        ly: 20546,
+        fuseTimer: 40,
+      });
+    }, { wasmSeed: 0, preserveSourceFog: true });
+  }, 300_000);
 
   it('skips a 2TNK shifted behind the Logic cursor by a SCUD detonation', async () => {
     await withDualScenario('SCU14EA', async (handle) => {
