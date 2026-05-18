@@ -657,44 +657,10 @@ describe('AI enemy selection guards on IsStarted — C++ house.cpp:4639-4642', (
   });
 });
 
-// =============================================================================
-// 10. Hidden() — re-shrouding behavior
-//     C++ techno.cpp:826-834
-// =============================================================================
-
-describe('Hidden() — re-shrouding guard (techno.cpp:826-834)', () => {
-  /**
-   * C++ techno.cpp:826-834:
-   *   void TechnoClass::Hidden(void) {
-   *     if (!IsDiscoveredByPlayer) return;
-   *     if (!House->IsHuman) {
-   *       IsDiscoveredByPlayer = false;
-   *     }
-   *   }
-   *
-   * Key behaviors:
-   *   1. If already hidden (not discovered), do nothing.
-   *   2. Only non-human (AI) houses can have objects re-hidden.
-   *   3. Human-owned objects, once discovered, stay discovered.
-   *
-   * TS: checkDiscoveryTriggers() in index.ts now implements Hidden() logic:
-   * AI-owned entities returning to shroud (vis < 2) have their ID removed
-   * from discoveredEntityIds, matching C++ behavior.
-   */
-
-  it('TS un-discovers AI entities returning to shroud (matches C++ Hidden())', () => {
-    // C++ allows AI-owned objects to return to hidden state.
-    // TS now deletes entity IDs from discoveredEntityIds when vis < 2
-    // (index.ts checkDiscoveryTriggers, line ~5207).
-    const discovered = new Set<number>();
-    discovered.add(42);
-    expect(discovered.has(42)).toBe(true);
-
-    // Simulate entity returning to shroud — TS now deletes the ID
-    discovered.delete(42);
-    expect(discovered.has(42)).toBe(false);
-  });
-});
+// Hidden() is covered by discovery-playerptr tests. C++ techno.cpp:848-856
+// clears IsDiscoveredByPlayer only when Hidden() is called by explicit object
+// hiding/removal paths such as ObjectClass::Limbo(), not by ordinary fog
+// downgrades.
 
 // =============================================================================
 // 11. Ambush mission transition on discovery

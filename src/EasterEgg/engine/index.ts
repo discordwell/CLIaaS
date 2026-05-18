@@ -13516,23 +13516,12 @@ export class Game {
       if (s.triggerName) this.springDiscoveredTriggerByName(s.triggerName);
     }
 
-    // C++ techno.cpp:826-834 Hidden() — un-discover AI objects returning to shroud.
-    // Only non-human (AI) houses can have objects re-hidden; human-owned objects
-    // stay discovered permanently.
-    for (const entity of this.entities) {
-      if (!entity.alive) continue;
-      // IsOwnedByPlayer is strict PlayerPtr ownership. Allied AI houses are
-      // not owned by the player and can be hidden again when they leave shroud.
-      if (entity.house === this.playerHouse) continue;
-      if (!this.discoveredEntityIds.has(entity.id)) continue; // not discovered
-
-      const vis = this.map.getVisibility(entity.cell.cx, entity.cell.cy);
-      if (vis === 0 && !this.isMappedPlacementRevealCandidate(entity)) {
-        // Entity returned to shroud — clear discovery flag (C++ IsDiscoveredByPlayer = false).
-        // Explored/fogged cells are still mapped; Hidden() is not just "outside current sight".
-        this.discoveredEntityIds.delete(entity.id);
-      }
-    }
+    // C++ TechnoClass::Hidden() clears IsDiscoveredByPlayer for non-human
+    // houses, but normal fog-of-war downgrades do not call Hidden(). Hidden is
+    // reached through explicit object hiding/removal paths such as Limbo().
+    // Keep discovered objects discovered here even if the current cell is no
+    // longer visible; Evaluate_Object reads that persistent flag during the
+    // next Logic.AI pass.
   }
 
   private markEntityDiscoveredByPlayer(entity: Entity): void {

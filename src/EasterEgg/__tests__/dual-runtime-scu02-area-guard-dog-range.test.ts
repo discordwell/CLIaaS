@@ -1,11 +1,15 @@
 /**
  * Dual-runtime check for FootClass::Mission_Guard_Area using Threat_Range(1).
  *
- * SCU02EA has a USSR dog at C++ logic[47] / TS logic[13]. On tick 145 C++
+ * SCU02EA has a USSR dog at C++ logic[47] / TS logic[47]. On tick 145 C++
  * scans from ArchiveTarget with the DOG type GuardRange override: Threat_Range(1)
  * doubles GuardRange=7 and caps it to 10 cells, so the dog acquires the Greece
  * E1 near (74,64) and returns delay 1 with no Random_Pick(1,5). Computing area
  * range from DogJaw weapon range misses that target and spends jitter RNG.
+ *
+ * This runs with source fog preserved because C++ keeps IsDiscoveredByPlayer
+ * persistent across ordinary fog downgrades. Clearing the discovered flag before
+ * Logic.AI makes the dog skip the C++ target and acquire an inner-ring E1.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -114,6 +118,6 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU02EA area guard dog rang
       expect(tsAfter.dog.targetX).toBe(cppAfter.dog.targetX);
       expect(tsAfter.dog.targetY).toBe(cppAfter.dog.targetY);
       expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
-    }, { wasmSeed: 0 });
+    }, { wasmSeed: 0, preserveSourceFog: true });
   }, 300_000);
 });

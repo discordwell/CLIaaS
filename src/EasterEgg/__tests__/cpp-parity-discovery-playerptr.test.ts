@@ -244,6 +244,26 @@ describe('TechnoClass::Revealed(PlayerPtr) strict PlayerPtr discovery', () => {
     expect(discovered.has(ussr.id)).toBe(true);
   });
 
+  it('keeps discovered AI objects discovered across ordinary fog downgrades', () => {
+    const game = createGame();
+    const ussr = new Entity(
+      UnitType.I_E1,
+      House.USSR,
+      30 * CELL_SIZE + CELL_SIZE / 2,
+      30 * CELL_SIZE + CELL_SIZE / 2
+    );
+    game.entities.push(ussr);
+    game.entityById.set(ussr.id, ussr);
+
+    const discovered = (game as unknown as { discoveredEntityIds: Set<number> }).discoveredEntityIds;
+    discovered.add(ussr.id);
+    game.map.setVisibility(30, 30, 0);
+
+    (game as unknown as { checkDiscoveryTriggers(): void }).checkDiscoveryTriggers();
+
+    expect(discovered.has(ussr.id)).toBe(true);
+  });
+
   it('honors scenario AllyReveal=no for allied structure discovery', () => {
     const game = createGame();
     (game as unknown as { baseDiscovered: boolean }).baseDiscovered = true;
