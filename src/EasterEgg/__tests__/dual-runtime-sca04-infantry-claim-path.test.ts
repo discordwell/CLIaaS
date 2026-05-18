@@ -104,6 +104,61 @@ async function tsAnt3(adapter: unknown) {
   });
 }
 
+async function wasmHuntAnt11164(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const ant = [
+      ...(state.units ?? []),
+      ...(state.enemies ?? []),
+      ...(state.vessels ?? []),
+    ].find((u: any) => u.t === 'ANT3' && u.house === 'Germany' && u.cx === 111 && u.cy === 64);
+    if (!ant) throw new Error('C++ SCA04EA Germany ANT3 hunt probe not found');
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      mission: ant.m,
+      missionTimer: ant.mt,
+      arm: ant.arm,
+      primaryFacing: ant.pf,
+      desiredFacing: ant.pfd,
+      isDriving: ant.drv,
+      targetCell: {
+        cx: Math.floor((ant.tlx ?? 0) / 256),
+        cy: Math.floor((ant.tly ?? 0) / 256),
+      },
+      weapon: ant.wpn,
+    };
+  });
+}
+
+async function tsHuntAnt11164(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const ant = game.entities.find((entity: any) =>
+      entity.alive !== false &&
+      entity.type === 'ANT3' &&
+      entity.house === 'Germany' &&
+      entity.cell?.cx === 111 &&
+      entity.cell?.cy === 64);
+    if (!ant) throw new Error('TS SCA04EA Germany ANT3 hunt probe not found');
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      mission: ant.mission,
+      missionTimer: ant.missionTimer,
+      attackCooldown: ant.attackCooldown,
+      primaryFacing: ant.bodyFacing256,
+      desiredFacing: ant.desiredFacing256,
+      isDriving: ant.isDriving,
+      target: ant.target
+        ? { type: ant.target.type, cx: ant.target.cell.cx, cy: ant.target.cell.cy }
+        : null,
+      weapon: ant.weapon ? ant.weapon.name : null,
+    };
+  });
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCA04 infantry reservation pathing', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -172,6 +227,35 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCA04 infantry reservation 
         isInvisible: true,
         isDropping: undefined,
       });
+      expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
+    }, { wasmSeed: 0 });
+  }, 180_000);
+
+  it('does not run TS-only ant retargeting between C++ Mission_Hunt scans', async () => {
+    await withDualScenario('SCA04EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      const result = await stepBoth(handle, 99);
+      expect(result.ts.state.tick).toBe(result.wasm.state.tick);
+
+      const cpp = await wasmHuntAnt11164(handle.wasm);
+      const ts = await tsHuntAnt11164(handle.ts);
+
+      expect(cpp.tick).toBe(99);
+      expect(cpp.mission).toBe(14); // MISSION_HUNT
+      expect(cpp.missionTimer).toBe(6);
+      expect(cpp.arm).toBe(0);
+      expect(cpp.targetCell).toEqual({ cx: 116, cy: 64 });
+
+      expect(ts.tick).toBe(cpp.tick);
+      expect(ts.mission).toBe('HUNT');
+      expect(ts.missionTimer).toBe(cpp.missionTimer);
+      expect(ts.attackCooldown).toBe(cpp.arm);
+      expect(ts.primaryFacing).toBe(cpp.primaryFacing);
+      expect(ts.desiredFacing).toBe(cpp.desiredFacing);
+      expect(ts.isDriving).toBe(cpp.isDriving);
+      expect(ts.target).toEqual({ type: 'GNRL', cx: 116, cy: 64 });
+      expect(ts.weapon).toBe(cpp.weapon);
       expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
     }, { wasmSeed: 0 });
   }, 180_000);

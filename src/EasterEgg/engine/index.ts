@@ -347,9 +347,6 @@ export const DIFFICULTIES: Difficulty[] = ['easy', 'normal', 'hard'];
 
 // DIFFICULTY_MODS, AIHouseState imported from ./ai
 
-/** Defensive structure types that ants prioritize attacking */
-const ANT_TARGET_DEFENSE_TYPES = new Set(['HBOX', 'PBOX', 'GUN', 'TSLA', 'SAM', 'AGUN', 'FTUR']);
-
 /** Wall structure types that use 1x1 placement mode */
 const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK', 'WOOD', 'CYCL']);
 const CRUSHABLE_WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'WOOD', 'CYCL']);
@@ -5248,15 +5245,12 @@ export class Game {
     this.technoTargetMaintenance(entity);
 
     // Team mission script execution (rate-limited to every 8 ticks)
-    // Area Guard ants use their own patrol logic, not global hunt AI
     if (entity.mission !== Mission.DIE && entity.mission !== Mission.AREA_GUARD &&
         entity.mission !== Mission.RETREAT) {
       if (this.tick - entity.lastAIScan >= 8) {
         entity.lastAIScan = this.tick;
         if (entity.teamMissions.length > 0) {
           this.updateTeamMission(entity);
-        } else if (entity.isAnt) {
-          this.updateAntAI(entity);
         }
       }
     }
@@ -7823,10 +7817,8 @@ export class Game {
   /** Execute team mission scripts — units follow waypoint patrol routes */
   private updateTeamMission(entity: Entity): void {
     if (entity.teamMissionIndex >= entity.teamMissions.length) {
-      // Script complete — ants fall back to hunt AI, allied units idle
-      if (entity.isAnt) {
-        this.updateAntAI(entity);
-      } else if (entity.mission !== Mission.RETREAT && entity.mission !== Mission.MOVE) {
+      // Script complete — fall back to the class idle mission.
+      if (entity.mission !== Mission.RETREAT && entity.mission !== Mission.MOVE) {
         // Don't override active RETREAT (loaner transports auto-retreat after unload)
         // or MOVE missions — these were intentionally set elsewhere and have a target.
         entity.mission = this.idleMission(entity);
@@ -8466,101 +8458,6 @@ export class Game {
    *  C++ unit.cpp:1855-1871: crusher vehicles destroy crushable walls on cell entry */
   private checkWallCrush(vehicle: Entity): void {
     this._runCombat(ctx => _checkWallCrush(ctx, vehicle));
-  }
-
-  /** Ant AI — hunt nearest visible player unit (fog-aware, LOS-aware) */
-  private updateAntAI(entity: Entity): void {
-    if (entity.mission === Mission.ATTACK && entity.target?.alive) return;
-
-    // Wave coordination: wait for rally delay before engaging
-    if (entity.waveId > 0 && this.tick < entity.waveRallyTick) {
-      // During rally, cluster toward other wave members
-      let waveCX = 0, waveCY = 0, waveCount = 0;
-      for (const other of this.entities) {
-        if (other.alive && other.waveId === entity.waveId) {
-          waveCX += other.pos.x;
-          waveCY += other.pos.y;
-          waveCount++;
-        }
-      }
-      if (waveCount > 1) {
-        waveCX /= waveCount;
-        waveCY /= waveCount;
-        const dist = worldDist(entity.pos, { x: waveCX, y: waveCY });
-        if (dist > 2) {
-          entity.animState = AnimState.WALK;
-          entity.moveToward({ lx: pixelToLepton(waveCX), ly: pixelToLepton(waveCY) }, this.movementSpeed(entity));
-          return;
-        }
-      }
-      entity.animState = AnimState.IDLE;
-      return;
-    }
-
-    // If a wave-mate found a target, share it
-    if (entity.waveId > 0 && !entity.target?.alive) {
-      for (const other of this.entities) {
-        if (other.alive && other.waveId === entity.waveId &&
-            other.id !== entity.id && other.target?.alive) {
-          entity.mission = Mission.HUNT;
-          entity.target = other.target;
-          entity.targetStructure = null;
-          entity.forceFirePos = null;
-          return;
-        }
-      }
-    }
-
-    let nearest: Entity | null = null;
-    let nearestDist = Infinity;
-    const ec = entity.cell;
-
-    for (const other of this.entities) {
-      if (!other.alive || !other.isPlayerUnit) continue;
-      const dist = worldDist(entity.pos, other.pos);
-      // Fog-aware: ants can only see units within their sight range
-      if (dist > entity.stats.sight * 1.5) continue;
-      // LOS check: can't see through walls
-      const oc = other.cell;
-      if (!this.map.hasLineOfSight(ec.cx, ec.cy, oc.cx, oc.cy)) continue;
-      if (dist < nearestDist) {
-        nearestDist = dist;
-        nearest = other;
-      }
-    }
-
-    if (nearest) {
-      entity.mission = Mission.HUNT;
-      entity.target = nearest;
-      entity.targetStructure = null;
-      entity.forceFirePos = null;
-      return;
-    }
-
-    // No units in sight — target nearest player structure (prefer defensive)
-    let bestStruct: MapStructure | null = null;
-    let bestStructDist = Infinity;
-    let bestIsDefense = false;
-    for (const s of this.structures) {
-      if (!s.alive) continue;
-      if (!this.isAllied(s.house, this.playerHouse)) continue;
-      const sPos = { x: s.cx * CELL_SIZE + CELL_SIZE, y: s.cy * CELL_SIZE + CELL_SIZE };
-      const dist = worldDist(entity.pos, sPos);
-      if (dist > entity.stats.sight * 2) continue;
-      const isDef = ANT_TARGET_DEFENSE_TYPES.has(s.type);
-      // Prefer defensive structures over other buildings
-      if (isDef && !bestIsDefense) {
-        bestStruct = s; bestStructDist = dist; bestIsDefense = true;
-      } else if (isDef === bestIsDefense && dist < bestStructDist) {
-        bestStruct = s; bestStructDist = dist; bestIsDefense = isDef;
-      }
-    }
-    if (bestStruct) {
-      entity.mission = Mission.ATTACK;
-      entity.target = null;
-      entity.targetStructure = bestStruct;
-      entity.forceFirePos = null;
-    }
   }
 
   /** C++ UnitClass::Scatter(0, true) — no-threat forced scatter.
