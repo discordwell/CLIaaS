@@ -3637,7 +3637,6 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
       : skipLogicHintRanges.find(range =>
           proj.logicIndexHint! >= range.after && proj.logicIndexHint! <= range.through);
     if (!spawnedThisPass.has(proj) &&
-        proj.createdLogicTick !== ctx.tick &&
         proj.logicIndexHint !== undefined &&
         skipRange !== undefined) {
       projectileTrace({
