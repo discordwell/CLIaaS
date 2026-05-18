@@ -1120,6 +1120,10 @@ export class Entity {
    *  FrameTimer tick after that frame, not again at the end of the same object
    *  logic pass. */
   missionTimerSetTick = -1;
+  /** Last tick weapon cooldowns were manually synced to a C++ FrameTimer value. */
+  cooldownFrameSyncedTick = -1;
+  /** Logic hint of the object slot whose deletion resubmitted this object. */
+  resubmittedAfterLogicHint = -1;
   /** C++ Logic vector index at submit time for runtime-created techno objects.
    *  Used to keep bullets/anims and later-spawned infantry in the same relative
    *  order when TS has to batch parts of the Logic array. */

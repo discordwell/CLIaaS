@@ -3127,6 +3127,7 @@ export class Game {
             ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
           }
           logicIdx = Math.max(logicIdx + 1, effectiveLogicIdx + 1);
+          this.prepareSameTickUnlimboForLogic(entity);
           this._processGroundEntity(entity);
           processed = true;
         }
@@ -3409,19 +3410,44 @@ export class Game {
 
     // C++ logic.cpp:285 re-reads Logic.Count() while iterating. Projectile
     // damage can submit new infantry (e.g. vehicle crew from UnitClass death),
-    // but same-tick-created invisible bullets occupy earlier Logic slots than
-    // the later-submitted infantry. TS batches projectile work after entity AI,
-    // so catch up projectile-spawned ground entities only after the invisible
-    // bullet flush has run.
-    for (let i = preProjectileEntityCount; i < this.entities.length; i++) {
-      const entity = this.entities[i];
-      if (!entity || !entity.alive || entity.isAirUnit) continue;
+    // and BulletClass::~BulletClass can resubmit an existing dog rider at the
+    // end of Logic. TS batches this final projectile flush after entity AI, so
+    // catch up newly appended entities, plus resubmitted dog riders only when
+    // the post-deletion cursor would still reach their new C++ Logic slot.
+    const postProjectileCandidates = this.entities
+      .map((entity, index) => ({ entity, index }))
+      .filter(({ entity, index }) => {
+        if (
+          !entity ||
+          !entity.alive ||
+          entity.isAirUnit ||
+          entity.inLimbo ||
+          !entity.occupiesCppLogic() ||
+          entity.lastLogicProcessedTick === this.tick
+        ) {
+          return false;
+        }
+
+        const effectiveLogicIdx = entity.logicIndexHint ?? index;
+        if (entity.unlimboTick === this.tick && entity.resubmittedAfterLogicHint >= 0) {
+          return effectiveLogicIdx >= entity.resubmittedAfterLogicHint;
+        }
+        return index >= preProjectileEntityCount;
+      })
+      .sort((a, b) =>
+        (a.entity.logicIndexHint ?? a.index) - (b.entity.logicIndexHint ?? b.index));
+    for (const { entity, index } of postProjectileCandidates) {
+      if (entity.lastLogicProcessedTick === this.tick) continue;
+      const effectiveLogicIdx = entity.logicIndexHint ?? index;
+      if (entity.missionTimerSetTick === this.tick && entity.missionTimer <= 0) {
+        this.prepareSameTickUnlimboForLogic(entity);
+      }
       if (ScenarioRandom._tagLogging) {
         ScenarioRandom._sourceTag = entity.stats.isInfantry
-          ? 10000 + i
+          ? 10000 + effectiveLogicIdx
           : entity.isNavalUnit
-            ? 14000 + i
-            : 11000 + i;
+            ? 14000 + effectiveLogicIdx
+            : 11000 + effectiveLogicIdx;
       }
       this._processGroundEntity(entity);
     }
@@ -5785,6 +5811,21 @@ export class Game {
     }
   }
 
+  private prepareSameTickUnlimboForLogic(entity: Entity): void {
+    if (
+      entity.unlimboTick === this.tick &&
+      entity.resubmittedAfterLogicHint >= 0 &&
+      entity.missionTimerSetTick === this.tick &&
+      entity.missionTimer <= 0
+    ) {
+      // This resubmitted object is about to run MissionClass::AI in the same
+      // C++ Logic pass that unlimboed it. Let the fresh mission handler timer
+      // age at the end of this object AI; keep the shield for preserved
+      // non-zero timers that carried through dog-bullet limbo.
+      entity.missionTimerSetTick = -1;
+    }
+  }
+
   /** C++ CDTimerClass<FrameTimerClass> timers tick when Frame advances after
    *  object AI, not before mission/firing logic. Keep this scoped to core
    *  MissionClass/TechnoClass timers; other bespoke counters retain their
@@ -5792,8 +5833,8 @@ export class Game {
   private decrementEntityCdTimersEndOfLogic(entity: Entity): void {
     if (entity.idleAnimTimer > 0) entity.idleAnimTimer--;
     if (entity.missionTimer > 0 && entity.missionTimerSetTick !== this.tick) entity.missionTimer--;
-    if (entity.attackCooldown > 0) entity.attackCooldown--;
-    if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
+    if (entity.attackCooldown > 0 && entity.cooldownFrameSyncedTick !== this.tick) entity.attackCooldown--;
+    if (entity.attackCooldown2 > 0 && entity.cooldownFrameSyncedTick !== this.tick) entity.attackCooldown2--;
     if (entity.baseAttackTimer > 0) entity.baseAttackTimer--;
   }
 

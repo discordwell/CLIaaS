@@ -3999,6 +3999,7 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
               dog.missionTimer = Math.max(0, dog.missionTimer - elapsed);
               dog.attackCooldown = Math.max(0, dog.attackCooldown - elapsed);
               dog.attackCooldown2 = Math.max(0, dog.attackCooldown2 - elapsed);
+              dog.cooldownFrameSyncedTick = ctx.tick;
               dog.dogRiderLimboStartTick = -1;
             }
             dog.leptonX = spot.lx;
@@ -4014,6 +4015,7 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
             dog.firingAnimTicks = 0;
             dogUnlimboEnterIdleMode(ctx, dog);
             dog.missionTimerSetTick = ctx.tick;
+            dog.resubmittedAfterLogicHint = proj.logicIndexHint ?? -1;
             // ObjectClass::Unlimbo submits the dog back into Logic at the
             // current end rather than restoring its original Infantry slot.
             ctx.resubmitEntityToLogicEnd?.(dog);
