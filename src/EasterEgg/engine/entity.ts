@@ -442,33 +442,45 @@ export class Entity {
    *  stay stuck at `doing === 'walk'` and `Random_Animate` is permanently gated
    *  off (see SCG07EA tick 17 missing-3-RA divergence).
    */
-  doingAI(): void {
+  private noteDoingOverlapDown(previous: string, tick: number): void {
+    if (tick >= 0 && this.doing !== previous) {
+      this.lastOverlapDownTick = tick;
+    }
+  }
+
+  doingAI(tick = -1): void {
     if (!this.stats.isInfantry) return;
     if (this.doing === 'lie_down' && this.doingStage >= this.infantryLieDownDoingCount()) {
       // Firing_AI can latch IsFiring while Do_Action(DO_FIRE_*) is blocked by
       // a non-interruptible animation. If that animation finishes before the
       // launch frame, C++ starts a fresh fire Doing on a later tick rather than
       // reading the reset prone/ready stage forever.
+      const previous = this.doing;
       this.clearFirePrepLatchedToBlockedDoing();
       this.doing = 'prone';
       this.doingStage = 0;
       this.doingRate = 0;
       this.doingRateTimer = 0;
+      this.noteDoingOverlapDown(previous, tick);
       return;
     }
     if (this.doing === 'get_up' && this.doingStage >= this.infantryGetUpDoingCount()) {
+      const previous = this.doing;
       this.clearFirePrepLatchedToBlockedDoing();
       this.doing = 'stand_ready';
       this.doingStage = 0;
       this.doingRate = 0;
       this.doingRateTimer = 0;
+      this.noteDoingOverlapDown(previous, tick);
       return;
     }
     if (this.doing === 'dog_maul' && this.doingStage >= this.infantryDogMaulDoingCount()) {
+      const previous = this.doing;
       this.doing = 'stand_ready';
       this.doingStage = 0;
       this.doingRate = 0;
       this.doingRateTimer = 0;
+      this.noteDoingOverlapDown(previous, tick);
       return;
     }
     // C++ infantry.cpp:3685: fires when Doing==DO_NOTHING OR animation completed.
@@ -499,6 +511,7 @@ export class Entity {
       (RANDOM_ANIMATE_CPP_FAITHFUL && this.doing === 'walk') ||
       (this.doing === 'gesture' && this.nonInterruptAnimTicks <= 0);
     if (canTransition) {
+      const previous = this.doing;
       if (this.doing === 'gesture') {
         this.clearFirePrepLatchedToBlockedDoing();
       }
@@ -513,6 +526,7 @@ export class Entity {
         this.doingRate = 0;
         this.doingRateTimer = 0;
       }
+      this.noteDoingOverlapDown(previous, tick);
     }
   }
 
@@ -538,22 +552,26 @@ export class Entity {
   doStopDriverAction(tick: number): void {
     if (!this.stats.isInfantry) return;
     if (this.doing !== 'nothing' && !this.isDoingInterruptible()) return;
+    const previous = this.doing;
     this.doing = this.type === UnitType.I_DOG || !this.isProne ? 'stand_ready' : 'prone';
     this.doingStage = 0;
     this.doingRate = 0;
     this.doingRateTimer = 0;
     this.doingSetTick = tick;
+    this.noteDoingOverlapDown(previous, tick);
   }
 
   /** C++ InfantryClass::Start_Driver -> Do_Action(DO_WALK). */
   doWalkAction(tick: number): void {
     if (!this.stats.isInfantry) return;
     if (this.doing !== 'nothing' && !this.isDoingInterruptible()) return;
+    const previous = this.doing;
     this.doing = 'walk';
     this.doingStage = 0;
     this.doingRate = 2;
     this.doingRateTimer = 2;
     this.doingSetTick = tick;
+    this.noteDoingOverlapDown(previous, tick);
   }
 
   isDogMaulMovementBlocking(): boolean {
@@ -573,6 +591,7 @@ export class Entity {
 
   startGestureDoing(tick: number, gestureDoInfo?: { frame: number; count: number; jump: number } | null): void {
     if (!this.stats.isInfantry) return;
+    const previous = this.doing;
     this.gestureDoInfo = gestureDoInfo ?? this.gestureDoInfo;
     this.nonInterruptAnimTicks = this.infantryGestureDurationTicks();
     this.nonInterruptAnimSetTick = tick;
@@ -581,6 +600,20 @@ export class Entity {
     this.doingRate = 2;
     this.doingRateTimer = 2;
     this.doingSetTick = tick;
+    this.noteDoingOverlapDown(previous, tick);
+  }
+
+  /** C++ InfantryClass::Do_Action(DO_IDLE1/DO_IDLE2). */
+  startIdleAnimDoing(tick: number): void {
+    if (!this.stats.isInfantry) return;
+    if (this.doing !== 'nothing' && !this.isDoingInterruptible()) return;
+    const previous = this.doing;
+    this.doing = 'idle_anim';
+    this.doingStage = 0;
+    this.doingRate = 2;
+    this.doingRateTimer = 2;
+    this.doingSetTick = tick;
+    this.noteDoingOverlapDown(previous, tick);
   }
 
   /** C++ infantry.cpp:878-889 tether cut.
@@ -597,7 +630,7 @@ export class Entity {
       // C++ InfantryClass::Do_Action special-case: spy gesture/salute requests
       // remap to DO_IDLE1/2 and consume Random_Pick(0,1).
       ScenarioRandom.nextInRange(0, 1);
-      this.doing = 'idle_anim';
+      this.startIdleAnimDoing(tick);
       return;
     }
 
@@ -695,17 +728,20 @@ export class Entity {
     if (this.infantryFireDoingCount() <= 0) return false;
     if (this.doing !== 'nothing' && !this.isDoingInterruptible()) return false;
     if (this.doing === 'fire') return false;
+    const previous = this.doing;
     this.doing = 'fire';
     this.doingStage = 0;
     this.doingRate = 1;
     this.doingRateTimer = 1;
     this.doingSetTick = tick;
+    this.noteDoingOverlapDown(previous, tick);
     return true;
   }
 
   /** Start C++ DO_DOG_MAUL (MasterDoControls rate=2, DOG count=12). */
   startDogMaulDoing(tick: number): void {
     if (!this.stats.isInfantry || this.type !== UnitType.I_DOG) return;
+    const previous = this.doing;
     this.doing = 'dog_maul';
     this.doingStage = 0;
     this.doingRate = 2;
@@ -713,28 +749,33 @@ export class Entity {
     this.doingSetTick = tick;
     this.animState = AnimState.ATTACK;
     this.animFrame = 0;
+    this.noteDoingOverlapDown(previous, tick);
   }
 
   /** Start C++ DO_LIE_DOWN (MasterDoControls rate=2, E1 DoControls count=2). */
   startLieDownDoing(tick: number): void {
     if (!this.stats.isInfantry) return;
     if (this.doing !== 'nothing' && !this.isDoingInterruptible()) return;
+    const previous = this.doing;
     this.doing = 'lie_down';
     this.doingStage = 0;
     this.doingRate = 2;
     this.doingRateTimer = 2;
     this.doingSetTick = tick;
+    this.noteDoingOverlapDown(previous, tick);
   }
 
   /** Start C++ DO_GET_UP (MasterDoControls rate=3, E1 DoControls count=2). */
   startGetUpDoing(tick: number): void {
     if (!this.stats.isInfantry) return;
     if (this.doing !== 'nothing' && !this.isDoingInterruptible()) return;
+    const previous = this.doing;
     this.doing = 'get_up';
     this.doingStage = 0;
     this.doingRate = 3;
     this.doingRateTimer = 3;
     this.doingSetTick = tick;
+    this.noteDoingOverlapDown(previous, tick);
   }
 
   /** C++ InfantryClass::Is_Ready_To_Random_Animate — checks all gates.
@@ -1082,6 +1123,8 @@ export class Entity {
    *  MapClass::Place_Down also marks overlap cells, and only that mark-down event
    *  can reveal infantry through an already mapped overlap footprint. */
   lastCellOccupierDownTick = -1;
+  /** Last tick an infantry Do_Action-equivalent marked its overlap footprint down. */
+  lastOverlapDownTick = -1;
   /** C++ building.cpp:2438-2455 — HPAD auto-spawned helicopter RNG parity.
    *  In C++, HPAD helicopters enter the Logic array right after their HPAD building
    *  and are processed interleaved with buildings, NOT in the aircraft pass.
@@ -1215,6 +1258,8 @@ export class Entity {
    *  Height > 0 for non-aircraft. */
   isFalling = false;
   fallRiser = 0;
+  /** Logic tick when ObjectClass::AI finished a falling/paradrop descent. */
+  fallLandedTick = -1;
   /** C++ ObjectClass::Paradrop attaches an AnimClass parachute, so falling
    *  uses the IsAnimAttached branch: Riser -= 1, clamped to -3. */
   fallHasAttachedAnim = false;

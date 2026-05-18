@@ -617,14 +617,10 @@ describe('C++ foot.cpp:1128: human units only retarget if attacker in range', ()
 });
 
 // ---------------------------------------------------------------------------
-// Test: Team mission gate (TS has this, C++ uses IsSuicide + separate team logic)
+// Test: legacy per-entity mission scripts do not suppress C++ retaliation
 // ---------------------------------------------------------------------------
-describe('TS team mission gate vs C++ team logic', () => {
-  // TS combat.ts:558-559: if (victim.teamMissions.length > 0 && mission !== HUNT) return
-  // C++ uses Is_Allowed_To_Retaliate (includes suicide check) plus separate team logic
-  // The TS check is more aggressive — blocks ALL team members except HUNT
-
-  it('TS blocks retaliation for entities with team missions (except HUNT)', () => {
+describe('legacy teamMissions vs C++ team logic', () => {
+  it('retaliates for entities with legacy teamMissions when MissionControl allows it', () => {
     const ctx = makeMockCtx();
     const tank = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
     tank.mission = Mission.ATTACK;
@@ -633,11 +629,10 @@ describe('TS team mission gate vs C++ team logic', () => {
 
     triggerRetaliation(ctx, tank, enemy);
 
-    // TS blocks because teamMissions.length > 0 && mission !== HUNT
-    expect(tank.target).toBeNull();
+    expect(tank.target).toBe(enemy);
   });
 
-  it('TS allows retaliation for HUNT mission even with team missions', () => {
+  it('blocks HUNT retaliation because rules.ini Hunt.Retaliate=no', () => {
     const ctx = makeMockCtx();
     const tank = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
     tank.mission = Mission.HUNT;
@@ -646,12 +641,7 @@ describe('TS team mission gate vs C++ team logic', () => {
 
     triggerRetaliation(ctx, tank, enemy);
 
-    // TS: allows because HUNT exception
-    // C++ HUNT has Retaliate=no in rules.ini! So C++ would actually BLOCK retaliation here
-    // This is an interesting double mismatch
-    if (tank.target === enemy) {
-      console.warn('MISMATCH: TS allows HUNT retaliation; C++ Hunt.Retaliate=no blocks it');
-    }
+    expect(tank.target).toBeNull();
   });
 });
 

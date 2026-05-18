@@ -15,6 +15,7 @@ export interface TsAgentAdapterConfig {
 
 export interface TsLoadScenarioOptions {
   seed?: number;
+  preserveSourceFog?: boolean;
 }
 
 declare global {
@@ -76,6 +77,9 @@ export class TsAgentAdapter {
     url.searchParams.set('difficulty', difficulty);
     if (options.seed != null) {
       url.searchParams.set('seed', String(options.seed >>> 0));
+    }
+    if (options.preserveSourceFog === true) {
+      url.searchParams.set('fog', 'source');
     }
 
     await this.page!.goto(url.toString(), { waitUntil: 'load', timeout: 120_000 });

@@ -10,6 +10,7 @@ import { test } from '@playwright/test';
 
 const BASE_URL = process.env.BASE_URL ?? 'https://cliaas.com';
 const TS_BASE_URL = process.env.TS_BASE_URL ?? BASE_URL;
+const TS_FOG_MODE = process.env.TS_FOG_MODE ?? 'source';
 const ALL = ['SCG01EA','SCG03EA','SCG04EA','SCG06EA','SCG07EA','SCG11EA','SCG13EA'];
 const scenarios = process.env.SCENARIOS?.split(',') ?? ALL;
 const maxTicks = Number(process.env.MAX ?? 500);
@@ -71,6 +72,7 @@ function tsUrl(baseUrl: string, scenario: string): string {
   url.searchParams.set('anttest', 'agent');
   url.searchParams.set('scenario', scenario);
   url.searchParams.set('difficulty', 'normal');
+  if (TS_FOG_MODE) url.searchParams.set('fog', TS_FOG_MODE);
   return addHarnessNoise(url, scenario, 'ts');
 }
 

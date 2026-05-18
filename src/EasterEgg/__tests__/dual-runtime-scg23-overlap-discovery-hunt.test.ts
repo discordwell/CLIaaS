@@ -118,6 +118,6 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCG23 overlap discovery bef
       expect(ts.scanner.targetLY).toBe(cpp.scanner.targetLY);
       expect(ts.scanner.navLX).toBe(cpp.scanner.navLX);
       expect(ts.scanner.navLY).toBe(cpp.scanner.navLY);
-    }, { wasmSeed: 0 });
+    }, { wasmSeed: 0, preserveSourceFog: true });
   }, 180_000);
 });

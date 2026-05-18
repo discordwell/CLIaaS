@@ -420,16 +420,16 @@ describe('retaliation runs from every damage path via damageEntity', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Team mission gate (TS-specific — scripted teams aren't interrupted)
+// Legacy per-entity mission scripts are not C++ TeamClass pointers.
 // ---------------------------------------------------------------------------
-describe('scripted team mission gate (TS addition)', () => {
-  it('entity with team missions (non-HUNT) does NOT retaliate — preserves script', () => {
+describe('legacy teamMissions retaliation', () => {
+  it('entity with legacy teamMissions still retaliates when MissionControl allows it', () => {
     const ctx = makeMockCtx();
     const tank = makeEntity(UnitType.V_3TNK, House.USSR, 100, 100);
     tank.mission = Mission.ATTACK;
     tank.teamMissions = [{ mission: 0, data: 0 }];
     const enemy = makeEntity(UnitType.V_2TNK, House.Spain, 100 + CELL_SIZE, 100);
     triggerRetaliation(ctx, tank, enemy);
-    expect(tank.target).toBeNull();
+    expect(tank.target).toBe(enemy);
   });
 });

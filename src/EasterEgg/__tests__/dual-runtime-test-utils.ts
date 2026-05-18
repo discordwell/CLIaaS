@@ -56,6 +56,7 @@ export interface DualStepResult {
 
 export interface DualScenarioOptions {
   wasmSeed?: number;
+  preserveSourceFog?: boolean;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -223,7 +224,10 @@ export async function withDualScenario<T>(
 
   await ts.connect();
   try {
-    const tsState = await ts.loadScenario(scenario, 'normal', { seed: wasmSeed });
+    const tsState = await ts.loadScenario(scenario, 'normal', {
+      seed: wasmSeed,
+      preserveSourceFog: options.preserveSourceFog,
+    });
     await wasm.connect();
     try {
       const wasmState = await wasm.observe();

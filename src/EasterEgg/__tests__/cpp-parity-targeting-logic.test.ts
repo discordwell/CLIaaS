@@ -971,19 +971,17 @@ describe('retaliation targeting gates (C++ techno.cpp:2735-2780)', () => {
     } as any;
   }
 
-  it('team mission units do not retaliate (except HUNT)', () => {
+  it('legacy team mission units still retaliate when MissionControl allows it', () => {
     const ctx = mockCombatCtx();
     const victim = makeEntity(UnitType.I_E1, House.Greece, 100, 100);
-    const attacker = makeEntity(UnitType.I_E1, House.USSR, 200, 200);
+    const attacker = makeEntity(UnitType.I_E1, House.USSR, 100 + CELL_SIZE, 100);
     victim.mission = Mission.GUARD;
     victim.target = null;
-    // Simulate being in a team mission
     victim.teamMissions = [{ mission: Mission.MOVE, waypoint: { x: 0, y: 0 } }];
 
     triggerRetaliation(ctx, victim, attacker);
 
-    // Team mission units don't break from their assignment
-    expect(victim.target).toBeNull();
+    expect(victim.target).toBe(attacker);
   });
 
   it('units in HUNT do NOT retaliate (C++ rules.ini Hunt.Retaliate=no)', () => {

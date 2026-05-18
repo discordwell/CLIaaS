@@ -5074,6 +5074,7 @@ export class Game {
       entity.flightAltitude = 0;
       entity.isFalling = false;
       entity.fallRiser = 0;
+      entity.fallLandedTick = this.tick;
       shortenFallingParachuteAnim(entity);
 
       if (entity.stats.isInfantry && FOOT_PER_CELL_ENABLED) {
@@ -5102,6 +5103,7 @@ export class Game {
           }
         );
         if (this.triggerMineAtCell(entity) && !entity.alive) return true;
+        this.runMobileLookForPlayer(entity);
         if (!this.springFootCellTriggers(entity)) return true;
       }
       return false;
@@ -5294,6 +5296,16 @@ export class Game {
     // animation cannot consume a tick in the same frame Do_Action was called.
     if (entity.nonInterruptAnimTicks > 0 && entity.nonInterruptAnimSetTick !== this.tick) {
       entity.nonInterruptAnimTicks--;
+    }
+    if (entity.stats.isInfantry &&
+        entity.fallLandedTick === this.tick &&
+        entity.doing === 'gesture' &&
+        entity.nonInterruptAnimTicks <= 0) {
+      // C++ ObjectClass::AI can land a paradropped infantry before the same
+      // tick's mission logic. If a short team-start gesture finished during
+      // the descent, InfantryClass::Mission_Guard sees the unit as idle on
+      // that landing tick and can run Random_Animate.
+      entity.doingAI(this.tick);
     }
 
     // C++ UnitClass::AI (unit.cpp:404) / VesselClass::AI (vessel.cpp:592) — pre-Commence
@@ -5565,7 +5577,7 @@ export class Game {
       this.runUnitReloadAI(entity);
 
       // C++ Doing_AI + firing-anim countdown — unchanged from legacy flow.
-      entity.doingAI();
+      entity.doingAI(this.tick);
       if (entity.isFiringAnim) {
         if (entity.firingAnimTicks > 0) entity.firingAnimTicks--;
         if (entity.firingAnimTicks <= 0) entity.isFiringAnim = false;
@@ -5625,7 +5637,7 @@ export class Game {
 
     // C++ InfantryClass::Doing_AI — transition Doing state after mission processing.
     // Called once per tick. Transitions DO_NOTHING → DO_STAND_READY when idle.
-    entity.doingAI();
+    entity.doingAI(this.tick);
     // C++ infantry.cpp:1190-1195 + 3657-3661: IsFiring is cleared when fire animation
     // frame sequence completes. firingAnimTicks counts down the animation duration
     // (~8 ticks for most infantry fire animations).
@@ -5715,10 +5727,18 @@ export class Game {
     entity.attackCooldownAtLogicStart = entity.attackCooldown;
     entity.attackCooldown2AtLogicStart = entity.attackCooldown2;
 
+    // C++ still advances the infantry StageClass/Doing timers while mission
+    // dispatch is blocked by Height > 0. This matters for short DO_GESTURE
+    // sequences started by a team while a paradropped infantry member is still
+    // airborne: the gesture can finish on the landing tick before Guard runs.
+    entity.advanceDoingStage(this.tick);
+    if (entity.nonInterruptAnimTicks > 0 && entity.nonInterruptAnimSetTick !== this.tick) {
+      entity.nonInterruptAnimTicks--;
+    }
     this.clearCompletedInfantryFiringState(entity);
     this.runInfantryFearAI(entity, entity.isDriving);
     this._runMissionAI(ctx => _runFiringAI(ctx, entity));
-    entity.doingAI();
+    entity.doingAI(this.tick);
     if (entity.isFiringAnim) {
       if (entity.firingAnimTicks > 0) entity.firingAnimTicks--;
       if (entity.firingAnimTicks <= 0) entity.isFiringAnim = false;
@@ -6286,8 +6306,9 @@ export class Game {
                       rescueMission: Mission.RESCUE,
 	                    }
 		                  );
-			                  if (this.triggerMineAtCell(entity) && !entity.alive) return;
-			                  if (!this.springFootCellTriggers(entity)) return;
+				                  if (this.triggerMineAtCell(entity) && !entity.alive) return;
+				                  this.runMobileLookForPlayer(entity);
+				                  if (!this.springFootCellTriggers(entity)) return;
 				                }
 	                this.stopInfantryDriver(entity);
                   this.markEntityCellOccupierDown(entity);
@@ -6727,8 +6748,9 @@ export class Game {
               rescueMission: Mission.RESCUE,
             }
           );
-	          if (this.triggerMineAtCell(entity) && !entity.alive) return;
-	          if (!this.springFootCellTriggers(entity)) return;
+		          if (this.triggerMineAtCell(entity) && !entity.alive) return;
+		          this.runMobileLookForPlayer(entity);
+		          if (!this.springFootCellTriggers(entity)) return;
 		        }
 		        this.stopInfantryDriver(entity);
         this.markEntityCellOccupierDown(entity);
@@ -8635,9 +8657,11 @@ export class Game {
 	      if (object.isAirUnit) continue;
 	      if (object.cell.cx !== cx || object.cell.cy !== cy) continue;
 
-	      const houseIQ = this.houseIQs.get(object.house)
-	        ?? this.aiStates.get(object.house)?.iq
-	        ?? (object.house === this.playerHouse ? 0 : IQ_SCATTER);
+      // C++ HouseClass constructor defaults IQ to 0; absent scenario IQ= does
+      // not imply Rule.IQScatter for allied or non-player houses.
+      const houseIQ = this.houseIQs.get(object.house)
+        ?? this.aiStates.get(object.house)?.iq
+        ?? 0;
 	      if (!nokidding && houseIQ < IQ_SCATTER) continue;
 
 	      if (object.stats.isInfantry) {
@@ -10669,6 +10693,7 @@ export class Game {
               }
             );
             if (this.triggerMineAtCell(entity) && !entity.alive) return;
+            this.runMobileLookForPlayer(entity);
             if (!this.springFootCellTriggers(entity)) return;
 	          }
 	          this.stopInfantryDriver(entity);
@@ -10755,6 +10780,7 @@ export class Game {
               }
             );
 	            if (this.triggerMineAtCell(entity) && !entity.alive) return;
+	            this.runMobileLookForPlayer(entity);
 	            if (!this.springFootCellTriggers(entity)) return;
 		          }
 		          this.stopInfantryDriver(entity);
@@ -11061,7 +11087,9 @@ export class Game {
         const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
         const inRangeNow = this.footPerCellTargetInRange(entity);
         this.cutTransportTether(entity);
+        if (entity.stats.isVessel) this.runMobileLookForPlayer(entity);
         if (this.edgeOfWorldAI(entity)) return true;
+        if (!entity.stats.isVessel) this.runMobileLookForPlayer(entity);
         const runClassPerCellProcess = entity.stats.isVessel ? drivePerCellProcess : unitPerCellProcess;
         const r = runClassPerCellProcess(entity, PCPType.PCP_END, {
           skipCommence,
@@ -11394,6 +11422,7 @@ export class Game {
               }
             );
             if (this.triggerMineAtCell(entity) && !entity.alive) return;
+            this.runMobileLookForPlayer(entity);
             if (!this.springFootCellTriggers(entity)) return;
           }
         }
@@ -12917,14 +12946,16 @@ export class Game {
                     // so the key identifies the boundary being left).
                     const boundaryKey = `${entity.trackIndex}-${entity.pathIndex}`;
                     if (!entity._commenceFiredBoundaries.has(boundaryKey)) {
-	                      // C++ IsDriving=true bracket (drive.cpp:773-775)
-	                      entity.isDriving = true;
-		                      if (this.edgeOfWorldAI(entity)) return false;
-		                      this.cutTransportTether(entity);
-			                      const runClassPerCellProcess = entity.stats.isVessel ? drivePerCellProcess : unitPerCellProcess;
-				                      const r = runClassPerCellProcess(entity, PCPType.PCP_END, {
-				                        rofBias: this.getROFBias(entity.house),
-				                      });
+		                      // C++ IsDriving=true bracket (drive.cpp:773-775)
+		                      entity.isDriving = true;
+			                      if (entity.stats.isVessel) this.runMobileLookForPlayer(entity);
+			                      if (this.edgeOfWorldAI(entity)) return false;
+			                      if (!entity.stats.isVessel) this.runMobileLookForPlayer(entity);
+			                      this.cutTransportTether(entity);
+				                      const runClassPerCellProcess = entity.stats.isVessel ? drivePerCellProcess : unitPerCellProcess;
+					                      const r = runClassPerCellProcess(entity, PCPType.PCP_END, {
+					                        rofBias: this.getROFBias(entity.house),
+					                      });
 			                      const killedByMine = this.triggerMineAtCell(entity) === true && !entity.alive;
 			                      entity.isDriving = false;
 		                      if (killedByMine) return false;
@@ -13361,15 +13392,18 @@ export class Game {
     // C++ CellClass::Occupy_Down / Overlap_Down reveal objects only when they
     // are actually marked down into already mapped terrain. A stationary object
     // sitting beside an explored cell is not re-revealed every frame.
-    const placementEvent =
+    const occupierPlacementEvent =
       entity.lastCellOccupierDownTick === this.tick ||
       entity.unlimboTick === this.tick;
+    const overlapPlacementEvent =
+      occupierPlacementEvent ||
+      entity.lastOverlapDownTick === this.tick;
 
     // C++ TechnoClass::Per_Cell_Process(PCP_END) also calls Revealed(PlayerPtr)
     // when the object's current cell is Map[cell].IsVisible. In TS that live
     // visibility can come from player-controlled/allied sight, but debug
     // fogDisabled reveal-all must not synthesize IsDiscoveredByPlayer.
-    if (placementEvent &&
+    if (occupierPlacementEvent &&
         (this.isCellCurrentlyVisibleForDiscovery(entity.cell.cx, entity.cell.cy) ||
          this.isCellMappedForPlayer(entity.cell.cx, entity.cell.cy))) {
       return true;
@@ -13378,14 +13412,14 @@ export class Game {
     // MapClass::Place_Down marks both occupy and overlap lists. Infantry can
     // therefore be discovered through an already mapped adjacent overlap cell,
     // but only on the frame that MARK_DOWN/MARK_OVERLAP_DOWN actually runs.
-    if (placementEvent && this.infantryOverlapTouchesPlayerMappedCell(entity)) return true;
+    if (overlapPlacementEvent && this.infantryOverlapTouchesPlayerMappedCell(entity)) return true;
 
     // C++ TechnoClass::Per_Cell_Process checks Map[cell].IsVisible, not strict
     // PlayerPtr sight. Player-allied, non-PlayerPtr units can therefore discover
     // themselves when their cell is visible to the player house. This is not a
     // blanket allied-sight reveal for enemies; only the object whose own house is
     // allied to PlayerPtr gets this fallback.
-    if (placementEvent && this.isAllied(entity.house, this.playerHouse)) {
+    if (occupierPlacementEvent && this.isAllied(entity.house, this.playerHouse)) {
       const playerIdx = Game.HOUSE_TO_INDEX[this.playerHouse] ?? -1;
       return playerIdx >= 0 && this.isRevealedToHouse(entity.cell.cx, entity.cell.cy, playerIdx);
     }
@@ -13436,14 +13470,16 @@ export class Game {
       if (entity.house === this.playerHouse) continue;
       if (this.discoveredEntityIds.has(entity.id)) continue; // already discovered
 
-      // C++ parity: use TRUE sight (unit/structure SightRange), not display fog state.
-      // fogDisabled=true artificially paints vis=2; must not trigger Revealed().
+      // C++ parity: TechnoClass::Per_Cell_Process(PCP_END) uses the live
+      // Map[cell].IsVisible flag. In TS that is valid only when source fog is
+      // preserved; fogDisabled=true artificially paints vis=2 and must not
+      // trigger Revealed().
       //
       // Movement also reveals through CellClass::Occupy_Down / Overlap_Down
       // when the object is marked into cells that PlayerPtr already mapped.
       // SCU02EA's Greek E1 at (74,64) is discovered this way: its overlap
       // rectangle touches visible cells before its center cell does.
-      if (!this.isCellTrulySeen(entity.cell.cx, entity.cell.cy) &&
+      if (!this.isCellCurrentlyVisibleForDiscovery(entity.cell.cx, entity.cell.cy) &&
           !this.isMappedPlacementRevealCandidate(entity)) continue;
 
       this.markEntityDiscoveredByPlayer(entity);
@@ -13462,7 +13498,7 @@ export class Game {
       const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
       for (let y = 0; y < sh && !seen; y++) {
         for (let x = 0; x < sw; x++) {
-          if (this.isCellTrulySeen(s.cx + x, s.cy + y)) {
+          if (this.isCellCurrentlyVisibleForDiscovery(s.cx + x, s.cy + y)) {
             seen = true;
             break;
           }
@@ -14967,6 +15003,18 @@ export class Game {
     this.revealAroundCell(cx, cy, radius);
     this.markPlayerMappedSight(cx, cy, radius);
     this.markObjectsRevealedToPlayer(cx, cy, radius);
+  }
+
+  /** C++ mobile TechnoClass::Look() remapped to PlayerPtr for player-allied houses.
+   *  DisplayClass::Map_Cell remaps allied sight to PlayerPtr in normal games, but
+   *  only when that mobile object actually runs a PCP_END Look(), not every tick. */
+  private runMobileLookForPlayer(entity: Entity): void {
+    if (!entity.alive || entity.inLimbo || entity.isAirUnit) return;
+    if (entity.house !== this.playerHouse && !this.isAllied(entity.house, this.playerHouse)) return;
+    const sight = entity.stats.sight;
+    if (!sight || sight > 10) return;
+    this.revealSightFromPlayer(entity.cell.cx, entity.cell.cy, sight);
+    this.markEntityDiscoveredByPlayer(entity);
   }
 
   /** Mirror DisplayClass::Map_Cell's `tech->Revealed(PlayerPtr)` side effect

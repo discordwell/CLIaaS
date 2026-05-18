@@ -1093,15 +1093,14 @@ describe('Retaliation system — triggerRetaliation', () => {
     expect(victim.mission).not.toBe(Mission.ATTACK);
   });
 
-  it('scripted team mission units do not retarget; HUNT mission also blocked', () => {
+  it('legacy team mission units can retarget; HUNT mission is still blocked', () => {
     const victim = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
-    const attacker = makeEntity(UnitType.I_E1, House.Spain, 200, 200);
+    const attacker = makeEntity(UnitType.I_E1, House.Spain, 100 + CELL_SIZE, 100);
     victim.teamMissions = [{ type: 'MOVE', target: { x: 50, y: 50 } }];
     victim.mission = Mission.MOVE;
     const ctx = makeMockCombatContext();
     triggerRetaliation(ctx, victim, attacker);
-    // Should NOT retarget because unit has scripted team missions
-    expect(victim.target).toBeNull();
+    expect(victim.target).toBe(attacker);
 
     // HUNT units also don't retaliate per C++ rules.ini [Hunt] Retaliate=no
     // (techno.cpp:4934 Is_Allowed_To_Retaliate checks MissionControl[HUNT].IsRetaliate).

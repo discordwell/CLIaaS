@@ -2683,9 +2683,6 @@ export function triggerRetaliation(ctx: CombatContext, victim: Entity, attacker:
   // computer-controlled allied house and still auto-retaliates in C++.
   const isVictimHumanHouse = victim.house === ctx.playerHouse;
 
-  // Don't interrupt scripted team missions (except HUNT which already attacks)
-  if (victim.teamMissions.length > 0 && victim.mission !== Mission.HUNT) return;
-
   // C++ unit.cpp:1124-1161: auto-crush retaliation path.
   const houseIQ = ctx.aiIQ?.(victim.house) ?? 3;
   if (isEntitySource(attacker) && shouldCrushIt(victim, attacker, isVictimHumanHouse, houseIQ)) {

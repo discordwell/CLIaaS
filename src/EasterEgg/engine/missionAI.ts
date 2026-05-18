@@ -452,12 +452,12 @@ function runInfantryRandomAnimate(ctx: MissionAIContext, entity: Entity): boolea
       // C++ Do_Action: SPY gestures/salutes remap to DO_IDLE1/2 and consume
       // Random_Pick(0,1) under the caller's saved source tag.
       ScenarioRandom.nextInRange(0, 1);
-      entity.doing = 'idle_anim';
+      entity.startIdleAnimDoing(ctx.tick);
     } else {
       entity.startGestureDoing(ctx.tick);
     }
   } else if (animPick === 5 || animPick === 7 || (animPick === 0 && entity.type === UnitType.I_DOG)) {
-    entity.doing = 'idle_anim';
+    entity.startIdleAnimDoing(ctx.tick);
   }
 
   if (animPick >= 6) {
@@ -3086,7 +3086,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
         // C++ InfantryClass::Do_Action special-case (infantry.cpp:1975):
         // SPY gesture/salute requests become DO_IDLE1 + Random_Pick(0,1).
         ScenarioRandom.nextInRange(0, 1);
-        entity.doing = 'idle_anim';
+        entity.startIdleAnimDoing(ctx.tick);
       } else {
         // C++ MasterDoControls: gestures and salutes (cases 1-4) are NOT interruptible.
         // idata.cpp supplies per-infantry Count (Tanya/dogs/civilians=1,
@@ -3098,7 +3098,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
     } else if (animPick === 5 || animPick === 7 || (animPick === 0 && entity.type === UnitType.I_DOG)) {
       // C++ cases 5/7 and dog case 0 call Do_Action(DO_IDLE*).
       // Cases 8-10 only turn facing; case 8 may additionally scatter below.
-      entity.doing = 'idle_anim';
+      entity.startIdleAnimDoing(ctx.tick);
     }
     randomAnimateCaseScatter(ctx, entity, animPick);
   }
@@ -3276,13 +3276,13 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
         // C++ Do_Action: SPY gestures/salutes are remapped to DO_IDLE1/2,
         // consuming Random_Pick(0,1) under the caller's source tag.
         ScenarioRandom.nextInRange(0, 1);
-        entity.doing = 'idle_anim';
+        entity.startIdleAnimDoing(ctx.tick);
       } else {
         // Phase 7B: gestures/salutes are non-interruptible per C++ MasterDoControls.
         entity.startGestureDoing(ctx.tick);
       }
     } else if (animPick === 5 || animPick === 7 || (animPick === 0 && entity.type === UnitType.I_DOG)) {
-      entity.doing = 'idle_anim';
+      entity.startIdleAnimDoing(ctx.tick);
     }
 
     if (animPick >= 6) {

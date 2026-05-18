@@ -123,6 +123,6 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCG07 mapped-overlap discov
       expect(cppAfter.jeep.targetKind).toBe(-1);
       expect(tsAfter.jeep.targetType).toBeNull();
       expect(tsAfter.rngState >>> 0).toBe(cppAfter.rngState >>> 0);
-    }, { wasmSeed: 0 });
+    }, { wasmSeed: 0, preserveSourceFog: true });
   }, 300_000);
 });

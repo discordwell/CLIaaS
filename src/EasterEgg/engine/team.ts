@@ -540,12 +540,10 @@ export class Team {
     // whole RTTI list and Can_Add can land on any open slot in that list. For
     // units/vessels C++ prefilters by the requested class before Can_Add.
     const canAdd = (e: Entity): boolean => {
-      // C++ paradropped infantry are active/unlimboed while Height > 0, but
-      // TechnoClass::AI returns before MissionClass::AI and the team recruit
-      // pass does not pull those falling objects back into a team. Treat the
-      // falling window as not recruitable so a just-dropped passenger keeps its
-      // queued HUNT order until it lands.
-      if (!e.alive || e.inLimbo || e.isFalling) return false;
+      // C++ _Is_It_Breathing does not reject nonzero Height. Paradropped
+      // infantry are active once unlimboed, so Create Team recruitment can pull
+      // them in while they are still falling.
+      if (!e.alive || e.inLimbo) return false;
       // C++ TeamClass::Can_Add (team.cpp:980): candidates in radio contact
       // are considered busy and cannot be recruited. TS uses `isTethered` for
       // BuildingClass::Exit_Object / transport radio contact until the first
@@ -834,7 +832,7 @@ export class Team {
             // team activation DO_GESTURE1/2 maps spies to DO_IDLE1/2 and
             // consumes Random_Pick(0,1), keeping the animation interruptible.
             ScenarioRandom.nextInRange(0, 1);
-            m.doing = 'idle_anim';
+            m.startIdleAnimDoing(ctx?.tick ?? -1);
             continue;
           }
           // Phase 7B — track Doing state for C++-faithful Commence gate
