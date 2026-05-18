@@ -1511,16 +1511,23 @@ export class Entity {
     return false;
   }
 
+  /** C++ ObjectClass::Height for targeting and Fire_Coord gates. */
+  objectHeightLeptons(): number {
+    if (this.stats.isAircraft) {
+      return this.aircraftHeightLeptons > 0
+        ? this.aircraftHeightLeptons
+        : (this.flightAltitude > 0 ? pixelToLepton(this.flightAltitude) : 0);
+    }
+    if (this.fallHeightLeptons > 0) return this.fallHeightLeptons;
+    return this.flightAltitude > 0 ? pixelToLepton(this.flightAltitude) : 0;
+  }
+
   /** C++ ObjectClass::Target_Coord for this entity.
    *  This differs from Center_Coord while falling/airborne: As_Coord(TARGET)
    *  subtracts object Height, and TechnoClass::Can_Fire/In_Range(TARGET) use
    *  that coordinate rather than the object center. */
   targetCoordLeptons(): LeptonPos {
-    const height = this.stats.isAircraft
-      ? this.aircraftHeightLeptons
-      : (this.fallHeightLeptons > 0
-          ? this.fallHeightLeptons
-          : (this.flightAltitude > 0 ? pixelToLepton(this.flightAltitude) : 0));
+    const height = this.objectHeightLeptons();
     return { lx: this.leptonX, ly: this.leptonY - height };
   }
 
@@ -1576,11 +1583,12 @@ export class Entity {
    *  This mirrors only FIRE_CANT/FIRE_ILLEGAL target gates; range and Arm timers are
    *  handled by the caller's actual fire gate. */
   canWeaponTarget(target: Entity, weapon: WeaponStats): boolean {
+    const targetHeight = target.objectHeightLeptons();
     const targetIsAircraft = !!target.stats.isAircraft;
-    const targetIsAirborne = targetIsAircraft && target.flightAltitude > 0;
+    const targetIsAirborne = targetIsAircraft && targetHeight > 0;
     const targetIsSubmarine = target.type === UnitType.V_SS || target.type === UnitType.V_MSUB;
     const targetIsSea = target.isNavalUnit;
-    const targetIsGrounded = !targetIsAircraft || target.flightAltitude <= 0;
+    const targetIsGrounded = targetHeight <= 0;
 
     if (targetIsAirborne && !weapon.isAntiAir) return false;
     if (weapon.isAntiGround === false && targetIsGrounded && !targetIsSubmarine) return false;

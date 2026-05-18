@@ -219,11 +219,23 @@ describe('C++ Parity — E3 weapon selection: RedEye (AA) vs Dragon (ground)', (
   it('E3 vs ground infantry: selects Dragon (RedEye AG=no cannot fire at ground)', () => {
     const [rocket, infantry] = pairAtDistance(UnitType.I_E3, UnitType.I_E1, 3);
     const selected = rocket.selectWeapon(infantry, getWarheadMultiplier);
-    // C++ techno.cpp:2711-2720: Can_Fire(target, 0) for RedEye returns FIRE_CANT
+    // C++ techno.cpp:2751-2758: Can_Fire(target, 0) for RedEye returns FIRE_CANT
     // because AAMissile IsAntiGround=false and target is on ground (Height==0)
     // → w1 zeroed → returns Dragon (secondary)
     expect(selected).toBe(rocket.weapon2); // Dragon
     expect(selected!.name).toBe('Dragon');
+  });
+
+  it('E3 vs falling infantry: selects RedEye because C++ AG=no checks Height==0', () => {
+    const [rocket, infantry] = pairAtDistance(UnitType.I_E3, UnitType.I_E1, 6);
+    infantry.isFalling = true;
+    infantry.fallHeightLeptons = 73;
+    infantry.flightAltitude = 6;
+
+    const selected = rocket.selectWeapon(infantry, getWarheadMultiplier);
+    expect(rocket.canWeaponTarget(infantry, rocket.weapon!)).toBe(true);
+    expect(selected).toBe(rocket.weapon); // RedEye
+    expect(selected!.name).toBe('RedEye');
   });
 
   it('E3 vs ground vehicle (heavy armor): selects Dragon', () => {
@@ -257,6 +269,7 @@ describe('C++ Parity — E3 weapon selection: RedEye (AA) vs Dragon (ground)', (
     // whenever target Height == 0, including RTTI_AIRCRAFT sitting on a pad.
     const [rocket, heli] = pairAtDistance(UnitType.I_E3, UnitType.V_HELI, 3);
     heli.flightAltitude = 0;
+    heli.aircraftHeightLeptons = 0;
     heli.aircraftState = 'landed';
 
     const selected = rocket.selectWeapon(heli, getWarheadMultiplier);

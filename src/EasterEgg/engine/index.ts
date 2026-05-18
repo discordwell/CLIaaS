@@ -6673,7 +6673,10 @@ export class Game {
       cx: Math.floor(entity.moveTarget.lx / LEPTON_SIZE),
       cy: Math.floor(entity.moveTarget.ly / LEPTON_SIZE),
     };
-    if (cellsInSameMovementZone(this.map, entity.cell, destCell, entity.isNavalUnit, this.structures)) {
+    const movementZone = this.basicPathNearbyZoneCells(entity);
+    if (destCell.cx >= 0 && destCell.cx < MAP_CELLS &&
+        destCell.cy >= 0 && destCell.cy < MAP_CELLS &&
+        movementZone[destCell.cy * MAP_CELLS + destCell.cx] !== 0) {
       return false;
     }
 
@@ -9053,6 +9056,17 @@ export class Game {
       if (mine.type === 'MINP' && this.isAllied(entity.house, mine.house)) {
         return MoveResult.IMPASSABLE;
       }
+    }
+
+    const wallType = this.map.getWallType(cx, cy);
+    if (wallType) {
+      // C++ InfantryClass::Can_Enter_Cell returns MOVE_DESTROYABLE for a
+      // non-holed wall when the infantry primary weapon is a wall destroyer.
+      // Basic_Path can then route to the wall destination at the destroyable
+      // threshold instead of treating the NavCom as unreachable.
+      return this.usesDestroyerMovementZone(entity)
+        ? MoveResult.DESTROYABLE
+        : MoveResult.IMPASSABLE;
     }
 
     let mapMove = this.map.canEnterCell(
@@ -12226,6 +12240,26 @@ export class Game {
 	
 	    return false;
 	  }
+
+	  private approachTargetClearToMove(
+	    entity: Entity,
+	    cx: number,
+	    cy: number,
+	    movementZone?: Uint8Array,
+	  ): boolean {
+	    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
+	    const cellIdx = cy * MAP_CELLS + cx;
+	    if (movementZone && movementZone[cellIdx] === 0) return false;
+
+	    // C++ CellClass::Is_Clear_To_Move rejects a BuildingClass occupier while
+	    // still allowing movement-zone wall handling below. TS stores structure
+	    // footprints separately from ordinary unit occupancy, so check them here.
+	    if (this.structures.some(s => this.structureOccupiesCell(s, cx, cy))) return false;
+
+	    if (this.map.occupancy[cellIdx] !== 0) return false;
+
+	    return this.nearbyLocationClearToMove(entity, cx, cy, true);
+	  }
 	
 	  private approachTarget(entity: Entity): void {
 	    if (!this.shouldMissionAttackApproach(entity)) return;
@@ -12237,8 +12271,9 @@ export class Game {
 	    if (entity.target?.alive) {
 	      const weapon = entity.weapon;
 	      if (weapon) weaponRangeLeptons = weapon.range * LEPTON_SIZE;
-	      targetLX = entity.target.leptonX;
-	      targetLY = entity.target.leptonY;
+	      const targetCoord = entity.target.targetCoordLeptons();
+	      targetLX = targetCoord.lx;
+	      targetLY = targetCoord.ly;
 	    } else if (entity.targetStructure?.alive) {
 	      const structure = entity.targetStructure as MapStructure;
 	      const structureWeapon = this.selectedWeaponForStructureTarget(entity, structure);
@@ -12271,6 +12306,9 @@ export class Game {
     let bestCX = 0, bestCY = 0;
     let fallbackCX = Math.floor(targetLX / 256);
     let fallbackCY = Math.floor(targetLY / 256);
+    const approachZone = entity.stats.speedClass === SpeedClass.WINGED
+      ? undefined
+      : this.basicPathNearbyZoneCells(entity);
 
     // C++ sweeps from maxrange inward in steps of 0x0100 (256 leptons = 1 cell)
     for (let range = maxrange; range > 0x0080; range -= 0x0100) {
@@ -12286,32 +12324,16 @@ export class Game {
           const tryCY = Math.floor(tryLY / 256);
           fallbackCX = tryCX;
           fallbackCY = tryCY;
-          // C++ foot.cpp:992 calls CellClass::Is_Clear_To_Move with the
-          // object's SpeedType. FLOAT vessels must evaluate WATER terrain here;
-          // using land passability makes naval Approach_Target miss valid water
-          // cells and fall back near the target (SCG07EA opening sub chase).
-          //
-          // Is_Clear_To_Move also rejects cells with a BuildingClass occupier.
-          // Keep that in the generic candidate predicate so HUNT/attack approach
-          // cannot assign a NavCom into a live structure footprint.
-          const inRadar = tryCX >= 0 && tryCX < 128 && tryCY >= 0 && tryCY < 128;
-          if (inRadar) {
-            const cellIdx = tryCY * 128 + tryCX;
-            const terrainClear = entity.isNavalUnit
-              ? this.map.isWaterPassable(tryCX, tryCY)
-              : this.map.isTerrainPassable(tryCX, tryCY);
-            const vehicleReservation = this.map.getVehicleTrackReservation(tryCX, tryCY);
-            const structureClear = !this.structures.some(s => this.structureOccupiesCell(s, tryCX, tryCY));
-            if (terrainClear &&
-                structureClear &&
-                !this.map.vehicleOccupancy.has(cellIdx) &&
-                this.map.occupancy[cellIdx] === 0 &&
-                vehicleReservation === 0) {
-              bestCX = tryCX;
-              bestCY = tryCY;
-              found = true;
-              break;
-            }
+          // C++ foot.cpp uses As_Coord(TarCom), then calls
+          // CellClass::Is_Clear_To_Move with the object's SpeedType, current
+          // zone, and MZone. FLOAT vessels evaluate water terrain, and
+          // wall-destroying weapons use MZONE_DESTROYER so wall overlay cells
+          // stay valid approach candidates.
+          if (this.approachTargetClearToMove(entity, tryCX, tryCY, approachZone)) {
+            bestCX = tryCX;
+            bestCY = tryCY;
+            found = true;
+            break;
           }
         }
       }
@@ -12323,7 +12345,13 @@ export class Game {
       // fall back through Map.Nearby_Location(trycell), choosing by Frame % count.
       // Game.update increments TS tick before AI dispatch; C++ Frame still names
       // the frame being processed. Use tick-1 so first-frame AI sees Frame % n == 0.
-      const nearby = nearbyLocation(this.map, { cx: fallbackCX, cy: fallbackCY }, entity.isNavalUnit, Math.max(0, this.tick - 1));
+      const nearby = nearbyLocation(
+        this.map,
+        { cx: fallbackCX, cy: fallbackCY },
+        entity.isNavalUnit,
+        Math.max(0, this.tick - 1),
+        (cx, cy) => this.approachTargetClearToMove(entity, cx, cy, approachZone),
+      );
       bestCX = nearby?.cx ?? fallbackCX;
       bestCY = nearby?.cy ?? fallbackCY;
     }

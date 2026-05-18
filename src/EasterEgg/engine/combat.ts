@@ -3413,7 +3413,9 @@ function advanceProjectileOneTick(ctx: CombatContext, proj: InflightProjectile):
   }
 
   // C++ bullet.cpp:368-397 — homing projectiles update DesiredFacing toward
-  // TarCom on every other frame, then Rotation_Adjust happens before physics.
+  // TarCom on every other global game frame, then Rotation_Adjust happens before
+  // physics. This is keyed to `Frame & 1`, not the projectile's age; otherwise
+  // missiles spawned on the opposite parity turn one frame early.
   // FuseClass::HeadTo is separate and remains the scattered impact coordinate.
   const rot = proj.weapon.projectileROT ?? 0;
   if (rot > 0) {
@@ -3422,7 +3424,7 @@ function advanceProjectileOneTick(ctx: CombatContext, proj: InflightProjectile):
       : (proj.homingTargetLX !== undefined && proj.homingTargetLY !== undefined
         ? { lx: proj.homingTargetLX, ly: proj.homingTargetLY }
         : null);
-    if ((proj.currentFrame & 0x01) && homingTarget) {
+    if (((ctx.tick & 0x01) === 0) && homingTarget) {
       proj.desiredFacing256 = directionToLeptons256(
         proj.logicalLX, proj.logicalLY,
         homingTarget.lx, homingTarget.ly,
