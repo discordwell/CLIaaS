@@ -321,6 +321,120 @@ async function tsPatrolTeamAnt11165(adapter: unknown) {
   });
 }
 
+async function wasmSameHouseTeamTargetFireState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const antRow = (state.logicLayer ?? []).find((row: any[]) => row[0] === 94);
+    const friendlyAntRow = (state.logicLayer ?? []).find((row: any[]) =>
+      row[1] === 'ANT3' && row[2] === 'Germany' && row[3] === 111 && row[4] === 64);
+    const barrelRow = (state.logicLayer ?? []).find((row: any[]) =>
+      row[1] === 'BARL' && row[3] === 112 && row[4] === 64);
+    if (!antRow || !friendlyAntRow || !barrelRow) {
+      throw new Error('C++ SCA04EA same-house target fire probe not found');
+    }
+    const fullAnt = [
+      ...(state.units ?? []),
+      ...(state.enemies ?? []),
+      ...(state.vessels ?? []),
+    ].find((unit: any) => unit.id === antRow[6]);
+    const team = (state.teams ?? []).find((candidate: any) =>
+      candidate.cls === 'ptrl2' &&
+      (candidate.members ?? []).some((member: any) => (member.ids ?? []).includes(antRow[6])));
+    if (!team) throw new Error('C++ SCA04EA ptrl2 team not found for fire probe');
+    const targetCell = team.tgtX || team.tgtY
+      ? { cx: Math.floor(team.tgtX / 256), cy: Math.floor(team.tgtY / 256) }
+      : null;
+    const missionTargetCell = team.mtgtX || team.mtgtY
+      ? { cx: Math.floor(team.mtgtX / 256), cy: Math.floor(team.mtgtY / 256) }
+      : null;
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      attacker: {
+        mission: antRow[7],
+        missionTimer: antRow[8],
+        arm: antRow[23],
+        targetCell: fullAnt?.tlx || fullAnt?.tly
+          ? { cx: Math.floor(fullAnt.tlx / 256), cy: Math.floor(fullAnt.tly / 256) }
+          : null,
+      },
+      friendlyAnt: {
+        mission: friendlyAntRow[7],
+        missionTimer: friendlyAntRow[8],
+        hp: friendlyAntRow[14],
+      },
+      barrel: {
+        hp: barrelRow[14],
+      },
+      team: {
+        currentMission: team.cur,
+        targetCell,
+        missionTargetCell,
+      },
+    };
+  });
+}
+
+async function tsSameHouseTeamTargetFireState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const attacker = game.entities.find((entity: any) => entity.logicIndexHint === 94);
+    const friendlyAnt = game.entities.find((entity: any) =>
+      entity.type === 'ANT3' &&
+      entity.house === 'Germany' &&
+      entity.cell?.cx === 111 &&
+      entity.cell?.cy === 64);
+    const barrel = game.structures.find((structure: any) =>
+      structure.type === 'BARL' &&
+      structure.cx === 112 &&
+      structure.cy === 64);
+    if (!attacker?.teamRef || !friendlyAnt || !barrel) {
+      throw new Error('TS SCA04EA same-house target fire probe not found');
+    }
+    const team = attacker.teamRef;
+    const targetCell = team.targetEntityRef
+      ? { cx: team.targetEntityRef.cell.cx, cy: team.targetEntityRef.cell.cy }
+      : team.targetCell
+        ? { cx: team.targetCell.cx, cy: team.targetCell.cy }
+        : team.target
+          ? { cx: Math.floor(team.target.x / 24), cy: Math.floor(team.target.y / 24) }
+          : null;
+    const missionTargetCell = team.missionTargetEntityRef
+      ? { cx: team.missionTargetEntityRef.cell.cx, cy: team.missionTargetEntityRef.cell.cy }
+      : team.missionTargetCell
+        ? { cx: team.missionTargetCell.cx, cy: team.missionTargetCell.cy }
+        : team.missionTarget
+          ? { cx: Math.floor(team.missionTarget.x / 24), cy: Math.floor(team.missionTarget.y / 24) }
+          : null;
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      attacker: {
+        mission: attacker.mission,
+        missionTimer: attacker.missionTimer,
+        arm: attacker.attackCooldown,
+        target: attacker.target
+          ? { type: attacker.target.type, house: attacker.target.house, cx: attacker.target.cell.cx, cy: attacker.target.cell.cy }
+          : null,
+      },
+      friendlyAnt: {
+        mission: friendlyAnt.mission,
+        missionTimer: friendlyAnt.missionTimer,
+        hp: friendlyAnt.hp,
+      },
+      barrel: {
+        hp: barrel.hp,
+      },
+      team: {
+        currentMission: team.currentMission,
+        targetCell,
+        missionTargetCell,
+      },
+    };
+  });
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCA04 infantry reservation pathing', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -492,6 +606,45 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCA04 infantry reservation 
       expect(ts.ant.missionTimer).toBe(cpp.ant.missionTimer);
       expect(ts.ant.target).toBeNull();
       expect(ts.ant.moveTarget).toEqual(cpp.ant.navCell);
+      expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
+    }, { wasmSeed: 0 });
+  }, 180_000);
+
+  it('does not fire on the same-house team damage target during patrol attack', async () => {
+    await withDualScenario('SCA04EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      const result = await stepBoth(handle, 119);
+      expect(result.ts.state.tick).toBe(result.wasm.state.tick);
+
+      const cpp = await wasmSameHouseTeamTargetFireState(handle.wasm);
+      const ts = await tsSameHouseTeamTargetFireState(handle.ts);
+
+      expect(cpp.tick).toBe(119);
+      expect(cpp.team).toEqual({
+        currentMission: 0,
+        targetCell: { cx: 111, cy: 64 },
+        missionTargetCell: null,
+      });
+      expect(cpp.attacker).toEqual({
+        mission: 1, // MISSION_ATTACK
+        missionTimer: 15,
+        arm: 0,
+        targetCell: null,
+      });
+      expect(cpp.friendlyAnt.hp).toBe(85);
+      expect(cpp.barrel.hp).toBe(4);
+
+      expect(ts.tick).toBe(cpp.tick);
+      expect(ts.team).toEqual(cpp.team);
+      expect(ts.attacker).toMatchObject({
+        mission: 'ATTACK',
+        missionTimer: cpp.attacker.missionTimer,
+        arm: cpp.attacker.arm,
+        target: null,
+      });
+      expect(ts.friendlyAnt.hp).toBe(cpp.friendlyAnt.hp);
+      expect(ts.barrel.hp).toBe(cpp.barrel.hp);
       expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
     }, { wasmSeed: 0 });
   }, 180_000);

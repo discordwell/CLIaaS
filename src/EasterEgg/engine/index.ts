@@ -6037,21 +6037,24 @@ export class Game {
       }
       case Mission.ATTACK: {
         let attackHandlerReturnedEarly = false;
-        if (DISPATCH_ORDER_REFACTOR && entity.stats.isInfantry) {
-          // C++ InfantryClass::AI order is MissionClass::AI -> Commence ->
-          // Firing_AI -> Movement_AI (infantry.cpp:1208-1247). The
-          // Mission_Attack handler itself is FootClass::Mission_Attack
-          // (foot.cpp:604-619): it only Approach_Target()s or Enter_Idle_Mode()
-          // and returns Normal_Delay + Random_Pick(0,2). It does not fire.
+        if (DISPATCH_ORDER_REFACTOR) {
+          // C++ FootClass::Mission_Attack (foot.cpp:604-619) is shared by
+          // infantry, units, and vessels: it only Approach_Target()s or
+          // Enter_Idle_Mode()s, then returns Normal_Delay + Random_Pick(0,2).
+          // Class-specific Firing_AI/Combat_AI runs later in the same object AI
+          // pass, after TechnoClass::AI's allied-TarCom cleanup.
           //
-          // Running updateAttack() here starts DO_FIRE_WEAPON before Commence,
-          // which blocks a queued MOVE from being popped. SCG06EA logic[67]
-          // then stays ATTACK+mq=MOVE instead of the C++ MOVE+mq=ATTACK chain.
+          // Running updateAttack() here starts fire before Commence/cleanup.
+          // For infantry that blocks queued MOVE transitions; for vehicles it
+          // lets team-assigned allied TarCom fire once before techno.cpp:2390
+          // can clear it.
           if (missionTimerFired) {
             const targetStructure = entity.targetStructure?.alive
               ? entity.targetStructure as MapStructure
               : null;
-            if (targetStructure && this.assignInfantryBuildingEntryMission(entity, targetStructure)) {
+            if (entity.stats.isInfantry &&
+                targetStructure &&
+                this.assignInfantryBuildingEntryMission(entity, targetStructure)) {
               // C++ InfantryClass::Mission_Attack returns 1 after queuing
               // CAPTURE/SABOTAGE; it does not run FootClass::Mission_Attack's
               // Random_Pick(0,2) jitter.
@@ -6062,7 +6065,12 @@ export class Game {
                 this.approachTarget(entity);
               }
             } else {
-              assignMission(entity, this.infantryEnterIdleMission(entity));
+              if (entity.stats.isInfantry) {
+                assignMission(entity, this.infantryEnterIdleMission(entity));
+              } else {
+                entity.mission = this.enterIdleMode(entity);
+                entity.animState = AnimState.IDLE;
+              }
             }
           }
         } else {
