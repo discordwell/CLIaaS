@@ -43,7 +43,7 @@ const TEVENT_BUILD = 19;
 const TEVENT_BUILD_UNIT = 20;             // TR3: specified unit built (C++ TEVENT_BUILD_UNIT)
 const TEVENT_BUILD_INFANTRY = 21;         // TR3/TR5: infantry built (C++ = 21)
 const TEVENT_BUILD_AIRCRAFT = 22;         // TR3/TR5: aircraft built (C++ = 22)
-const TEVENT_LEAVES_MAP = 23;
+export const TEVENT_LEAVES_MAP = 23;
 export const TEVENT_ENTERS_ZONE = 24;
 export const TEVENT_CROSS_HORIZONTAL = 25; // TR5: fixed index (was 21, C++ = 25)
 export const TEVENT_CROSS_VERTICAL = 26;   // TR5: fixed index (was 22, C++ = 26)
@@ -3021,6 +3021,7 @@ export interface TriggerGameState {
   missionTimerExpired: boolean;
   bridgesAlive: number;       // number of bridge cells remaining
   unitsLeftMap: number;        // count of units that have left the map
+  leftMapTeamTypes?: Set<number>; // C++ TEVENT_LEAVES_MAP: TeamType indices that emptied off-map
   // Building existence check (for BUILDING_EXISTS)
   structureTypes: Set<string>; // set of alive structure type names
   // Per-house raw BScan structure types alive.
@@ -3175,8 +3176,10 @@ export function checkTriggerEvent(
       return (houseBuilt?.size ?? 0) > 0; // fallback: any structure built by this house
     }
     case TEVENT_LEAVES_MAP:
-      // Units have left the map edge (civilian evacuation)
-      return state.unitsLeftMap > 0;
+      // C++ tevent.cpp:318-327 checks for an empty TeamClass whose Class
+      // matches this event's TeamType and whose IsLeaveMap flag is set. It is
+      // not a global "any unit left the map" counter.
+      return event.team >= 0 && (state.leftMapTeamTypes?.has(event.team) ?? false);
     case TEVENT_HOUSE_DISCOVERED:
       // C++ parity (#21): fires when the specified house's IsDiscovered flag is set.
       // C++ tevent.cpp:435-436 — hptr = HouseClass::As_Pointer(Data.House), checks hptr->IsDiscovered.

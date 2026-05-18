@@ -109,10 +109,16 @@ describe('SCG02EA Trigger Chain', () => {
     expect(checkTriggerEvent(event, createState({ missionTimerExpired: true }))).toBe(true);
   });
 
-  it('TEVENT_LEAVES_MAP (23) fires when units left map', () => {
+  it('TEVENT_LEAVES_MAP (23) fires when the convoy team left map', () => {
     const event: TriggerEvent = { type: 23, team: 0, data: 0 };
-    expect(checkTriggerEvent(event, createState({ unitsLeftMap: 0 }))).toBe(false);
-    expect(checkTriggerEvent(event, createState({ unitsLeftMap: 1 }))).toBe(true);
+    expect(checkTriggerEvent(event, createState({
+      unitsLeftMap: 1,
+      leftMapTeamTypes: new Set([1]),
+    }))).toBe(false);
+    expect(checkTriggerEvent(event, createState({
+      unitsLeftMap: 0,
+      leftMapTeamTypes: new Set([0]),
+    }))).toBe(true);
   });
 
   it('timer → global set chain: truk trigger sets globals 1 and 2', () => {

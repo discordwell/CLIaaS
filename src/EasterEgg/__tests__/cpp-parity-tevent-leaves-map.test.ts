@@ -7,12 +7,8 @@
  *     // Iterates Teams looking for one where Team matches, Is_Empty(), and IsLeaveMap.
  *     // If found, td.IsTripped = true; otherwise return false.
  *
- * TS behavior (scenario.ts):
- *   case TEVENT_LEAVES_MAP:
- *     return state.unitsLeftMap > 0;
- *
- * Returns true when at least one unit has left the map (unitsLeftMap > 0).
- * event.data is irrelevant — the check is purely on the counter.
+ * Returns true only when the event's TeamType index is present in the
+ * left-map team set. The global unitsLeftMap counter is not sufficient.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -66,63 +62,42 @@ describe('TEVENT_LEAVES_MAP (type=23) — C++ behavioral parity', () => {
 
   const TEVENT_LEAVES_MAP = 23;
 
-  /** Helper: create a LEAVES_MAP trigger event with optional data. */
-  const leavesMapEvent = (data: number = 0): TriggerEvent => ({
+  /** Helper: create a LEAVES_MAP trigger event for a TeamType index. */
+  const leavesMapEvent = (team = 12): TriggerEvent => ({
     type: TEVENT_LEAVES_MAP,
-    team: -1,
-    data,
+    team,
+    data: 0,
   });
 
   it('constant value is 23 (C++ TEVENT_LEAVES_MAP enum index)', () => {
     // Verify type=23 reaches the LEAVES_MAP path by checking both outcomes.
-    const event: TriggerEvent = { type: 23, team: -1, data: 0 };
+    const event: TriggerEvent = { type: 23, team: 12, data: 0 };
     const stateNone = createState({ unitsLeftMap: 0 });
-    const stateSome = createState({ unitsLeftMap: 1 });
+    const stateSome = createState({ unitsLeftMap: 0, leftMapTeamTypes: new Set([12]) });
 
     expect(checkTriggerEvent(event, stateNone)).toBe(false);
     expect(checkTriggerEvent(event, stateSome)).toBe(true);
   });
 
-  it('returns false when unitsLeftMap is 0 (no units have left)', () => {
-    const state = createState({ unitsLeftMap: 0 });
+  it('returns false when no matching team type left the map', () => {
+    const state = createState({ unitsLeftMap: 5, leftMapTeamTypes: new Set([13]) });
     expect(checkTriggerEvent(leavesMapEvent(), state)).toBe(false);
   });
 
-  it('returns true when unitsLeftMap is 1 (exactly one unit left)', () => {
-    const state = createState({ unitsLeftMap: 1 });
+  it('returns true when the matching team type emptied off-map', () => {
+    const state = createState({ unitsLeftMap: 1, leftMapTeamTypes: new Set([12]) });
     expect(checkTriggerEvent(leavesMapEvent(), state)).toBe(true);
   });
 
-  it('returns true when unitsLeftMap is greater than 1', () => {
-    const state = createState({ unitsLeftMap: 5 });
-    expect(checkTriggerEvent(leavesMapEvent(), state)).toBe(true);
+  it('team -1 does not match C++ TeamType lookup', () => {
+    const state = createState({ unitsLeftMap: 1, leftMapTeamTypes: new Set([12]) });
+    expect(checkTriggerEvent(leavesMapEvent(-1), state)).toBe(false);
   });
 
-  it('returns true for large unitsLeftMap values', () => {
-    const state = createState({ unitsLeftMap: 9999 });
-    expect(checkTriggerEvent(leavesMapEvent(), state)).toBe(true);
-  });
-
-  it('event.data is irrelevant — result depends only on unitsLeftMap', () => {
-    // With unitsLeftMap=0, any data value still returns false
-    const stateZero = createState({ unitsLeftMap: 0 });
-    expect(checkTriggerEvent(leavesMapEvent(0), stateZero)).toBe(false);
-    expect(checkTriggerEvent(leavesMapEvent(1), stateZero)).toBe(false);
-    expect(checkTriggerEvent(leavesMapEvent(42), stateZero)).toBe(false);
-    expect(checkTriggerEvent(leavesMapEvent(999), stateZero)).toBe(false);
-
-    // With unitsLeftMap=3, any data value returns true
-    const stateThree = createState({ unitsLeftMap: 3 });
-    expect(checkTriggerEvent(leavesMapEvent(0), stateThree)).toBe(true);
-    expect(checkTriggerEvent(leavesMapEvent(1), stateThree)).toBe(true);
-    expect(checkTriggerEvent(leavesMapEvent(42), stateThree)).toBe(true);
-    expect(checkTriggerEvent(leavesMapEvent(999), stateThree)).toBe(true);
-  });
-
-  it('other state fields do not affect the result', () => {
-    // Set various other state fields — only unitsLeftMap matters
+  it('other state fields do not affect the team match', () => {
     const stateWithNoise = createState({
-      unitsLeftMap: 0,
+      unitsLeftMap: 99,
+      leftMapTeamTypes: new Set([14]),
       playerEntered: true,
       enemyKillCount: 100,
       playerCredits: 50000,
@@ -132,11 +107,10 @@ describe('TEVENT_LEAVES_MAP (type=23) — C++ behavioral parity', () => {
     });
     expect(checkTriggerEvent(leavesMapEvent(), stateWithNoise)).toBe(false);
 
-    // Now flip only unitsLeftMap
-    const stateWithNoiseAndLeft = createState({
+    const stateWithMatchingTeam = createState({
       ...stateWithNoise,
-      unitsLeftMap: 1,
+      leftMapTeamTypes: new Set([12, 14]),
     });
-    expect(checkTriggerEvent(leavesMapEvent(), stateWithNoiseAndLeft)).toBe(true);
+    expect(checkTriggerEvent(leavesMapEvent(), stateWithMatchingTeam)).toBe(true);
   });
 });

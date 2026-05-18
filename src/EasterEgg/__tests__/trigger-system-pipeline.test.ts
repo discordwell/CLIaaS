@@ -339,11 +339,16 @@ describe('checkTriggerEvent — full event coverage', () => {
   });
 
   // TEVENT_LEAVES_MAP (23)
-  it('TEVENT_LEAVES_MAP (23) fires when units have left the map', () => {
-    const event: TriggerEvent = { type: 23, team: -1, data: 0 };
-    expect(checkTriggerEvent(event, createState({ unitsLeftMap: 0 }))).toBe(false);
-    expect(checkTriggerEvent(event, createState({ unitsLeftMap: 1 }))).toBe(true);
-    expect(checkTriggerEvent(event, createState({ unitsLeftMap: 5 }))).toBe(true);
+  it('TEVENT_LEAVES_MAP (23) fires when the specified team type left the map', () => {
+    const event: TriggerEvent = { type: 23, team: 4, data: 0 };
+    expect(checkTriggerEvent(event, createState({
+      unitsLeftMap: 5,
+      leftMapTeamTypes: new Set([3]),
+    }))).toBe(false);
+    expect(checkTriggerEvent(event, createState({
+      unitsLeftMap: 0,
+      leftMapTeamTypes: new Set([4]),
+    }))).toBe(true);
   });
 
   // Unknown event type returns false

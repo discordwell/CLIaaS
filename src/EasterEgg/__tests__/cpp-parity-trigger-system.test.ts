@@ -846,9 +846,17 @@ describe('checkTriggerEvent — C++ tevent.cpp operator() parity', () => {
 
   // --- TEVENT_LEAVES_MAP (23) ---
   // C++ tevent.cpp:318-327: team left map check
-  it('TEVENT_LEAVES_MAP fires when units have left the map', () => {
-    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.LEAVES_MAP), createState({ unitsLeftMap: 0 }))).toBe(false);
-    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.LEAVES_MAP), createState({ unitsLeftMap: 1 }))).toBe(true);
+  it('TEVENT_LEAVES_MAP fires when the specified team type left the map', () => {
+    const event = makeEvent(CPP_TEVENT.LEAVES_MAP);
+    event.team = 12;
+    expect(checkTriggerEvent(event, createState({
+      unitsLeftMap: 5,
+      leftMapTeamTypes: new Set([13]),
+    }))).toBe(false);
+    expect(checkTriggerEvent(event, createState({
+      unitsLeftMap: 0,
+      leftMapTeamTypes: new Set([12]),
+    }))).toBe(true);
   });
 
   // --- TEVENT_ENTERS_ZONE (24) ---
