@@ -1708,13 +1708,17 @@ export class Entity {
     //   DIR_W = 192 in the 256-step table. (turret + DIR_W) wraps via & 0xFF.
     //   C++ uses DIR_E instead when IsSecondShot is true.
     //   For lateral=0, this is a no-op; skip the math.
-    const turret256 = this.stats.isInfantry
-      ? (this.bodyFacing256 >= 0 ? this.bodyFacing256 & 0xFF : (this.facing * 32) & 0xFF)
-      : this.turretFacing256 >= 0 &&
+    const body256 = this.bodyFacing256 >= 0
+      ? this.bodyFacing256 & 0xFF
+      : (this.facing * 32) & 0xFF;
+    const secondary256 = this.turretFacing256 >= 0 &&
         dir256ToFacing32(this.turretFacing256) === this.turretFacing32 &&
         dir256ToFacing8(this.turretFacing256) === this.turretFacing
           ? this.turretFacing256 & 0xFF
           : (this.turretFacing32 * 8) & 0xFF;
+    const turret256 = this.stats.isInfantry
+      ? body256
+      : (this.stats.isAircraft || this.hasTurret ? secondary256 : body256);
     if (lateralOffset !== 0) {
       const lateralBase = this.isSecondShot ? 64 : 192; // DIR_E or DIR_W
       const dir2 = (turret256 + lateralBase) & 0xFF;
