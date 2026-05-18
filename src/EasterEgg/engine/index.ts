@@ -5830,8 +5830,17 @@ export class Game {
    *  Used by Fear_AI for fraidy-cat civilians. Forced scatter bypasses mission,
    *  target, and human-house voluntary-scatter gates, but still refuses to
    *  interrupt non-interruptible Doing animations. */
-  private infantryScatterNoThreat(entity: Entity): void {
+  private infantryScatterNoThreat(entity: Entity, forced = true, nokidding = false): void {
+    if (entity.isDriving) forced = false;
+    const mc = MISSION_CONTROL[entity.mission];
+    if (mc && !mc.isScatter && !forced) return;
+    const hasLegalCombatTarget =
+      (entity.target?.alive ?? false) ||
+      (entity.targetStructure?.alive ?? false);
+    if (!entity.stats.isFraidyCat && hasLegalCombatTarget && !forced) return;
     if (!entity.isDoingInterruptible()) return;
+    if (!forced && entity.house === this.playerHouse && !nokidding && !entity.teamRef) return;
+    if (!forced && !entity.stats.isFraidyCat) return;
 
     const fracX = entity.leptonX & 0xff;
     const fracY = entity.leptonY & 0xff;
@@ -8696,7 +8705,9 @@ export class Game {
       if (blocker.isAirUnit && blocker.flightAltitude > 0) continue;
       if (blocker.cell.cx !== cx || blocker.cell.cy !== cy) continue;
 
-      if (!blocker.stats.isInfantry && !blocker.isAirUnit) {
+      if (blocker.stats.isInfantry) {
+        this.infantryScatterNoThreat(blocker, true, true);
+      } else if (!blocker.isAirUnit) {
         this.unitClassScatterNoThreat(blocker, true, nearbyFrame);
       }
     }
@@ -9069,8 +9080,7 @@ export class Game {
     let result = MoveResult.OK;
 
     for (const other of this.entities) {
-      if (other.id === entity.id || !other.alive || other.inLimbo) continue;
-      if (other.isAirUnit && other.flightAltitude > 0) continue;
+      if (other.id === entity.id || !this.entityOccupiesDriveCell(other)) continue;
       if (other.cell.cx !== cx || other.cell.cy !== cy) continue;
 
       if (this.entitiesAllied(entity, other)) {
@@ -9095,7 +9105,7 @@ export class Game {
         if (occupantId === 0 || occupantId === entity.id) continue;
         filled++;
         const occupant = this.entityById.get(occupantId);
-        if (!occupant?.alive) continue;
+        if (!occupant || !this.entityOccupiesDriveCell(occupant)) continue;
         if (!this.entitiesAllied(entity, occupant)) {
           if (!hasWeapon) return MoveResult.IMPASSABLE;
           if (occupant.stats.isInfantry && occupant.type === UnitType.I_SPY && !entity.stats.isCanine) {
