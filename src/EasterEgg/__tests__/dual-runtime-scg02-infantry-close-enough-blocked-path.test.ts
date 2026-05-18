@@ -3,9 +3,11 @@
  *
  * In SCG02EA, two Greek E1s stop near a crowded destination at cell (87,49).
  * C++ validates the next Path[0] before Start_Driver; when Can_Enter_Cell
- * rejects that next cell and the infantry is already within CloseEnoughDistance,
- * it clears NavCom immediately even if PathDelay is active. Leaving TS moveTarget
- * alive delays the MOVE->GUARD transition and misses the tick-1068 guard RNG.
+ * rejects that next cell, Basic_Path can still return the same adjacent cell.
+ * C++ then validates that freshly selected acell, clears NavCom when the
+ * infantry is already within CloseEnoughDistance, and stops the driver. Leaving
+ * TS moveTarget alive delays the MOVE->GUARD transition and misses the
+ * tick-1068 guard RNG.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 

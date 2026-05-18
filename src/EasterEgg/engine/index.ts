@@ -6786,14 +6786,6 @@ export class Game {
 	        if (canStart !== MoveResult.OK) {
 	          entity.path = [];
 	          entity.pathIndex = 0;
-		          if (((entity.mission as Mission) === Mission.MOVE || (entity.mission as Mission) === Mission.ENTER)
-		              && !entity.isTethered
-		              && entity.moveTarget
-		              && leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly) < 704) {
-	            entity.moveTarget = null;
-	            this.stopInfantryDriver(entity);
-	            return;
-	          }
 	          if (entity.pathDelay > 0) return;
 
 	          const goal = {
@@ -6822,6 +6814,10 @@ export class Game {
 
         const nextDestCell = this.infantryNextPathCell(entity);
         if (!nextDestCell) return;
+        if (this.infantryCanEnterCell(entity, nextDestCell.cx, nextDestCell.cy) !== MoveResult.OK) {
+          this.handleInfantryBlockedStartCell(entity);
+          return;
+        }
         const started = this.infantryStartDriver(entity, nextDestCell.cx, nextDestCell.cy);
         if (!started) return;
         entity.isDriving = true;
@@ -9904,6 +9900,22 @@ export class Game {
     entity.drivePathHeadCleared = false;
   }
 
+  /** C++ infantry.cpp:3931-3958 post-Basic_Path acell validation. */
+  private handleInfantryBlockedStartCell(entity: Entity): void {
+    const closeEnough = 704; // rules.ini [General] CloseEnough=2.75 * 256
+    if (entity.moveTarget &&
+        ((entity.mission as Mission) === Mission.MOVE || (entity.mission as Mission) === Mission.ENTER) &&
+        !entity.isTethered &&
+        leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly) < closeEnough) {
+      entity.moveTarget = null;
+      entity.moveTargetEntityRef = null;
+      entity.moveTargetEntityRefLX = 0;
+      entity.moveTargetEntityRefLY = 0;
+    }
+    this.clearDrivePath(entity);
+    this.stopInfantryDriver(entity);
+  }
+
   /** C++ DriveClass::Assign_Destination(TARGET_NONE).
    *  The virtual DriveClass method clears Path[0] and, when the unit is not
    *  currently driving, immediately re-enters Start_Of_Move(). That top guard
@@ -10794,6 +10806,10 @@ export class Game {
           if (entity.path.length === 0 || entity.pathIndex >= entity.path.length) return;
           const firstCell = this.infantryNextPathCell(entity);
           if (!firstCell) return;
+          if (this.infantryCanEnterCell(entity, firstCell.cx, firstCell.cy) !== MoveResult.OK) {
+            this.handleInfantryBlockedStartCell(entity);
+            return;
+          }
           const started = this.infantryStartDriver(entity, firstCell.cx, firstCell.cy);
           if (started) {
             entity.isDriving = true;
@@ -11071,13 +11087,6 @@ export class Game {
 	        if (canStart !== MoveResult.OK) {
 	          entity.path = [];
 	          entity.pathIndex = 0;
-	          if (((entity.mission as Mission) === Mission.MOVE || (entity.mission as Mission) === Mission.ENTER)
-	              && !entity.isTethered
-	              && leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly) < 704) {
-	            entity.moveTarget = null;
-	            this.stopInfantryDriver(entity);
-	            return;
-	          }
 	          if (entity.pathDelay > 0) return;
 
 	          const goal = {
@@ -11223,6 +11232,10 @@ export class Game {
       // (SCG06EA BadGuy E1): otherwise TS starts the next hop one tick early.
       if (entity.stats.isInfantry) {
         if (!nextCell) return;
+        if (this.infantryCanEnterCell(entity, nextCell.cx, nextCell.cy) !== MoveResult.OK) {
+          this.handleInfantryBlockedStartCell(entity);
+          return;
+        }
         const started = this.infantryStartDriver(entity, nextCell.cx, nextCell.cy);
         if (started) {
           entity.isDriving = true;
