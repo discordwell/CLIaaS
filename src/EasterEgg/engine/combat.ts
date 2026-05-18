@@ -3988,6 +3988,7 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
             dog.isFiringAnim = false;
             dog.firingAnimTicks = 0;
             dogUnlimboEnterIdleMode(ctx, dog);
+            dog.missionTimerSetTick = ctx.tick;
             // ObjectClass::Unlimbo submits the dog back into Logic at the
             // current end rather than restoring its original Infantry slot.
             ctx.resubmitEntityToLogicEnd?.(dog);

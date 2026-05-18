@@ -5775,7 +5775,7 @@ export class Game {
    *  existing timing until ported with direct C++ evidence. */
   private decrementEntityCdTimersEndOfLogic(entity: Entity): void {
     if (entity.idleAnimTimer > 0) entity.idleAnimTimer--;
-    if (entity.missionTimer > 0) entity.missionTimer--;
+    if (entity.missionTimer > 0 && entity.missionTimerSetTick !== this.tick) entity.missionTimer--;
     if (entity.attackCooldown > 0) entity.attackCooldown--;
     if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
     if (entity.baseAttackTimer > 0) entity.baseAttackTimer--;

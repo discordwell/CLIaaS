@@ -1111,6 +1111,11 @@ export class Entity {
   lastLogicProcessedTick = -1;
   /** Tick when a dog entered the dog-rides-bullet limbo path. */
   dogRiderLimboStartTick = -1;
+  /** Last tick MissionClass Timer was explicitly assigned during object AI.
+   *  C++ CDTimerClass values assigned mid-frame are first decremented by the
+   *  FrameTimer tick after that frame, not again at the end of the same object
+   *  logic pass. */
+  missionTimerSetTick = -1;
   /** C++ Logic vector index at submit time for runtime-created techno objects.
    *  Used to keep bullets/anims and later-spawned infantry in the same relative
    *  order when TS has to batch parts of the Logic array. */

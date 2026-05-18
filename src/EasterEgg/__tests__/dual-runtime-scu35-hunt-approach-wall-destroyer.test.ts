@@ -367,6 +367,102 @@ async function tsSuperTeamSnapshot(adapter: unknown) {
   }>>;
 }
 
+async function wasmSovietDogSnapshot(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const details = [...(state.units ?? []), ...(state.enemies ?? [])];
+    const row = (state.logicLayer ?? []).find((entry: any[]) => {
+      if (entry[1] !== 'DOG' || entry[2] !== 'USSR' || entry[3] !== 25 || entry[4] !== 81) return false;
+      const detail = details.find((unit: any) => unit.id === entry[6]);
+      return detail?.hp === 855;
+    });
+    if (!row) throw new Error('C++ SCU35EA dog-rider at (25,81) missing');
+
+    const infantry = details.find((entry: any) => entry.id === row[6]);
+    if (!infantry) throw new Error('C++ SCU35EA dog-rider detail missing');
+
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      logicIndex: row[0],
+      id: row[6],
+      mission: row[7],
+      missionTimer: row[8],
+      doing: row[11],
+      lx: row[12],
+      ly: row[13],
+      hp: infantry.hp,
+      stage: infantry.stage ?? null,
+      fear: infantry.fear ?? null,
+      targetRtti: row[32],
+      targetIndex: row[33],
+    };
+  }) as Promise<{
+    tick: number;
+    rngState: number;
+    logicIndex: number;
+    id: number;
+    mission: number;
+    missionTimer: number;
+    doing: number;
+    lx: number;
+    ly: number;
+    hp: number;
+    stage: number | null;
+    fear: number | null;
+    targetRtti: number;
+    targetIndex: number;
+  }>;
+}
+
+async function tsSovietDogSnapshot(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const entity = game.entities.find((entry: any) =>
+      entry.type === 'DOG' &&
+      entry.house === 'USSR' &&
+      entry.cell.cx === 25 &&
+      entry.cell.cy === 81 &&
+      entry.hp === 855
+    );
+    if (!entity) throw new Error('TS SCU35EA dog-rider at (25,81) missing');
+
+    return {
+      tick: game.tick,
+      rngState: (window as any).__agentState().rngState,
+      logicIndex: entity.logicIndexHint,
+      id: entity.id,
+      mission: entity.mission,
+      missionTimer: entity.missionTimer,
+      doing: entity.doing,
+      doingStage: entity.doingStage,
+      lx: entity.leptonX,
+      ly: entity.leptonY,
+      hp: entity.hp,
+      fear: entity.fear,
+      targetType: entity.target?.type ?? null,
+      lastLogicProcessedTick: entity.lastLogicProcessedTick,
+      unlimboTick: entity.unlimboTick,
+    };
+  }) as Promise<{
+    tick: number;
+    rngState: number;
+    logicIndex: number;
+    id: number;
+    mission: string;
+    missionTimer: number;
+    doing: string;
+    doingStage: number;
+    lx: number;
+    ly: number;
+    hp: number;
+    fear: number;
+    targetType: string | null;
+    lastLogicProcessedTick: number;
+    unlimboTick: number;
+  }>;
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU35 HUNT approach wall destroyer', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -628,6 +724,57 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU35 HUNT approach wall de
         Math.round(anim.x) === 618 &&
         Math.round(anim.y) === 1950
       )).toBe(false);
+    }, { wasmSeed: 0 });
+  }, 300_000);
+
+  it('keeps dog-rider unlimbo MissionClass timer on the C++ frame', async () => {
+    await withDualScenario('SCU35EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBoth(handle, 225);
+      const cppUnlimbo = await wasmSovietDogSnapshot(handle.wasm);
+      const tsUnlimbo = await tsSovietDogSnapshot(handle.ts);
+      expect(cppUnlimbo).toMatchObject({
+        tick: 225,
+        mission: 5, // MISSION_GUARD
+        missionTimer: 14,
+        doing: 20, // DO_DOG_MAUL
+        hp: 855,
+      });
+      expect(tsUnlimbo).toMatchObject({
+        tick: cppUnlimbo.tick,
+        mission: 'GUARD',
+        missionTimer: cppUnlimbo.missionTimer,
+        doing: 'dog_maul',
+        doingStage: 0,
+        hp: cppUnlimbo.hp,
+        targetType: null,
+      });
+      expect(tsUnlimbo.rngState >>> 0).toBe(cppUnlimbo.rngState >>> 0);
+
+      await stepBoth(handle, 13);
+      const cppBeforeGuard = await wasmSovietDogSnapshot(handle.wasm);
+      const tsBeforeGuard = await tsSovietDogSnapshot(handle.ts);
+      expect(cppBeforeGuard).toMatchObject({ tick: 238, missionTimer: 1 });
+      expect(tsBeforeGuard.missionTimer).toBe(cppBeforeGuard.missionTimer);
+      expect(tsBeforeGuard.targetType).toBeNull();
+      expect(tsBeforeGuard.rngState >>> 0).toBe(cppBeforeGuard.rngState >>> 0);
+
+      await stepBoth(handle, 1);
+      const cppZero = await wasmSovietDogSnapshot(handle.wasm);
+      const tsZero = await tsSovietDogSnapshot(handle.ts);
+      expect(cppZero).toMatchObject({ tick: 239, missionTimer: 0 });
+      expect(tsZero.missionTimer).toBe(cppZero.missionTimer);
+      expect(tsZero.targetType).toBeNull();
+      expect(tsZero.rngState >>> 0).toBe(cppZero.rngState >>> 0);
+
+      await stepBoth(handle, 1);
+      const cppGuard = await wasmSovietDogSnapshot(handle.wasm);
+      const tsGuard = await tsSovietDogSnapshot(handle.ts);
+      expect(cppGuard).toMatchObject({ tick: 240, missionTimer: 43 });
+      expect(tsGuard.missionTimer).toBe(cppGuard.missionTimer);
+      expect(tsGuard.targetType).toBe('E3');
+      expect(tsGuard.rngState >>> 0).toBe(cppGuard.rngState >>> 0);
     }, { wasmSeed: 0 });
   }, 300_000);
 });
