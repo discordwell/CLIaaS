@@ -34,6 +34,13 @@ import { isScg01Jeep27DebugEnabled } from './perCellProcess';
 import { type LogicAnim, spawnLogicAnimForSprite } from './logicAnim';
 import { assignMission } from './missionLifecycle';
 
+function clearFootPath(entity: Entity): void {
+  entity.path = [];
+  entity.pathIndex = 0;
+  entity.drivePathFacings = [];
+  entity.drivePathHeadCleared = false;
+}
+
 // ── Context interface ───────────────────────────────────────────────────────
 
 /** Context object providing mission AI functions access to game state and callbacks */
@@ -411,8 +418,7 @@ function scatterFraidyCatNoThreat(ctx: MissionAIContext, entity: Entity): void {
 
     assignMission(entity, Mission.MOVE);
     entity.moveTarget = cellTargetToLepton(ncx, ncy);
-    entity.path = [];
-    entity.pathIndex = 0;
+    clearFootPath(entity);
     entity.pathThreshold = 1; // C++ MOVE_CLOAK
     return;
   }
@@ -609,9 +615,7 @@ function assignTargetForTechno(entity: Entity, target: Entity | null): void {
   // consumed when the hop completes, just like C++ memmove() shifts Path[1] into
   // Path[0].
   if (entity.stats.isInfantry && !entity.isDriving) {
-    entity.path = [];
-    entity.pathIndex = 0;
-    entity.drivePathHeadCleared = false;
+    clearFootPath(entity);
   } else if (entity.stats.isInfantry && entity.isDriving) {
     entity.drivePathHeadCleared = true;
   }
@@ -1362,8 +1366,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
               entity.moveTarget.lx === entity.target.leptonX &&
               entity.moveTarget.ly === entity.target.leptonY) {
             entity.moveTarget = null;
-            entity.path = [];
-            entity.pathIndex = 0;
+            clearFootPath(entity);
             entity.navComClearedTick = ctx.tick;
           }
         }
@@ -2922,8 +2925,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
         ly: pixelToLepton(Math.max(by0 + CELL_SIZE, Math.min(by1 - CELL_SIZE, fleeY))),
       };
       entity.mission = Mission.MOVE;
-      entity.path = [];
-      entity.pathIndex = 0;
+      clearFootPath(entity);
       return;
     }
     // No ant threat — weaponless civilians still run Random_Animate like C++
@@ -3392,9 +3394,7 @@ export function updateRetreat(ctx: MissionAIContext, entity: Entity): number {
   entity.forceFirePos = null;
   entity.moveTarget = cellTargetToLepton(edgeCell.cx, edgeCell.cy);
   entity.moveTargetEntityRef = null;
-  entity.path = [];
-  entity.pathIndex = 0;
-  entity.drivePathFacings = [];
+  clearFootPath(entity);
   entity.pathThreshold = MoveResult.CLOAK;
   entity.retreatStatus = TRAVEL;
   entity.skipDriveZoneCheckOnce = true;
@@ -3873,8 +3873,7 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
           entity.moveTarget.lx === targetLX &&
           entity.moveTarget.ly === targetLY) {
         entity.moveTarget = null;
-        entity.path = [];
-        entity.pathIndex = 0;
+        clearFootPath(entity);
         entity.navComClearedTick = ctx.tick;
       }
     }

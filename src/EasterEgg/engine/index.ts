@@ -3892,7 +3892,7 @@ export class Game {
         unit.forceFirePos = null;
         unit.moveTarget = null;
         unit.moveQueue = [];
-        unit.path = [];
+        this.clearDrivePath(unit);
         unit.animState = AnimState.IDLE;
       }
       keys.delete('s');
@@ -3909,7 +3909,7 @@ export class Game {
         unit.forceFirePos = null;
         unit.moveTarget = null;
         unit.moveQueue = [];
-        unit.path = [];
+        this.clearDrivePath(unit);
         unit.guardOrigin = { x: unit.pos.x, y: unit.pos.y };
         unit.animState = AnimState.IDLE;
       }
@@ -6804,12 +6804,11 @@ export class Game {
         const destCell = this.infantryNextPathCell(entity);
         if (!destCell) return;
         const canStart = this.infantryCanEnterCell(entity, destCell.cx, destCell.cy);
-	        if (canStart !== MoveResult.OK) {
-	          entity.path = [];
-	          entity.pathIndex = 0;
-	          if (entity.pathDelay > 0) return;
+        if (canStart !== MoveResult.OK) {
+          this.clearDrivePath(entity);
+          if (entity.pathDelay > 0) return;
 
-	          const goal = {
+          const goal = {
             cx: Math.floor(entity.moveTarget!.lx / LEPTON_SIZE),
             cy: Math.floor(entity.moveTarget!.ly / LEPTON_SIZE),
           };
@@ -7066,8 +7065,7 @@ export class Game {
       // same state. Normalize it before the Basic_Path branch below; otherwise
       // drive-class units with legal NavCom but exhausted Path[] sit still
       // forever. SCG07EA Greek PT id=187 mirrors C++ vessel 1966101 here.
-      entity.path = [];
-      entity.pathIndex = 0;
+      this.clearDrivePath(entity);
     }
 
     if (DRIVE_CLASS_AI_PORT && this.repairDriveCurrentCellPathRotation(entity)) {
@@ -7773,8 +7771,7 @@ export class Game {
           entity.mission = Mission.GUARD;
         }
         entity.moveTarget = null;
-        entity.path = [];
-        entity.pathIndex = 0;
+        this.clearDrivePath(entity);
         return 14;
 
       default:
@@ -7868,10 +7865,9 @@ export class Game {
 	      passenger.flightAltitude = 0;
       passenger.target = null;
       passenger.targetStructure = null;
-      passenger.forceFirePos = null;
+	      passenger.forceFirePos = null;
       passenger.moveTarget = cellTargetToLepton(newcell.cx, newcell.cy);
-      passenger.path = [];
-      passenger.pathIndex = 0;
+      this.clearDrivePath(passenger);
       passenger.pathDelay = 0;
       passenger.tryCount = PATH_RETRY;
       passenger.headToLX = 0;
@@ -8274,8 +8270,7 @@ export class Game {
             // Clear old moveTarget (was the unload waypoint) so updateRetreat
             // computes a fresh map edge target instead of "retreating" 1 cell.
             entity.moveTarget = null;
-            entity.path = [];
-            entity.pathIndex = 0;
+            this.clearDrivePath(entity);
             break;
           }
         }
@@ -9788,8 +9783,7 @@ export class Game {
 
     if (advancedCount > 0) this.consumeDrivePathFacings(entity, advancedCount);
     if (advanced && entity.pathIndex >= entity.path.length) {
-      entity.path = [];
-      entity.pathIndex = 0;
+      this.clearDrivePath(entity);
     }
     return advanced;
   }
@@ -11160,13 +11154,12 @@ export class Game {
         // reserved it), it invalidates the path and immediately retries
         // Basic_Path when PathDelay allows. This is distinct from vehicle
         // threshold pathing: infantry Start_Driver requires exactly MOVE_OK.
-	        const canStart = this.infantryCanEnterCell(entity, nextCell.cx, nextCell.cy);
-	        if (canStart !== MoveResult.OK) {
-	          entity.path = [];
-	          entity.pathIndex = 0;
-	          if (entity.pathDelay > 0) return;
+        const canStart = this.infantryCanEnterCell(entity, nextCell.cx, nextCell.cy);
+        if (canStart !== MoveResult.OK) {
+          this.clearDrivePath(entity);
+          if (entity.pathDelay > 0) return;
 
-	          const goal = {
+          const goal = {
             cx: Math.floor(entity.moveTarget.lx / LEPTON_SIZE),
             cy: Math.floor(entity.moveTarget.ly / LEPTON_SIZE),
           };
@@ -11289,8 +11282,7 @@ export class Game {
           } else {
             // All retries exhausted — give up (C++ drive.cpp:992)
             entity.moveTarget = null;
-            entity.path = [];
-            entity.pathIndex = 0;
+            this.clearDrivePath(entity);
             entity.trackNumber = -1; entity.trackControlIndex = -1;
             entity.trackCellSpan = 1;
             setMissionIdle();
@@ -11798,8 +11790,7 @@ export class Game {
               } else {
                 // All retries exhausted — give up (C++ drive.cpp:992)
                 entity.moveTarget = null;
-                entity.path = [];
-                entity.pathIndex = 0;
+                this.clearDrivePath(entity);
                 setMissionIdle();
                 entity.animState = AnimState.IDLE;
                 resetPathThreshold(entity);
@@ -12001,8 +11992,7 @@ export class Game {
           // InfantryClass::Assign_Target clears Path[0] before FootClass clears
           // TarCom, invalidating any queued path while preserving an active
           // Head_To_Coord hop.
-          other.path = [];
-          other.pathIndex = 0;
+          this.clearDrivePath(other);
           other.isFiringAnim = false;
           other.firingAnimTicks = 0;
         }
@@ -12995,8 +12985,7 @@ export class Game {
       if (newPath.length > 0) {
         this.setInfantryBasicPath(entity, newPath);
       } else {
-        entity.path = [];
-        entity.pathIndex = 0;
+        this.clearDrivePath(entity);
       }
     }
   }
@@ -16205,8 +16194,7 @@ export class Game {
     entity.missionQueue = Mission.MOVE;
     entity.missionTimer = 0;
     entity.moveTarget = cellTargetToLepton(exitCell.cx, exitCell.cy);
-    entity.path = [];
-    entity.pathIndex = 0;
+    this.clearDrivePath(entity);
     entity.pathDelay = 0;
     entity.isDriving = false;
     // C++ BuildingClass::Exit_Object establishes radio contact with produced
@@ -16276,8 +16264,7 @@ export class Game {
     entity.bodyFacing32 = dir256ToFacing32(entity.bodyFacing256);
     entity.desiredFacing256 = entity.bodyFacing256;
     entity.isDriving = false;
-    entity.path = [];
-    entity.pathIndex = 0;
+    this.clearDrivePath(entity);
     entity.pathDelay = 0;
     entity.moveTarget = null;
     entity.isTethered = true;
@@ -16335,8 +16322,7 @@ export class Game {
     entity.mission = Mission.GUARD;
     entity.missionQueue = null;
     entity.missionTimer = 0;
-    entity.path = [];
-    entity.pathIndex = 0;
+    this.clearDrivePath(entity);
     entity.pathDelay = 0;
     entity.moveTarget = null;
     entity.isDriving = false;

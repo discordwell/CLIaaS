@@ -338,6 +338,7 @@ export function updateMCVUnloadMission(ctx: PlacementContext, entity: Entity): n
       // active driver can finish/stop through the normal movement path.
       entity.path = [];
       entity.drivePathFacings = [];
+      entity.drivePathHeadCleared = false;
       entity.pathIndex = 0;
       entity.moveTarget = null;
       entity.mcvUnloadStatus = 1;

@@ -754,6 +754,8 @@ export function processCommands(game: Game, commands: AgentCommand[]): CommandRe
           we.pos = { x: c.cx * CELL_SIZE + CELL_SIZE / 2, y: c.cy * CELL_SIZE + CELL_SIZE / 2 };
           we.path = [];
           we.pathIndex = 0;
+          we.drivePathFacings = [];
+          we.drivePathHeadCleared = false;
           we.mission = Mission.GUARD;
           we.target = null;
           we.moveTarget = null;

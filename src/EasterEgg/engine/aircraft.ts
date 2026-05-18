@@ -24,6 +24,13 @@ function leptonPosToWorld(lp: LeptonPos): WorldPos {
   return { x: lp.lx * CELL_SIZE / LEPTON_SIZE, y: lp.ly * CELL_SIZE / LEPTON_SIZE };
 }
 
+function clearFootPath(entity: Entity): void {
+  entity.path = [];
+  entity.pathIndex = 0;
+  entity.drivePathFacings = [];
+  entity.drivePathHeadCleared = false;
+}
+
 /** Convert world positions to a C++ 256-step DirType facing (0=N, 64=E, 128=S, 192=W).
  *  C++ Direction() routes through Desired_Facing256: integer lepton math, not atan2. */
 export function directionTo256(from: WorldPos, to: WorldPos): number {
@@ -2040,8 +2047,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         assignMission(passenger, Mission.MOVE);
         passenger.moveTarget = exitTarget;
         passenger.moveQueue = [];
-        passenger.path = [];
-        passenger.pathIndex = 0;
+        clearFootPath(passenger);
         passenger.isDriving = false;
         if (!passenger.stats.isInfantry) {
           passenger.claimedCellIdx = -1;

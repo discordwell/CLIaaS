@@ -14,6 +14,13 @@ import { findPath } from './pathfinding';
 import { movementZoneCells } from './missionAI';
 import { assignMission } from './missionLifecycle';
 
+function clearFootPath(entity: Entity): void {
+  entity.path = [];
+  entity.pathIndex = 0;
+  entity.drivePathFacings = [];
+  entity.drivePathHeadCleared = false;
+}
+
 // ---------------------------------------------------------------------------
 // Context interface — minimal fields needed by harvester functions
 // ---------------------------------------------------------------------------
@@ -182,8 +189,7 @@ function clearHarvesterTargetAndDestination(entity: Entity): void {
   entity.moveTargetEntityRef = null;
   entity.moveTargetEntityRefLX = 0;
   entity.moveTargetEntityRefLY = 0;
-  entity.path = [];
-  entity.pathIndex = 0;
+  clearFootPath(entity);
 }
 
 function cellHasTechno(ctx: HarvesterContext, cx: number, cy: number): boolean {

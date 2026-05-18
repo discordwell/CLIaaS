@@ -47,6 +47,13 @@ function facingFromCellStep(from: { cx: number; cy: number }, to: { cx: number; 
   return 0;
 }
 
+function clearFootPath(unit: Entity): void {
+  unit.path = [];
+  unit.pathIndex = 0;
+  unit.drivePathFacings = [];
+  unit.drivePathHeadCleared = false;
+}
+
 /**
  * Optional context threaded through Team.ai() for a full per-tick pass.
  *
@@ -462,16 +469,14 @@ export class Team {
     unit.moveTargetEntityRefLY = target.ly;
     unit.pathThreshold = 1; // C++ MOVE_CLOAK
     if (unit.stats.isInfantry) {
-      unit.path = [];
-      unit.pathIndex = 0;
+      clearFootPath(unit);
       return;
     }
     if (!unit.isAirUnit) {
       if (ctx?.startDriveClassMove) {
         ctx.startDriveClassMove(unit);
       } else {
-        unit.path = [];
-        unit.pathIndex = 0;
+        clearFootPath(unit);
       }
     }
   }
@@ -1135,8 +1140,7 @@ export class Team {
           unit.moveTargetEntityRef = null;
           unit.moveTargetEntityRefLX = 0;
           unit.moveTargetEntityRefLY = 0;
-          unit.path = [];
-          unit.pathIndex = 0;
+          clearFootPath(unit);
         }
       }
     }
@@ -1252,11 +1256,9 @@ export class Team {
                 unit.doStopDriverAction(ctx?.tick ?? -1);
               }
             }
-            unit.path = [];
-            unit.pathIndex = 0;
+            clearFootPath(unit);
           } else if (!ctx?.startDriveClassMove) {
-            unit.path = [];
-            unit.pathIndex = 0;
+            clearFootPath(unit);
           }
 
           // C++ DriveClass::Assign_Destination immediately calls Start_Of_Move
@@ -1737,8 +1739,7 @@ export class Team {
    *  TARGET_NONE (techno.cpp:2952-2958). */
   private assignMemberTarget(unit: Entity, target: Entity | null): void {
     if (unit.stats.isInfantry && !unit.isDriving) {
-      unit.path = [];
-      unit.pathIndex = 0;
+      clearFootPath(unit);
     }
     if (!target || target.inLimbo || !target.alive || target.hp <= 0) {
       unit.target = null;
@@ -1814,8 +1815,7 @@ export class Team {
         unit.forceFirePos = null;
         unit.pathThreshold = 1; // C++ MOVE_CLOAK
         if (!unit.isDriving) {
-          unit.path = [];
-          unit.pathIndex = 0;
+          clearFootPath(unit);
         }
         // C++ DriveClass::Assign_Destination(TARGET_NONE) sets Path[0] to
         // FACING_NONE and immediately calls Start_Of_Move when the unit is not
@@ -2053,8 +2053,7 @@ export class Team {
                 unit.doStopDriverAction(ctx?.tick ?? -1);
               }
             }
-            unit.path = [];
-            unit.pathIndex = 0;
+            clearFootPath(unit);
             unit.moveTarget = { lx: targetLXlepton, ly: targetLYlepton };
             unit.moveTargetEntityRef = null;
             unit.pathThreshold = 1;
@@ -2715,8 +2714,7 @@ export class Team {
           if (navMatch) {
             unit.moveTarget = null;
             unit.moveTargetEntityRef = null;
-            unit.path = [];
-            unit.pathIndex = 0;
+            clearFootPath(unit);
           }
           if (tarMatch) {
             // C++ TeamClass::Assign_Mission_Target clears old TarCom with
@@ -2724,8 +2722,7 @@ export class Team {
             // invalidates Path[0], so a member whose target was cleared cannot
             // reuse the stale approach path when Enter_Idle_Mode queues MOVE.
             if (unit.stats.isInfantry) {
-              unit.path = [];
-              unit.pathIndex = 0;
+              clearFootPath(unit);
             }
             unit.target = null;
             unit.targetStructure = null;

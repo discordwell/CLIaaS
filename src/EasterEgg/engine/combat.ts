@@ -72,6 +72,13 @@ const BARREL_FIRE_WEAPON: WeaponStats = {
   isInvisible: true,
 };
 
+function clearFootPath(entity: Entity): void {
+  entity.path = [];
+  entity.pathIndex = 0;
+  entity.drivePathFacings = [];
+  entity.drivePathHeadCleared = false;
+}
+
 /** C++ ini.cpp Get_MPHType: rules.ini Speed= is a percentage of 256
  *  leptons/tick, clamped at MPH_LIGHT_SPEED (255). Example: TorpTube
  *  Speed=15 becomes MaxSpeed=38, matching BulletClass::MaxSpeed in WASM. */
@@ -880,8 +887,7 @@ function detachCellTargetFromTargeting(ctx: CombatContext, cx: number, cy: numbe
     }
     if (entity.moveTarget?.lx === target.lx && entity.moveTarget.ly === target.ly) {
       entity.moveTarget = null;
-      entity.path = [];
-      entity.pathIndex = 0;
+      clearFootPath(entity);
     }
     if (detachedTarCom) {
       entity.firePrepActive = false;
@@ -943,8 +949,7 @@ function restoreSuspendedMissionAfterDetach(ctx: CombatContext, entity: Entity, 
     entity.moveTarget = null;
     entity.moveTargetEntityRef = null;
   }
-  entity.path = [];
-  entity.pathIndex = 0;
+  clearFootPath(entity);
   if (!entity.stats.isInfantry && !entity.isAirUnit && entity.moveTarget) {
     ctx.startDriveClassMove?.(entity);
   }
@@ -1746,8 +1751,7 @@ function assignInfantryScatterDestination(ctx: CombatContext, entity: Entity, ce
         entity.doStopDriverAction(ctx.tick);
       }
     }
-    entity.path = [];
-    entity.pathIndex = 0;
+    clearFootPath(entity);
     entity.pathThreshold = 1; // C++ MOVE_CLOAK
   }
   entity.moveTarget = cellTargetToLepton(cell.cx, cell.cy);
@@ -2504,8 +2508,7 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
   victim.targetStructure = null;
   victim.moveTarget = null;
   victim.moveTargetEntityRef = null;
-  victim.path = [];
-  victim.pathIndex = 0;
+  clearFootPath(victim);
   victim.firePrepActive = false;
   victim.firePrepStage = 0;
   victim.firePrepUsesDoingStage = false;
@@ -2521,8 +2524,7 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
         // C++ ObjectClass::Detach_All reaches InfantryClass::Assign_Target
         // through TechnoClass::Detach; assigning TARGET_NONE clears Path[0]
         // without stopping the active Head_To_Coord hop.
-        entity.path = [];
-        entity.pathIndex = 0;
+        clearFootPath(entity);
         entity.isFiringAnim = false;
         entity.firingAnimTicks = 0;
       }
@@ -2530,8 +2532,7 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
     if (entity.moveTargetEntityRef === victim) {
       entity.moveTarget = null;
       entity.moveTargetEntityRef = null;
-      entity.path = [];
-      entity.pathIndex = 0;
+      clearFootPath(entity);
       restoreSuspendedMissionAfterDetach(ctx, entity, victim);
     }
   }

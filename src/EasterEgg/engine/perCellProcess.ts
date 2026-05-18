@@ -840,6 +840,8 @@ export interface PCPEntity<M = unknown> {
   cell: { cx: number; cy: number };
   path: Array<{ cx: number; cy: number }>;
   pathIndex: number;
+  drivePathFacings?: number[];
+  drivePathHeadCleared?: boolean;
   missionQueue: M | null;
   mission: M;
   missionTimer: number;
@@ -850,6 +852,13 @@ export interface PCPEntity<M = unknown> {
   // Optional fields that full Commence port will touch (currently unused
   // by the NavCom-clear path, but documented here for future sub-cases).
   // status?: number;     // C++ Status — set to 0 by Commence
+}
+
+function clearFootPath(entity: PCPEntity<unknown>): void {
+  entity.path = [];
+  entity.pathIndex = 0;
+  if (entity.drivePathFacings) entity.drivePathFacings = [];
+  if (entity.drivePathHeadCleared !== undefined) entity.drivePathHeadCleared = false;
 }
 
 /**
@@ -984,8 +993,7 @@ function drivePerCellProcessImpl<M>(
     const navCellY = Math.floor(entity.moveTarget.ly / 256);
     if (navCellX === entity.cell.cx && navCellY === entity.cell.cy) {
       entity.moveTarget = null;
-      entity.path = [];
-      entity.pathIndex = 0;
+      clearFootPath(entity);
       result.navComCleared = true;
     }
   }
@@ -998,8 +1006,7 @@ function drivePerCellProcessImpl<M>(
       && opts.pathShortenEligible === true
       && opts.targetInRange === true) {
     entity.moveTarget = null;
-    entity.path = [];
-    entity.pathIndex = 0;
+    clearFootPath(entity);
     result.navComCleared = true;
   }
 
@@ -1275,8 +1282,7 @@ export function footPerCellProcess<M>(
       && pathShortenMissionEligible
       && ctx.targetInRange === true) {
     entity.moveTarget = null;
-    entity.path = [];
-    entity.pathIndex = 0;
+    clearFootPath(entity);
     result.navComCleared = true;
   }
 
