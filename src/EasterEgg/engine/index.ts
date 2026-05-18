@@ -10289,10 +10289,18 @@ export class Game {
           // objects in this cell, then checks cell flag bits. TS getOccupancy()
           // is also fed by infantry sub-cell claims; a moving infantry can claim
           // a sub-cell in the target cell while its physical Cell_Occupier cell is
-          // still adjacent. C++ only lets crushers ignore enemy infantry reserve
-          // bits; non-crushers still see MOVE_DESTROYABLE/NO from the cell flags.
-          if (!this.entitiesAllied(entity, occupant) && entity.stats.crusher) {
+          // still adjacent. C++ unit.cpp:3268-3294 treats these flags as
+          // MOVE_MOVING_BLOCK for allies, MOVE_DESTROYABLE for armed non-crushers,
+          // and passable only for crushers.
+          if (this.entitiesAllied(entity, occupant)) {
+            return MoveResult.OCCUPIED;
+          }
+          if (entity.stats.crusher) {
             sawCrushableOnly = true;
+          } else if (entity.weapon && entity.weapon.isAntiGround !== false) {
+            return MoveResult.DESTROYABLE;
+          } else {
+            return MoveResult.IMPASSABLE;
           }
         } else
         if (this.entitiesAllied(entity, occupant)) {
