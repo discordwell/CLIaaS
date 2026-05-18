@@ -1079,6 +1079,12 @@ export class Game {
     if (recordTick) entity.lastCellOccupierDownTick = this.tick;
   }
 
+  private cellOccupierOrderKey(entity: Entity): number {
+    return entity.cellOccupierSerial > 0
+      ? entity.cellOccupierSerial
+      : (entity.logicIndexHint ?? entity.id);
+  }
+
   private initializeScenarioCellOccupierOrder(): void {
     this._nextCellOccupierSerial = 1;
     for (const entity of this.entities) {
@@ -8710,11 +8716,17 @@ export class Game {
     requesterId = 0,
     nearbyFrame = Math.max(0, this.tick - 1),
   ): void {
-    for (const blocker of this.entities) {
-      if (blocker.id === requesterId || !blocker.alive || blocker.inLimbo) continue;
-      if (blocker.isAirUnit && blocker.flightAltitude > 0) continue;
-      if (blocker.cell.cx !== cx || blocker.cell.cy !== cy) continue;
+    const blockers = this.entities
+      .filter(blocker =>
+        blocker.id !== requesterId &&
+        blocker.alive &&
+        !blocker.inLimbo &&
+        !(blocker.isAirUnit && blocker.flightAltitude > 0) &&
+        blocker.cell.cx === cx &&
+        blocker.cell.cy === cy)
+      .sort((a, b) => this.cellOccupierOrderKey(b) - this.cellOccupierOrderKey(a));
 
+    for (const blocker of blockers) {
       if (blocker.stats.isInfantry) {
         this.infantryScatterNoThreat(blocker, true, true);
       } else if (!blocker.isAirUnit) {
@@ -8975,6 +8987,10 @@ export class Game {
   private cutTransportTether(entity: Entity): void {
     if (!entity.isTethered) return;
     const transport = entity.transportRef;
+    const fullInfantryCell =
+      entity.stats.isInfantry &&
+      this.map.isOnlyInfantryOccupied(entity.cell.cx, entity.cell.cy) &&
+      this.map.getSubCellCount(entity.cell.cx, entity.cell.cy) === 5;
     const factoryContact = this.factoryRadioContactStructure(entity);
     const factoryRunAway =
       factoryContact !== null &&
@@ -8987,6 +9003,9 @@ export class Game {
     }
     if (entity.stats.isInfantry) {
       entity.startTransportUnloadGesture(this.tick);
+      if (fullInfantryCell) {
+        this.incomingNoThreatScatterCell(entity.cell.cx, entity.cell.cy, entity.id);
+      }
     } else if (factoryRunAway && !hadNavCom && !entity.isAirUnit) {
       this.unitClassScatterNoThreat(entity, true);
     }
