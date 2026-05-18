@@ -1231,6 +1231,8 @@ export interface CombatContext {
   isRevealedToHouse?(cx: number, cy: number, houseIdx: number): boolean;
   /** C++ InfantryClass::Stop_Driver, used by InfantryClass::Assign_Destination. */
   stopInfantryDriver?(entity: Entity): void;
+  /** C++ Clear_Occupy_Bit(Coord) anonymous infantry bit clear. */
+  clearInfantryOccupyBit?(cellIdx: number, subCell: number): void;
   /** C++ InfantryClass::Assign_Destination line 1046 clear-current-cell predicate. */
   canStopInfantryDriverForAssignDestination?(entity: Entity): boolean;
   /** C++ DriveClass::Assign_Destination immediate Start_Of_Move hook. */
@@ -1550,6 +1552,7 @@ export function damageEntity(
     hasDamageSource: attacker !== undefined || options.sourceStructure !== undefined,
   });
   if (killed) {
+    updateInfantryDeathOccupancy(ctx, target);
     ctx.recordUnitLost?.(target.house);
     for (const passengerHouse of passengerHouses) ctx.recordUnitLost?.(passengerHouse);
     if (occupiedLogicBefore && !target.occupiesCppLogic()) {
@@ -1737,6 +1740,62 @@ function releaseDestroyedUnitOccupancy(ctx: CombatContext, victim: Entity): void
   ctx.map.clearVehicleTrackReservationsForEntity(victim.id);
   ctx.map.clearVehicleOccupancy(victim.cell.cx, victim.cell.cy, victim.id);
   victim.driveTrackFlagClearedCellIdx = -1;
+}
+
+function infantryDeathKeepsLogicObject(victim: Entity): boolean {
+  return victim.deathVariant >= 1 && victim.deathVariant <= 4;
+}
+
+function infantrySpotIndex(lx: number, ly: number): number {
+  const fracX = ((lx % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+  const fracY = ((ly % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+  if (leptonDist(fracX, fracY, 0x80, 0x80) < 60) return 0;
+  let index = 0;
+  if (fracX > 0x80) index |= 0x01;
+  if (fracY > 0x80) index |= 0x02;
+  return index + 1;
+}
+
+function clearInfantryOccupyBit(ctx: CombatContext, victim: Entity): void {
+  if (victim.claimedCellIdx >= 0 && victim.claimedSubCell >= 0) {
+    if (ctx.clearInfantryOccupyBit) {
+      ctx.clearInfantryOccupyBit(victim.claimedCellIdx, victim.claimedSubCell);
+    } else {
+      ctx.map.vacateClaimedSubCell(victim.claimedCellIdx, victim.id, victim.claimedSubCell);
+    }
+  }
+  victim.claimedCellIdx = -1;
+  victim.claimedSubCell = -1;
+}
+
+function updateInfantryDeathOccupancy(ctx: CombatContext, victim: Entity): void {
+  if (!victim.stats.isInfantry) return;
+
+  if (infantryDeathKeepsLogicObject(victim)) {
+    if (ctx.stopInfantryDriver) {
+      ctx.stopInfantryDriver(victim);
+      return;
+    }
+
+    clearInfantryOccupyBit(ctx, victim);
+    const cellIdx = victim.cell.cy * MAP_CELLS + victim.cell.cx;
+    const spot = infantrySpotIndex(victim.leptonX, victim.leptonY);
+    if (ctx.map.occupyClaimedSubCell(cellIdx, victim.id, spot)) {
+      victim.claimedCellIdx = cellIdx;
+      victim.claimedSubCell = spot;
+      victim.subCell = spot;
+    }
+    victim.isDriving = false;
+    victim.headToLX = 0;
+    victim.headToLY = 0;
+    return;
+  }
+
+  clearInfantryOccupyBit(ctx, victim);
+  ctx.map.vacateSubCell(victim.cell.cx, victim.cell.cy, victim.id);
+  victim.isDriving = false;
+  victim.headToLX = 0;
+  victim.headToLY = 0;
 }
 
 /**

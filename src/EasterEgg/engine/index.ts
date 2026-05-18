@@ -833,6 +833,7 @@ export class Game {
       isDiscoveredByPlayer: (e) => e.house === this.playerHouse || this.discoveredEntityIds.has(e.id),
       isRevealedToHouse: (cx, cy, hi) => this.isRevealedToHouse(cx, cy, hi),
       stopInfantryDriver: (e) => this.stopInfantryDriver(e),
+      clearInfantryOccupyBit: (cellIdx, subCell) => this.clearInfantryOccupyBit(cellIdx, subCell),
       canStopInfantryDriverForAssignDestination: (e) => this.canStopInfantryDriverForAssignDestination(e),
       startDriveClassMove: (e) => this.startDriveClassMove(e),
       idleMission: (e) => this.idleMission(e),
@@ -2509,7 +2510,7 @@ export class Game {
     this.map.applyVehicleTrackReservations();
     const restoredInfantryClaims = new Set<number>();
     for (const entity of this.entities) {
-      if (entity.alive && !entity.inLimbo &&
+      if (entity.occupiesCppLogic() && !entity.inLimbo &&
           (!entity.isAirUnit || entity.flightAltitude === 0) &&
           entity.stats.isInfantry &&
           entity.isDriving &&
@@ -2520,7 +2521,7 @@ export class Game {
       }
     }
     for (const entity of this.entities) {
-      if (entity.alive && !entity.inLimbo) {
+      if (entity.occupiesCppLogic() && !entity.inLimbo) {
         // Air units don't block ground occupancy when airborne
         if (!entity.isAirUnit || entity.flightAltitude === 0) {
           if (entity.stats.isInfantry) {
@@ -11940,6 +11941,11 @@ export class Game {
       // Persist trigger name before entity is removed from array.
       if (e.triggerName) this.destroyedTriggerNames.add(e.triggerName);
       this.detachEntityFromTargeting(e, true);
+      if (e.claimedCellIdx >= 0 && e.claimedSubCell >= 0) {
+        this.clearInfantryOccupyBit(e.claimedCellIdx, e.claimedSubCell);
+      }
+      e.claimedCellIdx = -1;
+      e.claimedSubCell = -1;
       this.releaseCppLogicSlotForEntity(e);
 
       const createsCppCorpseAnim = e.stats.isInfantry &&
