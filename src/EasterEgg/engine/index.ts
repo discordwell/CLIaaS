@@ -5455,28 +5455,17 @@ export class Game {
       // timer dispatch. Idempotent — updateAttack gates on attackCooldown and
       // firePrep so repeat calls within the same tick are no-ops.
       //
-      // Skipped when:
-      //   (1) STAGE B already dispatched a handler that still runs its own
-      //       Firing_AI swap (HUNT / ATTACK legacy paths). Guard and Area Guard
-      //       are exceptions: C++ FootClass::Mission_Guard returns its
-      //       Normal_Delay+Random_Pick jitter before InfantryClass::Firing_AI
-      //       runs, so their firing must happen here after dispatch.
-      //   (2) Mission.MOVE infantry — STAGE D's MOVE branch runs the
-      //       Firing_AI-before-Movement_AI path so movement can be skipped
-      //       when a fire animation starts.
+      // Under the refactored order, infantry mission handlers do not own the
+      // class-specific Firing_AI pass. C++ always runs Firing_AI after the
+      // post-MissionClass::AI Commence gate, so a MOVE handler can dispatch,
+      // Commence into queued ATTACK, and still fire before Movement_AI in the
+      // same object pass (SCG27EA C1 tick 2061).
+      //
+      // Mission.MOVE is the one current-mission exception: STAGE D's MOVE branch
+      // runs Firing_AI immediately before Movement_AI so FIRE_MOVING can stop
+      // the walk step when a firing animation starts.
       const skipFiringAIForMoveInfantry =
         entity.stats.isInfantry && (entity.mission as Mission) === Mission.MOVE;
-      const runInfantryFiringAfterGuardDispatch =
-        missionHandlerRan &&
-        entity.stats.isInfantry &&
-        (
-          missionBeforeStageB === Mission.ATTACK ||
-          missionBeforeStageB === Mission.HUNT ||
-          missionBeforeStageB === Mission.RESCUE ||
-          missionBeforeStageB === Mission.GUARD ||
-          missionBeforeStageB === Mission.STICKY ||
-          missionBeforeStageB === Mission.AREA_GUARD
-        );
       // C++ class order differs by locomotor:
       //   InfantryClass::AI: Firing_AI before Movement_AI (infantry.cpp:1237-1247)
       //   Unit/Vessel::AI: DriveClass::AI before Firing/Combat_AI
@@ -5487,9 +5476,7 @@ export class Game {
       // consumed the first tick-72 RNG call that C++ gives to Area Guard
       // Random_Animate. Keep pre-movement firing to infantry only; non-infantry
       // combat runs after STAGE D below.
-      if (entity.stats.isInfantry &&
-          (!missionHandlerRan || runInfantryFiringAfterGuardDispatch) &&
-          !skipFiringAIForMoveInfantry) {
+      if (entity.stats.isInfantry && !skipFiringAIForMoveInfantry) {
         this._runMissionAI(ctx => _runFiringAI(ctx, entity));
       }
 
@@ -12919,6 +12906,16 @@ export class Game {
     // Store HeadToCoord on entity
     entity.headToLX = headToLX;
     entity.headToLY = headToLY;
+
+    // C++ InfantryClass::Movement_AI sets PrimaryFacing immediately after a
+    // successful Start_Driver, before the next Coord_Move tick.
+    const facing8 = directionToLeptons(entity.leptonX, entity.leptonY, headToLX, headToLY);
+    const facing256 = (facing8 * 32) & 0xff;
+    entity.bodyFacing256 = facing256;
+    entity.bodyFacing32 = dir256ToFacing32(facing256);
+    entity.facing = dir256ToFacing8(facing256);
+    entity.desiredFacing = entity.facing;
+    entity.desiredFacing256 = facing256;
 
     return { lx: headToLX, ly: headToLY };
   }
