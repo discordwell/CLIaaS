@@ -2719,6 +2719,14 @@ export class Team {
             unit.pathIndex = 0;
           }
           if (tarMatch) {
+            // C++ TeamClass::Assign_Mission_Target clears old TarCom with
+            // unit->Assign_Target(TARGET_NONE). InfantryClass::Assign_Target
+            // invalidates Path[0], so a member whose target was cleared cannot
+            // reuse the stale approach path when Enter_Idle_Mode queues MOVE.
+            if (unit.stats.isInfantry) {
+              unit.path = [];
+              unit.pathIndex = 0;
+            }
             unit.target = null;
             unit.targetStructure = null;
           }

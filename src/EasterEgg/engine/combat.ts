@@ -2506,6 +2506,11 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
       entity.firePrepUsesDoingStage = false;
       restoreSuspendedMissionAfterDetach(ctx, entity, victim);
       if (entity.stats.isInfantry) {
+        // C++ ObjectClass::Detach_All reaches InfantryClass::Assign_Target
+        // through TechnoClass::Detach; assigning TARGET_NONE clears Path[0]
+        // without stopping the active Head_To_Coord hop.
+        entity.path = [];
+        entity.pathIndex = 0;
         entity.isFiringAnim = false;
         entity.firingAnimTicks = 0;
       }

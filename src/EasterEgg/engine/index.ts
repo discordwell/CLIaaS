@@ -11996,6 +11996,12 @@ export class Game {
         other.firePrepStage = 0;
         other.firePrepUsesDoingStage = false;
         if (other.stats.isInfantry) {
+          // C++ TechnoClass::Detach calls virtual Assign_Target(TARGET_NONE).
+          // InfantryClass::Assign_Target clears Path[0] before FootClass clears
+          // TarCom, invalidating any queued path while preserving an active
+          // Head_To_Coord hop.
+          other.path = [];
+          other.pathIndex = 0;
           other.isFiringAnim = false;
           other.firingAnimTicks = 0;
         }

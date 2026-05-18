@@ -49,7 +49,7 @@ async function wasmPatrolMembers(adapter: unknown) {
     const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
     const rows = new Map<number, any>(
       (state.logicLayer ?? [])
-        .filter((row: any[]) => row[0] === 114 || row[0] === 115)
+        .filter((row: any[]) => row[0] === 114 || row[0] === 115 || row[0] === 116)
         .map((row: any[]) => [row[0], {
           logicIndex: row[0],
           mission: row[7],
@@ -60,7 +60,7 @@ async function wasmPatrolMembers(adapter: unknown) {
           ly: row[13],
         }]),
     );
-    if (!rows.has(114) || !rows.has(115)) {
+    if (!rows.has(114) || !rows.has(115) || !rows.has(116)) {
       throw new Error('C++ SCG27EA patrol infantry rows missing');
     }
     return {
@@ -75,7 +75,7 @@ async function tsPatrolMembers(adapter: unknown) {
   return adapterPage(adapter).evaluate(() => {
     const game = (window as any).__agentGame;
     const state = (window as any).__agentState();
-    const rows = [114, 115].map(logicIndex => {
+    const rows = [114, 115, 116].map(logicIndex => {
       const entity = game.entities.find((e: any) => e.logicIndexHint === logicIndex);
       if (!entity) throw new Error(`TS SCG27EA patrol infantry ${logicIndex} missing`);
       return [logicIndex, {
@@ -136,6 +136,23 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCG27EA patrol retarget', (
           missionQueue: -1,
         });
       }
+
+      const cpp116 = cppRetarget.units[116];
+      const ts116 = tsRetarget.units[116];
+      expect(ts116).toMatchObject({
+        mission: 'MOVE',
+        missionQueue: null,
+        missionTimer: cpp116.missionTimer,
+        isDriving: cpp116.isDriving,
+        lx: cpp116.lx,
+        ly: cpp116.ly,
+        moveTarget: { lx: 8584, ly: 12424 },
+      });
+      expect(cpp116).toMatchObject({
+        mission: 2,
+        missionQueue: -1,
+        isDriving: false,
+      });
 
       await stepBothOneTickAtATime(handle, 1);
       const [cppNext, tsNext] = await Promise.all([
