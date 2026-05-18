@@ -4354,8 +4354,9 @@ export function applySplashDamage(
 
       if (reduced) {
         const nextLevel = ctx.map.getWallDamageLevel(impactCell.cx, impactCell.cy) + 1;
-        const clearsWithUndamagedShape = nextLevel === damageLevels - 1;
-        if (weapon.damage === -1 || nextLevel >= damageLevels || clearsWithUndamagedShape) {
+        const connectionIcon = ctx.map.getWallConnectionIcon(impactCell.cx, impactCell.cy, wallType);
+        const clearsWithMissingDamagedArt = nextLevel === damageLevels - 1 && connectionIcon === 0;
+        if (weapon.damage === -1 || nextLevel >= damageLevels || clearsWithMissingDamagedArt) {
           ctx.map.clearWallType(impactCell.cx, impactCell.cy);
           detachCellTargetFromTargeting(ctx, impactCell.cx, impactCell.cy);
           ctx.map.addDecal(impactCell.cx, impactCell.cy, 4, 0.3);

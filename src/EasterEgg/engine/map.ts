@@ -408,6 +408,17 @@ export class GameMap {
     }
   }
 
+  /** C++ Wall_Update low nibble: same-type cardinal wall connections, NESW bits. */
+  getWallConnectionIcon(cx: number, cy: number, wallType = this.getWallType(cx, cy)): number {
+    if (!wallType) return 0;
+    let icon = 0;
+    if (this.getWallType(cx, cy - 1) === wallType) icon |= 1;
+    if (this.getWallType(cx + 1, cy) === wallType) icon |= 2;
+    if (this.getWallType(cx, cy + 1) === wallType) icon |= 4;
+    if (this.getWallType(cx - 1, cy) === wallType) icon |= 8;
+    return icon;
+  }
+
   /** Get tree type at a cell ('' if no tree type stored) */
   getTreeType(cx: number, cy: number): string {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return '';
