@@ -1974,6 +1974,12 @@ function guardScanMask(entity: Entity, isHumanControlled: boolean): number {
   return mask;
 }
 
+function isHumanControlledForTargeting(ctx: GreatestThreatRangeContext, entity: Entity): boolean {
+  return ctx.isHumanControlledHouse
+    ? ctx.isHumanControlledHouse(entity.house)
+    : entity.house === ctx.playerHouse;
+}
+
 /** C++ FootClass::Mission_Hunt calls Target_Something_Nearby(THREAT_NORMAL).
  *  For vessels, the virtual VesselClass::Greatest_Threat override still applies:
  *  submarines replace THREAT_NORMAL with BOATS|BUILDINGS|FACTORIES, while other
@@ -2779,7 +2785,7 @@ function threatRangeScanConfig(entity: Entity): { scanRange: number; mode: 'rang
  */
 export function greatestThreatRangeTarget(ctx: GreatestThreatRangeContext, entity: Entity): Entity | null {
   const { scanRange, mode } = threatRangeScanConfig(entity);
-  const scanMask = guardScanMask(entity, ctx.isPlayerControlled(entity));
+  const scanMask = guardScanMask(entity, isHumanControlledForTargeting(ctx, entity));
   if (scanRange <= 0 || scanMask === 0) return null;
   return cellBasedGuardScan(ctx, entity, scanRange, scanMask, {
     mode,
@@ -2790,7 +2796,7 @@ export function greatestThreatRangeTarget(ctx: GreatestThreatRangeContext, entit
 
 export function targetSomethingNearbyRange(ctx: MissionAIContext, entity: Entity): Entity | null {
   const { scanRange, mode } = threatRangeScanConfig(entity);
-  const scanMask = guardScanMask(entity, ctx.isPlayerControlled(entity));
+  const scanMask = guardScanMask(entity, isHumanControlledForTargeting(ctx, entity));
   if (scanRange <= 0 || scanMask === 0) {
     assignTargetForTechno(entity, null);
     entity.targetStructure = null;

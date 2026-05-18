@@ -5875,7 +5875,7 @@ export class Game {
         const hasLegalTarCom = (entity.target?.alive ?? false) || (entity.targetStructure?.alive ?? false);
         if (missionTimerFired &&
             !hasLegalTarCom &&
-            !this.isPlayerControlled(entity) &&
+            entity.house !== this.playerHouse &&
             !entity.teamRef?.isSuicide) {
           this._runMissionAI(ctx => _targetSomethingNearbyRange(ctx, entity));
         }
