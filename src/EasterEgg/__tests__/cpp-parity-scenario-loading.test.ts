@@ -839,6 +839,41 @@ Theater=TEMPERATE
   });
 });
 
+describe('C++ Parity: Scenario General Overrides (rules.cpp:479)', () => {
+  it('reads AllyReveal=no from scenario [General]', () => {
+    // C++ rules.cpp:479: scenario INI [General] can override RulesClass::IsAllyReveal.
+    const testIni = `[General]
+AllyReveal=no
+[Basic]
+Name=Ally Reveal Test
+Player=Greece
+[Map]
+X=0
+Y=0
+Width=50
+Height=50
+Theater=TEMPERATE
+`;
+    const data = parseScenarioINI(testIni);
+    expect(data.allyReveal).toBe(false);
+  });
+
+  it('defaults AllyReveal to rules.ini yes when the scenario omits it', () => {
+    const testIni = `[Basic]
+Name=Default Ally Reveal Test
+Player=Greece
+[Map]
+X=0
+Y=0
+Width=50
+Height=50
+Theater=TEMPERATE
+`;
+    const data = parseScenarioINI(testIni);
+    expect(data.allyReveal).toBe(true);
+  });
+});
+
 describe('C++ Parity: Terrain Template Classification (display.cpp, scenario.ts)', () => {
   it('water templates (1-2) are classified as WATER', () => {
     // C++ defines.h:1695-1696: TEMPLATE_WATER, TEMPLATE_WATER2

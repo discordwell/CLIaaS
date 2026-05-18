@@ -194,6 +194,11 @@ function isEntitySource(source: DamageSource): source is Entity {
   return source instanceof Entity;
 }
 
+type LogicSkipRange = {
+  after: number;
+  through: number;
+};
+
 function sourceHouse(source: DamageSource): House {
   return source.house;
 }
@@ -327,6 +332,78 @@ function aircraftProjectileImpactAfterScatter(
   const dy = impactY - targetPixels.y;
   directHit = Math.sqrt(dx * dx + dy * dy) < CELL_SIZE * 0.6;
   return { impactX, impactY, directHit, facing256 };
+}
+
+function structureProjectileImpactAfterScatter(
+  s: MapStructure,
+  weapon: StructureWeapon,
+  target: Entity,
+  fireCoord: { lx: number; ly: number },
+  targetCoord: { lx: number; ly: number },
+): { targetLX: number; targetLY: number; impactX: number; impactY: number; directHit: boolean; facing256?: number } {
+  const targetPixels = entityTargetPixels(target);
+  let targetLX = targetCoord.lx;
+  let targetLY = targetCoord.ly;
+  let impactX = targetPixels.x;
+  let impactY = targetPixels.y;
+  let directHit = true;
+  let facing256: number | undefined;
+
+  const projectile = weapon as StructureWeapon & Pick<WeaponStats, 'isArcing' | 'isFueled' | 'projectileROT' | 'isDropping'>;
+  const warhead = (weapon.warhead ?? 'HE') as WarheadType;
+  const doScatter = target.stats.isInfantry && (warhead === 'AP' || !!projectile.isFueled);
+  if (!doScatter) return { targetLX, targetLY, impactX, impactY, directHit };
+
+  // C++ TechnoClass::Fire_At -> BulletClass::Unlimbo -> bullet.cpp:709-730.
+  // Building firers are never FootClass moving platforms, but AP/fueled shots
+  // against infantry still scatter at launch and consume scenario RNG.
+  const savedTag = ScenarioRandom._sourceTag;
+  if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 70015;
+  try {
+    const distLeptons = leptonDist(fireCoord.lx, fireCoord.ly, targetCoord.lx, targetCoord.ly);
+    let scatterMax = Math.trunc(distLeptons / 16) - 0x0040;
+    scatterMax = Math.max(0, scatterMax);
+    scatterMax = Math.min(scatterMax, projectile.isArcing ? 0x0200 : 0x0100);
+
+    if (projectile.isArcing) {
+      const baseDir = directionToLeptons256(
+        fireCoord.lx, fireCoord.ly,
+        targetCoord.lx, targetCoord.ly,
+      );
+      const jitter = ScenarioRandom.nextInRange(0, 10);
+      facing256 = (baseDir + jitter - 5) & 0xff;
+      const scatterDist = ScenarioRandom.nextInRange(0, scatterMax);
+      const coordScatterSavedTag = ScenarioRandom._sourceTag;
+      if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 50002;
+      const scatterDir = ScenarioRandom.nextInRange(0, 255);
+      if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = coordScatterSavedTag;
+      const scattered = moveCoordLeptons(targetCoord, scatterDir, scatterDist);
+      targetLX = scattered.lx;
+      targetLY = scattered.ly;
+    } else {
+      const scatterDist = ScenarioRandom.nextInRange(0, scatterMax);
+      const projectileHasFireDirection = ((projectile.projectileROT ?? 0) !== 0) || !!projectile.isDropping;
+      const dir256 = projectileHasFireDirection
+        ? structureTurretFacing256(s, target)
+        : directionToLeptons256(
+            fireCoord.lx, fireCoord.ly,
+            targetCoord.lx, targetCoord.ly,
+          );
+      facing256 = dir256;
+      const scattered = moveCoordLeptons(targetCoord, dir256, scatterDist);
+      targetLX = scattered.lx;
+      targetLY = scattered.ly;
+    }
+  } finally {
+    ScenarioRandom._sourceTag = savedTag;
+  }
+
+  impactX = targetLX * CELL_SIZE / LEPTON_SIZE;
+  impactY = targetLY * CELL_SIZE / LEPTON_SIZE;
+  const dx = impactX - targetPixels.x;
+  const dy = impactY - targetPixels.y;
+  directHit = Math.sqrt(dx * dx + dy * dy) < CELL_SIZE * 0.6;
+  return { targetLX, targetLY, impactX, impactY, directHit, facing256 };
 }
 
 function structureTurretFacing256(s: MapStructure, target?: Entity): number {
@@ -1084,8 +1161,12 @@ export interface CombatContext {
   releaseTerrainLogicSlot?: (terrain: MapTree) => void;
   /** Release a non-entity C++ Logic slot after its BulletClass/AnimClass deletes. */
   deferLogicSlotRelease?: (logicIndexHint: number | undefined) => void;
+  /** Lowest original Logic index before a shifted-behind-cursor range. */
+  shiftedLogicSkipHintAfter?: number;
   /** Highest original Logic index shifted behind the active C++ cursor this tick. */
   shiftedLogicSkipHintThrough?: number;
+  /** Original Logic index ranges shifted behind the active C++ cursor this tick. */
+  shiftedLogicSkipRanges?: LogicSkipRange[];
   /** Reserve one C++ AnimClass heap slot. Returns false when Rule.AnimMax is full. */
   reserveAnimSlot?: () => boolean;
   tick: number;
@@ -2961,12 +3042,17 @@ function launchStructureProjectile(
   target: Entity,
   weapon: StructureWeapon,
 ): void {
-  const targetCoord = entityTargetLeptons(target);
-  const targetLX = targetCoord.lx;
-  const targetLY = targetCoord.ly;
-  const targetX = targetLX * CELL_SIZE / LEPTON_SIZE;
-  const targetY = targetLY * CELL_SIZE / LEPTON_SIZE;
   const { lx: launchLX, ly: launchLY } = structureFireLeptons(s, target);
+  const targetCoord = entityTargetLeptons(target);
+  const scatter = structureProjectileImpactAfterScatter(
+    s,
+    weapon,
+    target,
+    { lx: launchLX, ly: launchLY },
+    targetCoord,
+  );
+  const targetLX = scatter.targetLX;
+  const targetLY = scatter.targetLY;
   const maxSpeed = weapon.projSpeed !== undefined
     ? iniSpeedToMph(weapon.projSpeed)
     : LIGHT_SPEED;
@@ -3006,9 +3092,9 @@ function launchStructureProjectile(
     speed,
     travelFrames,
     currentFrame: 0,
-    directHit: true,
-    impactX: targetX,
-    impactY: targetY,
+    directHit: scatter.directHit,
+    impactX: scatter.impactX,
+    impactY: scatter.impactY,
     attackerIsPlayer: ctx.isAllied(s.house, ctx.playerHouse),
     isArcing: false,
     arcHeight: 0,
@@ -3029,8 +3115,8 @@ function launchStructureProjectile(
     logicalLY: bulletStartLY,
     headToLX: targetLX,
     headToLY: targetLY,
-    facing256: directionToLeptons256(bulletStartLX, bulletStartLY, targetLX, targetLY),
-    desiredFacing256: directionToLeptons256(bulletStartLX, bulletStartLY, targetLX, targetLY),
+    facing256: scatter.facing256 ?? directionToLeptons256(bulletStartLX, bulletStartLY, targetLX, targetLY),
+    desiredFacing256: scatter.facing256 ?? directionToLeptons256(bulletStartLX, bulletStartLY, targetLX, targetLY),
     speedAccum: 0,
     speedAdd,
     fuseTimer: Math.min(0xFF, travelFrames),
@@ -3438,16 +3524,20 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
   const survivors: InflightProjectile[] = [...alreadyProcessed];
   const predecessors = snapshotProjectilePredecessors(ctx);
   let shiftedBehindCursor = 0;
-  let skipLogicHintThrough = -Infinity;
+  const skipLogicHintRanges: LogicSkipRange[] = [];
   const spawnedThisPass = new Set<InflightProjectile>();
 
   ctx.inflightProjectiles = [...survivors, ...deferred];
 
   for (let i = 0; i < queue.length; i++) {
     const proj = queue[i];
+    const skipRange = proj.logicIndexHint === undefined
+      ? undefined
+      : skipLogicHintRanges.find(range =>
+          proj.logicIndexHint! > range.after && proj.logicIndexHint! <= range.through);
     if (!spawnedThisPass.has(proj) &&
         proj.logicIndexHint !== undefined &&
-        proj.logicIndexHint <= skipLogicHintThrough) {
+        skipRange !== undefined) {
       projectileTrace({
         event: 'skip-shifted',
         tick: ctx.tick,
@@ -3456,7 +3546,8 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
         currentFrame: proj.currentFrame,
         fuelTimer: proj.fuelTimer,
         fuseTimer: proj.fuseTimer,
-        skipLogicHintThrough,
+        skipLogicHintAfter: skipRange.after,
+        skipLogicHintThrough: skipRange.through,
       });
       proj.processedLogicTick = ctx.tick;
       survivors.push(proj);
@@ -3549,17 +3640,24 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
     const liveAfter = countLiveProjectilePredecessors(ctx, predecessors);
     const earlierDeletes = Math.max(0, liveBefore - liveAfter);
     if (proj.logicIndexHint !== undefined) {
-      skipLogicHintThrough = Math.max(skipLogicHintThrough, proj.logicIndexHint + earlierDeletes);
-      ctx.shiftedLogicSkipHintThrough = Math.max(
-        ctx.shiftedLogicSkipHintThrough ?? -Infinity,
-        skipLogicHintThrough,
-      );
+      const skipLogicHintAfter = proj.logicIndexHint;
+      const skipLogicHintThrough = proj.logicIndexHint + earlierDeletes;
+      if (skipLogicHintThrough > skipLogicHintAfter) {
+        const range = { after: skipLogicHintAfter, through: skipLogicHintThrough };
+        skipLogicHintRanges.push(range);
+        (ctx.shiftedLogicSkipRanges ??= []).push(range);
+        if (skipLogicHintThrough > (ctx.shiftedLogicSkipHintThrough ?? -Infinity)) {
+          ctx.shiftedLogicSkipHintAfter = skipLogicHintAfter;
+          ctx.shiftedLogicSkipHintThrough = skipLogicHintThrough;
+        }
+      }
       projectileTrace({
         event: 'delete-shift',
         tick: ctx.tick,
         weapon: proj.weapon.name,
         hint: proj.logicIndexHint,
         earlierDeletes,
+        skipLogicHintAfter,
         skipLogicHintThrough,
       });
     } else {
@@ -4614,6 +4712,12 @@ function entityLogicOrderKey(entity: Entity): number {
   return entity.logicIndexHint ?? entity.id;
 }
 
+function entityCellOccupierOrderKey(entity: Entity): number {
+  return entity.cellOccupierSerial > 0
+    ? entity.cellOccupierSerial
+    : entityLogicOrderKey(entity);
+}
+
 function structureThreatCandidateVisible(ctx: CombatContext, e: Entity): boolean {
   // C++ techno.cpp:1551 skips the IsDiscoveredByPlayer visibility gate for
   // RTTI_AIRCRAFT candidates.
@@ -4636,7 +4740,22 @@ function structureThreatScore(s: MapStructure, e: Entity): number {
   return Math.max(Math.trunc((value * 32000) / (Math.floor(scoreDistLeptons / LEPTON_SIZE) + 1)), 1);
 }
 
-function structureThreatObjectIsEligible(
+function entityOccupiesStructureThreatCell(e: Entity): boolean {
+  if (e.inLimbo) return false;
+  if (e.alive) return true;
+  if (!e.stats.isInfantry) return false;
+  if (e.type === UnitType.I_DOG) return false;
+  return e.mission === Mission.DIE &&
+    e.deathVariant >= 1 &&
+    e.deathVariant <= 4 &&
+    !e.isInfantryDeathAnimationComplete();
+}
+
+function structureThreatObjectIsAssignable(e: Entity): boolean {
+  return e.alive && e.hp > 0 && !e.inLimbo;
+}
+
+function structureThreatObjectPassesEvaluate(
   ctx: CombatContext,
   s: MapStructure,
   e: Entity,
@@ -4644,7 +4763,7 @@ function structureThreatObjectIsEligible(
   rangeLeptons: number,
 ): boolean {
   if (!s.weapon) return false;
-  if (!e.alive || e.inLimbo) return false;
+  if (!entityOccupiesStructureThreatCell(e)) return false;
   if (!e.isAirUnit && entityInTopLayer(e)) return false;
   if (ctx.isAllied(s.house, e.house)) return false;
   if (MISSION_CONTROL[e.mission]?.isNoThreat) return false;
@@ -4673,7 +4792,8 @@ function structureThreatAirTarget(ctx: CombatContext, s: MapStructure): Entity |
 
   for (const e of structureThreatScanEntities(ctx)) {
     if (!e.isAirUnit || e.flightAltitude <= 0) continue;
-    if (!structureThreatObjectIsEligible(ctx, s, e, fireCoord, rangeLeptons)) continue;
+    if (!structureThreatObjectPassesEvaluate(ctx, s, e, fireCoord, rangeLeptons)) continue;
+    if (!structureThreatObjectIsAssignable(e)) continue;
     const score = structureThreatScore(s, e);
     if (score > bestScore) {
       bestTarget = e;
@@ -4708,13 +4828,16 @@ export function findStructureThreatTarget(ctx: CombatContext, s: MapStructure): 
   // techno in the LIFO chain. If that object then fails Evaluate_Object, C++
   // does not look behind it in the same cell. Build exactly that per-cell head.
   const cellHead = new Map<number, Entity>();
-  const ordered = [...ctx.entities].sort((a, b) => entityLogicOrderKey(a) - entityLogicOrderKey(b));
-  for (const e of ordered) {
-    if (!e.alive || e.inLimbo) continue;
+  for (const e of ctx.entities) {
+    if (!entityOccupiesStructureThreatCell(e)) continue;
     if (!e.isAirUnit && entityInTopLayer(e)) continue;
     if (e.isAirUnit && e.flightAltitude > 0) continue;
     if (ctx.isAllied(s.house, e.house)) continue;
-    cellHead.set(structureThreatCellKey(e.cell.cx, e.cell.cy), e);
+    const key = structureThreatCellKey(e.cell.cx, e.cell.cy);
+    const current = cellHead.get(key);
+    if (!current || entityCellOccupierOrderKey(e) > entityCellOccupierOrderKey(current)) {
+      cellHead.set(key, e);
+    }
   }
 
   const mapX = ctx.map.boundsX;
@@ -4726,7 +4849,7 @@ export function findStructureThreatTarget(ctx: CombatContext, s: MapStructure): 
   const scanCell = (cx: number, cy: number): void => {
     const candidate = cellHead.get(structureThreatCellKey(cx, cy));
     if (!candidate) return;
-    if (structureThreatObjectIsEligible(ctx, s, candidate, fireCoord, rangeLeptons)) {
+    if (structureThreatObjectPassesEvaluate(ctx, s, candidate, fireCoord, rangeLeptons)) {
       // C++ cell-scan bug: bestval is initialized before the ring scan but is
       // never updated when a cell candidate wins, so every later valid
       // positive-valued cell target overwrites the previous one until an early
@@ -4761,11 +4884,13 @@ export function findStructureThreatTarget(ctx: CombatContext, s: MapStructure): 
     if (bestTarget) {
       const quarter = Math.floor(crange / 4);
       const half = Math.floor(crange / 2);
-      if (radius === quarter || radius === half) return bestTarget;
+      if (radius === quarter || radius === half) {
+        return structureThreatObjectIsAssignable(bestTarget) ? bestTarget : null;
+      }
     }
   }
 
-  return bestTarget;
+  return bestTarget && structureThreatObjectIsAssignable(bestTarget) ? bestTarget : null;
 }
 
 function getAssignedStructureTarget(ctx: CombatContext, s: MapStructure): Entity | null {

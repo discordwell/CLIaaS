@@ -539,7 +539,7 @@ function commenceAircraft(ctx: AircraftContext, entity: Entity): void {
   entity.missionQueue = null;
   entity.missionQueueSetTick = -1;
   entity.missionTimer = 0;
-  if (queuedMission === Mission.MOVE) {
+  if (queuedMission === Mission.MOVE && !entity.isFixedWing) {
     entity.aircraftMoveStatus = MOVE_TAKE_OFF;
     entity._flyToTicks = 0;
     const savedTag = ScenarioRandom._sourceTag;

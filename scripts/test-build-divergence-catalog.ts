@@ -35,6 +35,28 @@ const TS_BASE_URL = process.env.TS_BASE_URL ?? BASE_URL;
 const SCENARIOS = (process.env.SCENARIOS ?? 'SCG01EA,SCG03EA,SCG04EA,SCG06EA,SCG07EA,SCG11EA,SCG13EA').split(',');
 const MAX = Number(process.env.MAX ?? 100);
 const OUT = process.env.OUT ?? 'artifacts/divergence-catalog.json';
+const TEST_TIMEOUT_MS = Number(process.env.TEST_TIMEOUT_MS ?? 20 * 60 * 1000);
+const WASM_READY_TIMEOUT_MS = Number(process.env.WASM_READY_TIMEOUT_MS ?? 180_000);
+const TS_READY_TIMEOUT_MS = Number(process.env.TS_READY_TIMEOUT_MS ?? 120_000);
+const MULT_CONSTANT = 0x41C64E6D;
+const ADD_CONSTANT = 0x00003039;
+
+function nextScenarioSeed(seed: number): number {
+  return (Math.imul(seed >>> 0, MULT_CONSTANT) + ADD_CONSTANT) >>> 0;
+}
+
+function filterScenarioRngLog(log: Array<[number, number, number?]>, startSeed: number): Array<[number, number, number?]> {
+  const filtered: Array<[number, number, number?]> = [];
+  let seed = startSeed >>> 0;
+  for (const entry of log) {
+    const expected = nextScenarioSeed(seed);
+    if ((entry[0] >>> 0) === expected) {
+      filtered.push(entry);
+      seed = expected;
+    }
+  }
+  return filtered;
+}
 
 function tagName(tag: number): string {
   if (tag >= 16000 && tag < 17000) return `anim[${tag - 16000}]`;
@@ -96,7 +118,7 @@ const catalog: Catalog = {
 
 for (const scenario of SCENARIOS) {
   test(`build catalog: ${scenario}`, async ({ browser }) => {
-    test.setTimeout(20 * 60 * 1000);
+    test.setTimeout(TEST_TIMEOUT_MS);
 
     const wasmCtx = await browser.newContext();
     const tsCtx = await browser.newContext({ viewport: { width: 1200, height: 800 } });
@@ -110,8 +132,21 @@ for (const scenario of SCENARIOS) {
       tsPage.goto(`${TS_BASE_URL}?anttest=agent&scenario=${scenario}&difficulty=normal`, { waitUntil: 'load' }),
     ]);
     await Promise.all([
-      wasmPage.waitForFunction(() => { try { const M=(window as any).Module; return M?.ccall && JSON.parse(M.ccall('agent_get_state','string',[],[])).units?.length > 0; } catch { return false; } }, { timeout: 180_000, polling: 2000 }),
-      tsPage.waitForFunction(() => (window as any).__agentReady === true, { timeout: 120_000, polling: 1000 }),
+      wasmPage.waitForFunction(() => {
+        try {
+          const M = (window as any).Module;
+          if (!M?.ccall) return false;
+          const state = JSON.parse(M.ccall('agent_get_state', 'string', [], []));
+          return !state.error &&
+            typeof state.tick === 'number' &&
+            Array.isArray(state.units) &&
+            Array.isArray(state.enemies) &&
+            Array.isArray(state.structures);
+        } catch {
+          return false;
+        }
+      }, { timeout: WASM_READY_TIMEOUT_MS, polling: 2000 }),
+      tsPage.waitForFunction(() => (window as any).__agentReady === true, { timeout: TS_READY_TIMEOUT_MS, polling: 1000 }),
     ]);
     const wasmSeed = await wasmPage.evaluate(() => {
       const M = (window as any).Module;
@@ -119,6 +154,7 @@ for (const scenario of SCENARIOS) {
     });
     await tsPage.evaluate((s: number) => { (window as any).__syncRngSeed?.(s); }, wasmSeed);
     await tsPage.evaluate(() => { (window as any).__rngTagControl('enable'); });
+    let wasmScenarioSeed = wasmSeed >>> 0;
 
     const sc: ScenarioCatalog = {
       first_divergence: null,
@@ -154,10 +190,11 @@ for (const scenario of SCENARIOS) {
         };
       });
 
-      const wasmLog = wasmStepResult.log;
+      const wasmLog = filterScenarioRngLog(wasmStepResult.log, wasmScenarioSeed);
       const tsLog = tsData.log;
       const wSeed = wasmStepResult.seed >>> 0;
       const tSeed = tsData.seed >>> 0;
+      wasmScenarioSeed = wSeed;
       const seedMatch = wSeed === tSeed;
       const callDiff = wasmLog.length - tsLog.length;
 

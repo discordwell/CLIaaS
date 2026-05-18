@@ -134,6 +134,7 @@ export interface MissionAIContext {
   /** C++ VesselClass::Mission_Retreat removes retreating vessels from teams. */
   removeFromTeamForRetreat?(entity: Entity): void;
   threatScore(scanner: Entity, target: Entity, dist: number): number;
+  structureThreatScore?(scanner: Entity, structure: MapStructure, dist: number): number;
   leaveMap?(entity: Entity): void;
 
   // Special unit delegation — these call back into Game class methods
@@ -193,6 +194,7 @@ export interface GreatestThreatRangeContext {
   isHumanControlledHouse?(house: House): boolean;
   isWallDestroyerDifficulty?(house: House): boolean;
   threatScore?(scanner: Entity, target: Entity, dist: number): number;
+  structureThreatScore?(scanner: Entity, structure: MapStructure, dist: number): number;
 }
 
 function weaponSelectionMult(
@@ -1694,14 +1696,42 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
     // the player discovery map (`IsDiscoveredByPlayer`), not the scanner's own
     // house. Candidate-owned-by-player is the only bypass.
     const playerHouseIdx = _HOUSE_IDX[ctx.playerHouse] ?? -1;
-    let bestTarget: Entity | null = null;
-    let bestStruct: MapStructure | null = null;
-    let bestScore = -Infinity;
-    let bestSortKey = Infinity;
-    for (const other of ctx.entities) {
-      if (!isCppFullMapThreatLayerCandidate(other) || ctx.entitiesAllied(entity, other)) continue;
-      if (!isInCppGroundThreatLayer(other)) continue;
-      // C++ Target_Something_Nearby delegates through class Greatest_Threat.
+	    let bestTarget: Entity | null = null;
+	    let bestStruct: MapStructure | null = null;
+	    let bestScore = -Infinity;
+	    let bestSortKey = Infinity;
+
+	    // C++ techno.cpp:2239-2250 full-map Greatest_Threat scans Aircraft.Count()
+	    // before Map.Layer[LAYER_GROUND], and that Evaluate_Object call does not
+	    // receive the movement-zone argument. SCU35EA exposes this when an E3
+	    // HUNT scan sees an out-of-zone BADR, assigns a NavCom via Approach_Target,
+	    // and only later clears TarCom in TechnoClass::AI zone maintenance.
+	    if ((rttiMask & RTTI.AIRCRAFT) && hasThreatAirMethod(entity)) {
+	      const aircraft = ctx.entities
+	        .filter(other => other.isAirUnit)
+	        .sort((a, b) => a.id - b.id);
+	      for (const other of aircraft) {
+	        if (!isCppFullMapThreatLayerCandidate(other) || ctx.entitiesAllied(entity, other)) continue;
+	        if (!(entityRttiBit(other) & rttiMask)) continue;
+	        if (!canTargetNaval(entity, other)) continue;
+	        if (MISSION_CONTROL[other.mission]?.isNoThreat) continue;
+	        if (other.cloakState === CloakState.CLOAKED) continue;
+	        const dist = leptonDist(entity.leptonX, entity.leptonY, other.leptonX, other.leptonY);
+	        const score = ctx.threatScore(entity, other, dist / LEPTON_SIZE);
+	        const sortKey = other.id;
+	        if (score > bestScore || (score === bestScore && sortKey < bestSortKey)) {
+	          bestScore = score;
+	          bestSortKey = sortKey;
+	          bestTarget = other;
+	          bestStruct = null;
+	        }
+	      }
+	    }
+
+	    for (const other of ctx.entities) {
+	      if (!isCppFullMapThreatLayerCandidate(other) || ctx.entitiesAllied(entity, other)) continue;
+	      if (!isInCppFullMapGroundThreatLayer(other)) continue;
+	      // C++ Target_Something_Nearby delegates through class Greatest_Threat.
       // InfantryClass::Greatest_Threat ORs weapon Allowed_Threats, then clears
       // non-infantry targets for Organic warheads/dogs (infantry.cpp:2315-2326;
       // techno.cpp:2017-2038). Mission_Hunt must respect that same RTTI mask:
@@ -1749,7 +1779,9 @@ export function updateHunt(ctx: MissionAIContext, entity: Entity): void {
         const targetCoord = structureTargetLeptons(s);
         const dist = leptonDist(entity.leptonX, entity.leptonY, targetCoord.lx, targetCoord.ly);
         if (dist > huntRange) continue;
-        const score = structureThreatScore(s, dist);
+        const score = ctx.structureThreatScore
+          ? ctx.structureThreatScore(entity, s, dist / LEPTON_SIZE)
+          : structureThreatScore(s, dist);
         const sortKey = structureGroundLayerSortKey(s);
         if (score > bestScore || (score === bestScore && sortKey < bestSortKey)) {
           bestScore = score;
@@ -2021,6 +2053,11 @@ function isInCppGroundThreatLayer(other: Entity): boolean {
   if (other.isAirUnit) return true;
   if (!other.isFalling) return true;
   return other.fallHeightLeptons < CXX_GROUND_LAYER_HEIGHT_LEPTONS;
+}
+
+function isInCppFullMapGroundThreatLayer(other: Entity): boolean {
+  if (other.isAirUnit) return !isInCppAircraftTopThreatLayer(other);
+  return isInCppGroundThreatLayer(other);
 }
 
 function hasThreatAirMethod(entity: Entity): boolean {
@@ -2395,20 +2432,20 @@ function cellBasedGuardScan(
   const mapW = ctx.map.boundsW;
   const mapH = ctx.map.boundsH;
 
-  // Build cell→entity lookup: for each cell, store the LAST candidate techno.
+  // Build cell→entity lookup: for each cell, store the first candidate techno
+  // in C++ Cell_Occupier chain order.
   //
   // C++ Evaluate_Cell (techno.cpp:1831-1843) traverses the Cell_Occupier() linked list:
   //   - normal weapons pick the FIRST non-allied techno
   //   - negative-damage weapons pick the FIRST injured allied techno
   //
-  // The occupier list is LIFO — Occupy_Up (cell.cpp:1189) prepends:
-  // object->Next = OccupierPtr; OccupierPtr = object. So the FIRST in the LIFO
-  // chain is the MOST RECENTLY unlimboed entity in that cell.
-  //
-  // ctx.entities is in INI/unlimbo order (oldest first). To match C++'s "most recently
-  // unlimboed" selection, we always overwrite — the LAST entity per cell in our forward
-  // iteration is the one that would be at the HEAD of C++'s LIFO occupier chain.
+  // CellClass::Occupy_Down prepends non-building objects to the chain. The game
+  // stamps that place-down order in Entity.cellOccupierSerial; when a unit test
+  // builds entities without a game, fall back to Logic/creation order, where
+  // later scenario unlimbos are newer.
   const cellMap = new Map<number, CellScanTarget>();
+  const cellOccupierOrderKey = (ent: Entity): number =>
+    ent.cellOccupierSerial > 0 ? ent.cellOccupierSerial : (ent.logicIndexHint ?? ent.id);
   // C++ techno.cpp:1529 — visibility is checked on the candidate object:
   //   if (!object->IsOwnedByPlayer && !object->IsDiscoveredByPlayer && GAME_NORMAL)
   //       reject;
@@ -2427,7 +2464,9 @@ function cellBasedGuardScan(
   const scoreStructureCandidate = (s: MapStructure): number => {
     const center = structureCenterLeptons(s);
     const dist = leptonDist(entity.leptonX, entity.leptonY, center.lx, center.ly);
-    return structureThreatScore(s, dist);
+    return ctx.structureThreatScore
+      ? ctx.structureThreatScore(entity, s, dist / LEPTON_SIZE)
+      : structureThreatScore(s, dist);
   };
   const entityIsInScanRange = (ent: Entity): boolean => {
     const selectedWeapon = mode === 'range'
@@ -2555,9 +2594,10 @@ function cellBasedGuardScan(
     const oc = other.cell;
     if (reachableZone && !reachableZone[cellKey(oc.cx, oc.cy)]) continue;
     const key = cellKey(oc.cx, oc.cy);
-    // C++ LIFO: last unlimboed = head of chain = picked by Evaluate_Cell.
-    // TS forward iteration: always overwrite so last (= most recently unlimboed) wins.
-    cellMap.set(key, { entity: other });
+    const current = cellMap.get(key);
+    if (!current?.entity || cellOccupierOrderKey(other) > cellOccupierOrderKey(current.entity)) {
+      cellMap.set(key, { entity: other });
+    }
   }
 
   // Buildings live in the same Cell_Occupier chain as foot objects for

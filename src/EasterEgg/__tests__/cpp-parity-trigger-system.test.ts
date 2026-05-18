@@ -604,16 +604,15 @@ describe('checkTriggerEvent — C++ tevent.cpp operator() parity', () => {
   // C++ tevent.cpp:251-253: if (td.Timer != 0) return(false); return(true);
   // C++ tevent.cpp:187: Reset sets td.Timer = Data.Value * (TICKS_PER_MINUTE/10)
   // TICKS_PER_MINUTE = 900 (at 15Hz), so TIME_UNIT = 90 ticks
-  it('TEVENT_TIME fires when elapsed ticks > data * TIME_UNIT_TICKS', () => {
+  it('TEVENT_TIME fires when elapsed ticks >= data * TIME_UNIT_TICKS', () => {
     // C++ tevent.cpp:187: timer = Data.Value * (TICKS_PER_MINUTE/10) = data * 90
-    // C++ CDTimerClass: Frame increments AFTER Logic.AI, TS tick increments BEFORE,
-    // so TS tick is always Frame+1 at the same processing point. Use > not >=.
+    // C++ CDTimerClass reaches zero when elapsed >= delay.
     const data = 5; // 5 * 90 = 450 ticks required
     const requiredTicks = data * TIME_UNIT_TICKS;
     expect(requiredTicks).toBe(450);
 
     // Not yet elapsed
-    const state1 = createState({ gameTick: 450, triggerStartTick: 0 });
+    const state1 = createState({ gameTick: 449, triggerStartTick: 0 });
     expect(checkTriggerEvent(makeEvent(CPP_TEVENT.TIME, data), state1)).toBe(false);
 
     // One tick past — fires
@@ -1761,8 +1760,8 @@ describe('Spring() lifecycle — C++ trigger.cpp:227-358 integration', () => {
     t.timerTick = 1000; // Simulate timer reset
     t.fired = false;    // Ready to fire again
 
-    // Verify the trigger can check events again after reset (> not >=, so need 451 elapsed)
-    const state = createState({ gameTick: 1451, triggerStartTick: 1000 });
+    // Verify the trigger can check events again after reset at the exact threshold.
+    const state = createState({ gameTick: 1450, triggerStartTick: 1000 });
     expect(checkTriggerEvent(t.event1, state)).toBe(true);
   });
 
@@ -1796,10 +1795,10 @@ describe('timer constants — C++ tevent.cpp:187, defines.h', () => {
 
   it('Data.Value=1 in TEVENT_TIME means 90 ticks (6 seconds at 15Hz)', () => {
     const state = createState({ gameTick: 90, triggerStartTick: 0 });
-    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.TIME, 1), state)).toBe(false); // 90 > 90 is false
+    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.TIME, 1), state)).toBe(true);
 
     state.gameTick = 91;
-    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.TIME, 1), state)).toBe(true); // 91 > 90 is true
+    expect(checkTriggerEvent(makeEvent(CPP_TEVENT.TIME, 1), state)).toBe(true);
   });
 
   it('TACTION_ADD_TIMER and SUB_TIMER use same 1/10th minute units', () => {

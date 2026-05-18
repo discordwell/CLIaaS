@@ -34,6 +34,7 @@ export interface RAGameState {
   units: RAEntity[];
   enemies: RAEntity[];
   structures: RAStructure[];
+  houses?: RAHouse[];
   production: RAProduction[];
   buildable?: RABuildable;
   coastalCells?: Array<{ cx: number; cy: number }>;
@@ -83,6 +84,13 @@ export interface RAWeapon {
 
 export interface RAStructure extends RAEntity {
   repairing: boolean;
+}
+
+export interface RAHouse {
+  house: string;
+  money: number;
+  iq?: number;
+  human?: boolean;
 }
 
 export interface RAProduction {
@@ -448,6 +456,7 @@ export class WasmAdapter {
       units: Array.isArray(state.units) ? state.units : [],
       enemies: Array.isArray(state.enemies) ? state.enemies : [],
       structures: Array.isArray(state.structures) ? state.structures : [],
+      houses: Array.isArray(state.houses) ? state.houses : [],
       production: Array.isArray(state.production) ? state.production : [],
       buildable: state.buildable,
       coastalCells: Array.isArray(state.coastalCells) ? state.coastalCells : [],

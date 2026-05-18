@@ -595,7 +595,7 @@ describe('TEVENT_TIME elapsed calculation for global/time trigger pairs — C++ 
    */
 
   it('TIME event uses timerTick for elapsed calculation', () => {
-    // The TIME event uses (gameTick - triggerStartTick) > requiredTicks
+    // The TIME event uses (gameTick - triggerStartTick) >= requiredTicks
     const timeEvent: TriggerEvent = { type: TEVENT_TIME, team: -1, data: 1 }; // 1 unit = 90 ticks
     const TIME_UNIT_TICKS = 90;
 
@@ -606,12 +606,12 @@ describe('TEVENT_TIME elapsed calculation for global/time trigger pairs — C++ 
     });
     expect(checkTriggerEvent(timeEvent, stateBefore)).toBe(false);
 
-    // Exactly at threshold — still false (> not >=)
+    // Exactly at threshold — fires
     const stateExact = createState({
       gameTick: 90,
       triggerStartTick: 0,
     });
-    expect(checkTriggerEvent(timeEvent, stateExact)).toBe(false);
+    expect(checkTriggerEvent(timeEvent, stateExact)).toBe(true);
 
     // One tick past threshold — fires
     const stateAfter = createState({

@@ -237,6 +237,19 @@ describe('C++ parity (#38): TEVENT_GLOBAL_SET evaluates from global state', () =
     expect(checkTriggerEvent(makeEvent(TEVENT_GLOBAL_SET, 5), state)).toBe(false);
     expect(checkTriggerEvent(makeEvent(TEVENT_GLOBAL_SET, 0), state)).toBe(false);
   });
+
+  it('TEVENT_GLOBAL_SET index 30 aliases Scen.Views[0] like C++ tevent.cpp', () => {
+    // C++ checks Scen.GlobalFlags[Data.Value] without the Set_Global_To bounds
+    // guard. GlobalFlags[30] is the low byte of Views[0]; SCU34EA uses this to
+    // fire the civ4 GLOBAL_SET(30) trigger at tick 0.
+    const state = makeGameState(new Set(), {
+      cppGlobalFlagMemory: Uint8Array.from([
+        ...Array(30).fill(0),
+        0x5d, 0x0e, // Views[0] = 0x0e5d / SCU34EA WAYPT_HOME cell 3677.
+      ]),
+    });
+    expect(checkTriggerEvent(makeEvent(TEVENT_GLOBAL_SET, 30), state)).toBe(true);
+  });
 });
 
 describe('C++ parity (#38): TEVENT_GLOBAL_CLEAR evaluates from global state', () => {
@@ -262,6 +275,16 @@ describe('C++ parity (#38): TEVENT_GLOBAL_CLEAR evaluates from global state', ()
     expect(checkTriggerEvent(makeEvent(TEVENT_GLOBAL_CLEAR, 3), state)).toBe(false); // 3 is set
     expect(checkTriggerEvent(makeEvent(TEVENT_GLOBAL_CLEAR, 5), state)).toBe(true);  // 5 is not set
     expect(checkTriggerEvent(makeEvent(TEVENT_GLOBAL_CLEAR, 0), state)).toBe(true);  // 0 is not set
+  });
+
+  it('TEVENT_GLOBAL_CLEAR index 30 is false when the aliased view byte is nonzero', () => {
+    const state = makeGameState(new Set(), {
+      cppGlobalFlagMemory: Uint8Array.from([
+        ...Array(30).fill(0),
+        1,
+      ]),
+    });
+    expect(checkTriggerEvent(makeEvent(TEVENT_GLOBAL_CLEAR, 30), state)).toBe(false);
   });
 });
 

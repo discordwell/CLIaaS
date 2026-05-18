@@ -15,7 +15,7 @@ import { Game } from '../engine/index';
 import { Entity, resetEntityIds, setPlayerHouses } from '../engine/entity';
 import { CELL_SIZE, House, MAP_CELLS, Mission, RESFACTOR, UnitType } from '../engine/types';
 import { clearAllTeams, getActiveTeams } from '../engine/team';
-import type { ScenarioTrigger, TeamType } from '../engine/scenario';
+import type { MapStructure, ScenarioTrigger, TeamType } from '../engine/scenario';
 
 class FakeAudio {
   src = ''; preload = ''; volume = 1; currentTime = 0; muted = false; loop = false;
@@ -42,6 +42,24 @@ function createGame(): Game {
   ]);
   setPlayerHouses(new Set([House.Greece, House.England]));
   return game;
+}
+
+function makeStructure(type: string, house: House, cx: number, cy: number): MapStructure {
+  return {
+    type,
+    image: type.toLowerCase(),
+    house,
+    cx,
+    cy,
+    hp: 256,
+    maxHp: 256,
+    alive: true,
+    rubble: false,
+    attackCooldown: 0,
+    ammo: -1,
+    maxAmmo: -1,
+    missionTimer: 0,
+  } as MapStructure;
 }
 
 beforeAll(() => {
@@ -125,6 +143,8 @@ describe('TechnoClass::Revealed(PlayerPtr) strict PlayerPtr discovery', () => {
     (game as unknown as { _houseRevealed: Map<number, Set<number>> })._houseRevealed =
       new Map([[1, new Set([58 * MAP_CELLS + 27])]]);
 
+    (game as unknown as { markEntityCellOccupierDown(e: Entity): void })
+      .markEntityCellOccupierDown(englandTank);
     (game as unknown as { checkDiscoveryTriggers(): void }).checkDiscoveryTriggers();
 
     const discovered = (game as unknown as { discoveredEntityIds: Set<number> }).discoveredEntityIds;
@@ -170,6 +190,74 @@ describe('TechnoClass::Revealed(PlayerPtr) strict PlayerPtr discovery', () => {
 
     const discovered = (game as unknown as { discoveredEntityIds: Set<number> }).discoveredEntityIds;
     expect(discovered.has(ussr.id)).toBe(false);
+  });
+
+  it('does not discover stationary infantry only because an overlap cell is already mapped by PlayerPtr', () => {
+    const game = createGame();
+    const ussr = new Entity(
+      UnitType.I_E1,
+      House.USSR,
+      30 * CELL_SIZE + CELL_SIZE / 2,
+      30 * CELL_SIZE + CELL_SIZE / 2
+    );
+    ussr.isDriving = false;
+    ussr.unlimboTick = -1;
+    game.entities.push(ussr);
+    game.entityById.set(ussr.id, ussr);
+
+    const mapped = (game as unknown as { playerMappedCells: Uint8Array }).playerMappedCells;
+    mapped[30 * MAP_CELLS + 29] = 1;
+
+    expect(game.map.getVisibility(30, 30)).toBe(0);
+    expect(mapped[30 * MAP_CELLS + 30]).toBe(0);
+
+    (game as unknown as { checkDiscoveryTriggers(): void }).checkDiscoveryTriggers();
+
+    const discovered = (game as unknown as { discoveredEntityIds: Set<number> }).discoveredEntityIds;
+    expect(discovered.has(ussr.id)).toBe(false);
+  });
+
+  it('discovers infantry when a mark-down overlap touches an already mapped PlayerPtr cell', () => {
+    const game = createGame();
+    const ussr = new Entity(
+      UnitType.I_E1,
+      House.USSR,
+      30 * CELL_SIZE + CELL_SIZE / 2,
+      30 * CELL_SIZE + CELL_SIZE / 2
+    );
+    ussr.isDriving = false;
+    ussr.unlimboTick = -1;
+    game.entities.push(ussr);
+    game.entityById.set(ussr.id, ussr);
+
+    const mapped = (game as unknown as { playerMappedCells: Uint8Array }).playerMappedCells;
+    mapped[30 * MAP_CELLS + 29] = 1;
+
+    expect(game.map.getVisibility(30, 30)).toBe(0);
+    expect(mapped[30 * MAP_CELLS + 30]).toBe(0);
+
+    (game as unknown as { markEntityCellOccupierDown(e: Entity): void })
+      .markEntityCellOccupierDown(ussr);
+    (game as unknown as { checkDiscoveryTriggers(): void }).checkDiscoveryTriggers();
+
+    const discovered = (game as unknown as { discoveredEntityIds: Set<number> }).discoveredEntityIds;
+    expect(discovered.has(ussr.id)).toBe(true);
+  });
+
+  it('honors scenario AllyReveal=no for allied structure discovery', () => {
+    const game = createGame();
+    (game as unknown as { baseDiscovered: boolean }).baseDiscovered = true;
+    (game as unknown as { allyReveal: boolean }).allyReveal = false;
+    game.structures.push(
+      makeStructure('FACT', House.England, 30, 30),
+      makeStructure('V05', House.England, 34, 30),
+    );
+
+    (game as unknown as { checkDiscoveryTriggers(): void }).checkDiscoveryTriggers();
+
+    const discovered = (game as unknown as { discoveredStructureIds: Set<number> }).discoveredStructureIds;
+    expect(discovered.has(0)).toBe(false);
+    expect(discovered.has(1)).toBe(false);
   });
 
   it('springs attached DISCOVERED triggers immediately when an object is revealed', () => {

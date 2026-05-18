@@ -766,6 +766,47 @@ describe('Invisible projectile Coord_Scatter (bullet.cpp:1012-1014)', () => {
     expect(shiftedProjectile.currentFrame).toBe(1);
   });
 
+  it('processes duplicate-hinted BulletClass slots when no earlier Logic predecessor was deleted', () => {
+    // SCG07EA tick 169 has a torpedo and a fireball collapsed onto the same
+    // effective Logic hint after previous vector compaction. C++ still advances
+    // both bullets in that frame; only objects in the range after the deleting
+    // bullet are skipped when a real earlier predecessor was removed.
+    const ctx = makeCombatCtx();
+    ctx.tick = 169;
+    const detonatingProjectile = makeProjectile({
+      weapon: WEAPON_STATS.TorpTube,
+      logicIndexHint: 188,
+      fuseTimer: 1,
+      fuelTimer: 1,
+      logicalLX: 4496,
+      logicalLY: 14223,
+      headToLX: 4496,
+      headToLY: 14223,
+      proximity: 0,
+    });
+    const duplicateHintProjectile = makeProjectile({
+      weapon: WEAPON_STATS.Flamer,
+      logicIndexHint: 188,
+      currentFrame: 17,
+      fuseTimer: 15,
+      fuelTimer: 15,
+      travelFrames: 32,
+      logicalLX: 7282,
+      logicalLY: 15095,
+      headToLX: 7040,
+      headToLY: 14976,
+      proximity: 270,
+    });
+    ctx.inflightProjectiles.push(detonatingProjectile, duplicateHintProjectile);
+
+    updateInflightProjectiles(ctx, 188);
+
+    expect(ctx.inflightProjectiles).toContain(duplicateHintProjectile);
+    expect(duplicateHintProjectile.currentFrame).toBe(18);
+    expect(duplicateHintProjectile.fuelTimer).toBe(14);
+    expect(duplicateHintProjectile.processedLogicTick).toBe(169);
+  });
+
   it('processes two bullets submitted by the current object in the same Logic pass', () => {
     // C++ DynamicVectorClass::Add appends at ActiveCount; it does not reuse an
     // earlier hole. A two-shooter aircraft can submit two invisible BulletClass

@@ -9,7 +9,7 @@ import { Game } from '../engine/index';
 import { GameMap, Terrain } from '../engine/map';
 import { ScenarioRandom } from '../engine/random';
 import { type MapStructure } from '../engine/scenario';
-import { CELL_SIZE, House, MAP_CELLS, Mission, RESFACTOR, UnitType } from '../engine/types';
+import { CELL_SIZE, House, MAP_CELLS, Mission, RESFACTOR, UnitType, cellTargetToLepton } from '../engine/types';
 
 class FakeAudio {
   src = ''; preload = ''; volume = 1; currentTime = 0; muted = false; loop = false;
@@ -185,6 +185,54 @@ describe('C++ parity: MISSION_HARVEST harvester timer returns', () => {
     expect(ScenarioRandom.callCount).toBe(1);
     expect(harv.harvesterState).toBe('seeking');
     expect(harv.moveTarget).not.toBeNull();
+    expect(harv.mission).toBe(Mission.HARVEST);
+    expect(harv.missionTimer).toBeGreaterThanOrEqual(14);
+    expect(harv.missionTimer).toBeLessThanOrEqual(16);
+  });
+
+  it('uses mapped player-owned structure sight before first harvester ore search', () => {
+    const game = new Game(createCanvas());
+    game.map.setBounds(28, 36, 80, 70);
+    game.structures.push(makeRefinery(House.USSR, 48, 75));
+    game.structures.push({
+      type: 'TSLA', image: 'tsla', house: House.USSR, cx: 59, cy: 80,
+      hp: 400, maxHp: 400, alive: true, rubble: false,
+      attackCooldown: 0, ammo: -1, maxAmmo: -1,
+    } as MapStructure);
+    placeGold(game, 58, 85);
+
+    const scout = new Entity(
+      UnitType.V_3TNK,
+      House.USSR,
+      57 * CELL_SIZE + CELL_SIZE / 2,
+      80 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    game.entities.push(scout);
+    game.entityById.set(scout.id, scout);
+
+    const harv = new Entity(
+      UnitType.V_HARV,
+      House.USSR,
+      50 * CELL_SIZE + CELL_SIZE / 2,
+      77 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    harv.mission = Mission.HARVEST;
+    harv.missionTimer = 0;
+    harv.harvesterState = 'idle';
+    game.entities.push(harv);
+    game.entityById.set(harv.id, harv);
+    game.map.setVehicleOccupancy(50, 77, harv.id);
+
+    (game as unknown as { markCurrentPlayerSightMapped(): void }).markCurrentPlayerSightMapped();
+
+    ScenarioRandom.seed = 0x19770424;
+    ScenarioRandom.callCount = 0;
+
+    dispatchMission(game, harv);
+
+    expect(ScenarioRandom.callCount).toBe(1);
+    expect(harv.harvesterState).toBe('seeking');
+    expect(harv.moveTarget).toEqual(cellTargetToLepton(58, 85));
     expect(harv.mission).toBe(Mission.HARVEST);
     expect(harv.missionTimer).toBeGreaterThanOrEqual(14);
     expect(harv.missionTimer).toBeLessThanOrEqual(16);

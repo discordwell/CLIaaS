@@ -46,6 +46,8 @@ export interface FogContext {
    *  Set by superweapon system when GPS fires, cleared when ATEK destroyed (house.cpp:1420-1425). */
   gpsActive: boolean;
   baseDiscovered: boolean;
+  /** rules.ini/scenario [General] AllyReveal. Defaults to true for older tests. */
+  allyReveal?: boolean;
   powerProduced: number;
   powerConsumed: number;
   gapGeneratorCells: Map<number, { cx: number; cy: number; radius: number }>;
@@ -96,7 +98,10 @@ export function updateFogOfWar(ctx: FogContext): void {
   // C++ All_To_Look(units_only=true) at init skips buildings; per-tick sight includes them.
   if (ctx.baseDiscovered) {
     for (const s of ctx.structures) {
-      if (s.alive && ctx.isAllied(s.house, ctx.playerHouse)) {
+      const revealsForPlayer =
+        s.house === ctx.playerHouse ||
+        ((ctx.allyReveal ?? true) && ctx.isAllied(s.house, ctx.playerHouse));
+      if (s.alive && revealsForPlayer) {
         // C++ building.cpp uses Class->SightRange directly — no health reduction.
         const sight = STRUCTURE_SIGHT[s.type] ?? 5;
         // C++ map.cpp:296: if (!sightrange || sightrange > 10) return;

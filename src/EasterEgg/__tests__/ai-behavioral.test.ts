@@ -490,27 +490,27 @@ describe('updateAISellDamaged', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('updateAIIncome', () => {
-  it('only runs on tick % 450 === 0', () => {
+  it('does not grant money off-cycle', () => {
     const ctx = makeMockAIContext({ tick: 100 });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.houseCredits.set(House.USSR, 0);
     addAIHouse(ctx, House.USSR, { iq: 3, incomeMult: 1.0 });
 
     updateAIIncome(ctx);
-    expect(ctx.houseCredits.get(House.USSR)).toBe(0); // wrong tick
+    expect(ctx.houseCredits.get(House.USSR)).toBe(0);
   });
 
-  it('grants income per PROC refinery on tick % 450', () => {
+  it('does not grant refinery stipend on the old TS 450-tick frame', () => {
     const ctx = makeMockAIContext({ tick: 451 });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.houseCredits.set(House.USSR, 500);
     addAIHouse(ctx, House.USSR, { iq: 3, incomeMult: 1.0 });
 
     updateAIIncome(ctx);
-    expect(ctx.houseCredits.get(House.USSR)).toBe(600); // +100
+    expect(ctx.houseCredits.get(House.USSR)).toBe(500);
   });
 
-  it('grants income per PROC -- multiple refineries accumulate', () => {
+  it('does not accumulate income from multiple refineries', () => {
     const ctx = makeMockAIContext({ tick: 451 });
     ctx.structures.push(
       makeStructure('PROC', House.USSR, 50, 50),
@@ -520,20 +520,20 @@ describe('updateAIIncome', () => {
     addAIHouse(ctx, House.USSR, { iq: 3, incomeMult: 1.0 });
 
     updateAIIncome(ctx);
-    expect(ctx.houseCredits.get(House.USSR)).toBe(200); // 2 PROCs * 100
+    expect(ctx.houseCredits.get(House.USSR)).toBe(0);
   });
 
-  it('applies incomeMult from AIHouseState', () => {
+  it('ignores incomeMult because income is harvester-driven', () => {
     const ctx = makeMockAIContext({ tick: 451 });
     ctx.structures.push(makeStructure('PROC', House.USSR, 50, 50));
     ctx.houseCredits.set(House.USSR, 0);
     addAIHouse(ctx, House.USSR, { iq: 3, incomeMult: 1.5 });
 
     updateAIIncome(ctx);
-    expect(ctx.houseCredits.get(House.USSR)).toBe(150); // 100 * 1.5
+    expect(ctx.houseCredits.get(House.USSR)).toBe(0);
   });
 
-  it('income goes to the correct house credits', () => {
+  it('leaves every house credit pool unchanged', () => {
     const ctx = makeMockAIContext({ tick: 451 });
     ctx.structures.push(
       makeStructure('PROC', House.USSR, 50, 50),
@@ -545,8 +545,8 @@ describe('updateAIIncome', () => {
     addAIHouse(ctx, House.Ukraine, { iq: 3, incomeMult: 1.0 });
 
     updateAIIncome(ctx);
-    expect(ctx.houseCredits.get(House.USSR)).toBe(100);
-    expect(ctx.houseCredits.get(House.Ukraine)).toBe(100);
+    expect(ctx.houseCredits.get(House.USSR)).toBe(0);
+    expect(ctx.houseCredits.get(House.Ukraine)).toBe(0);
   });
 
   it('does not grant income to player-allied refineries', () => {

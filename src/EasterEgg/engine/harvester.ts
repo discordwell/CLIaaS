@@ -12,6 +12,7 @@ import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { GameMap, MoveResult } from './map';
 import { findPath } from './pathfinding';
 import { movementZoneCells } from './missionAI';
+import { assignMission } from './missionLifecycle';
 
 // ---------------------------------------------------------------------------
 // Context interface — minimal fields needed by harvester functions
@@ -121,6 +122,18 @@ function hasAlliedRefinery(ctx: HarvesterContext, entity: Entity): boolean {
   return nearestRefinery(ctx, entity) !== null;
 }
 
+function clearHarvesterTargetAndDestination(entity: Entity): void {
+  entity.target = null;
+  entity.targetStructure = null;
+  entity.forceFirePos = null;
+  entity.moveTarget = null;
+  entity.moveTargetEntityRef = null;
+  entity.moveTargetEntityRefLX = 0;
+  entity.moveTargetEntityRefLY = 0;
+  entity.path = [];
+  entity.pathIndex = 0;
+}
+
 function cellHasTechno(ctx: HarvesterContext, cx: number, cy: number): boolean {
   if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return true;
   const idx = cy * MAP_CELLS + cx;
@@ -133,6 +146,25 @@ function cellHasTechno(ctx: HarvesterContext, cx: number, cy: number): boolean {
 function isOreOverlay(ctx: HarvesterContext, cx: number, cy: number): boolean {
   if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
   return GameMap.isOreOverlayId(ctx.map.overlay[cy * MAP_CELLS + cx]);
+}
+
+function enterHarvesterIdleMode(ctx: HarvesterContext, entity: Entity, initial = false): void {
+  if (entity.moveTarget) {
+    assignMission(entity, Mission.MOVE);
+    return;
+  }
+
+  if (entity.mission === Mission.HARVEST || entity.missionQueue === Mission.HARVEST || entity.isTethered) {
+    return;
+  }
+
+  const ec = entity.cell;
+  const order =
+    initial || !ctx.isPlayerControlled(entity) || isOreOverlay(ctx, ec.cx, ec.cy)
+      ? Mission.HARVEST
+      : Mission.GUARD;
+  clearHarvesterTargetAndDestination(entity);
+  assignMission(entity, order);
 }
 
 function tiberiumCheck(
@@ -223,6 +255,17 @@ export function updateHarvester(ctx: HarvesterContext, entity: Entity, missionTi
 
   switch (entity.harvesterState) {
     case 'idle': {
+      if (entity.mission === Mission.ENTER) {
+        // C++ FootClass::Mission_Enter falls back to UnitClass::Enter_Idle_Mode
+        // when no radio/archive techno can coordinate docking. For AI
+        // harvesters, UnitClass queues MISSION_HARVEST instead of leaving the
+        // unit stuck in ENTER.
+        if (!entity.archiveTargetEntity?.alive && !entity.transportRef) {
+          enterHarvesterIdleMode(ctx, entity);
+        }
+        break;
+      }
+
       // Only start auto-harvest from idle mission (GUARD/AREA_GUARD), not during manual MOVE
       if (!isIdleMission(entity.mission)) break;
       const ec = entity.cell;

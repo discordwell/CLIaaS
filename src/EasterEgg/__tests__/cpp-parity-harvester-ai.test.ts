@@ -1229,6 +1229,24 @@ describe('Ore growth timing — map.ts ORE_GROWTH_INTERVAL', () => {
 // 19. Harvester State: idle → seeking Transition (harvester.ts:109-122)
 
 describe('idle → seeking transition — harvester.ts:109-122', () => {
+  it('MISSION_ENTER with no radio contact queues HARVEST for AI harvesters', () => {
+    const ctx = makeCtx();
+    const harv = makeHarv(House.USSR, 50, 50);
+    const dummyTarget = new Entity(UnitType.V_1TNK, House.Spain, 54 * CELL_SIZE, 50 * CELL_SIZE);
+    harv.harvesterState = 'idle';
+    harv.mission = Mission.ENTER;
+    harv.target = dummyTarget;
+    harv.forceFirePos = { x: 52 * CELL_SIZE, y: 50 * CELL_SIZE };
+    ctx.entities.push(harv, dummyTarget);
+
+    updateHarvester(ctx, harv);
+
+    expect(harv.mission).toBe(Mission.ENTER);
+    expect(harv.missionQueue).toBe(Mission.HARVEST);
+    expect(harv.target).toBeNull();
+    expect(harv.forceFirePos).toBeNull();
+  });
+
   /**
    * C++ unit.cpp:2781-2831 — LOOKING state:
    *   Harvester only starts seeking when in LOOKING state.

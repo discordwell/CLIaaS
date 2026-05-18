@@ -2131,17 +2131,14 @@ export function updateAISellDamaged(ctx: AIContext): void {
   }
 }
 
-/** AI passive income -- AI houses earn credits from refineries */
+/**
+ * C++ has no passive refinery stipend. House money changes through
+ * Credits= initialization, harvester deposits, production spend/refunds, and
+ * explicit script/economy actions. Keep this legacy entry point inert so old
+ * callers cannot silently reintroduce a parity-only cash grant.
+ */
 export function updateAIIncome(ctx: AIContext): void {
-  if ((ctx.tick - 1) % 450 !== 0) return;
-  for (const s of ctx.structures) {
-    if (!s.alive || s.type !== 'PROC') continue;
-    if (ctx.isAllied(s.house, ctx.playerHouse)) continue;
-    const current = ctx.houseCredits.get(s.house) ?? 0;
-    const aiState = ctx.aiStates.get(s.house);
-    const incomeMult = aiState ? aiState.incomeMult : 1.0;
-    ctx.houseCredits.set(s.house, current + Math.floor(100 * incomeMult));
-  }
+  void ctx;
 }
 
 /** AI army building -- AI houses produce units when they have credits and barracks/factory */

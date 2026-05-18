@@ -134,6 +134,7 @@ function makeFogContext(overrides: Partial<FogContext> = {}): FogContext {
     fogDisabled: false,
     gpsActive: false,
     baseDiscovered: true,
+    allyReveal: true,
     powerProduced: 100,
     powerConsumed: 50,
     gapGeneratorCells: new Map(),
@@ -221,6 +222,23 @@ describe('AllyReveal — allied structures reveal fog (C++ house.cpp:2158)', () 
     updateFogOfWar(ctx);
 
     // Enemy structure should NOT reveal any cells
+    expect(map.getVisibility(64, 64)).toBe(0);
+  });
+
+  it('AllyReveal=no prevents allied structures from revealing fog', () => {
+    const map = new GameMap();
+    const structure = makeStructure('FACT', House.Greece, 64, 64);
+
+    const ctx = makeFogContext({
+      map,
+      structures: [structure],
+      allyReveal: false,
+      isAllied: (a, b) => a === b || (a === House.Spain && b === House.Greece)
+                                 || (a === House.Greece && b === House.Spain),
+    });
+
+    updateFogOfWar(ctx);
+
     expect(map.getVisibility(64, 64)).toBe(0);
   });
 

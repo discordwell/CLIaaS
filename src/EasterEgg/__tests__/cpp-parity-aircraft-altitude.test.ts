@@ -160,6 +160,31 @@ describe('aircraft Mission_Move dispatch', () => {
     expect(tran.missionTimer).toBeLessThanOrEqual(15);
   });
 
+  it('queued MOVE on fixed-wing aircraft commences without helicopter Mission_Move jitter', () => {
+    ScenarioRandom.seed = 0x12345678;
+    ScenarioRandom.callCount = 0;
+    ScenarioRandom._seedLog = [];
+    ScenarioRandom._taggedLog = [];
+    ScenarioRandom._sourceTag = 0;
+
+    const mig = makeEntity(UnitType.V_MIG, House.Greece, 10 * CELL_SIZE + 12, 10 * CELL_SIZE + 12);
+    mig.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    mig.aircraftState = 'flying';
+    mig.mission = Mission.NONE;
+    mig.missionQueue = Mission.MOVE;
+    mig.moveTarget = {
+      lx: pixelToLepton(13 * CELL_SIZE + CELL_SIZE / 2),
+      ly: pixelToLepton(10 * CELL_SIZE + CELL_SIZE / 2),
+    };
+
+    updateAircraft(makeAircraftCtx({ tick: 10 }), mig);
+
+    expect(mig.mission).toBe(Mission.MOVE);
+    expect(mig.missionQueue).toBeNull();
+    expect(ScenarioRandom.callCount).toBe(0);
+    expect(ScenarioRandom._seedLog.some(([, tag]) => tag === 40040)).toBe(false);
+  });
+
   it('helicopter MOVE keeps drifting on current facing until the initial delay expires', () => {
     ScenarioRandom.seed = 0x12345678;
     ScenarioRandom.callCount = 0;

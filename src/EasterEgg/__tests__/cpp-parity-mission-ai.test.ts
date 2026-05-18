@@ -401,9 +401,9 @@ describe('Hunt Mode Scanning — C++ foot.cpp:654-703', () => {
     expect(hunter.target).not.toBeNull(); // C++ parity: unlimited range
   });
 
-  it('hunt rejects a higher-value target outside the scanner movement zone', () => {
-    // SCG04EA tick 21 root case: USSR E1s scan with THREAT_NORMAL, but
-    // TechnoClass::Greatest_Threat still applies the scanner's movement zone.
+	  it('hunt rejects a higher-value target outside the scanner movement zone', () => {
+	    // SCG04EA tick 21 root case: USSR E1s scan with THREAT_NORMAL, but
+	    // TechnoClass::Greatest_Threat still applies the scanner's movement zone.
     // The Greek MNLY at x=93 is outside the scenario [Map] rectangle
     // (X=37 Width=56), so C++ rejects it and chooses the in-zone JEEP.
     const map = new GameMap();
@@ -429,12 +429,46 @@ describe('Hunt Mode Scanning — C++ foot.cpp:654-703', () => {
     hunter.target = null;
     updateHunt(ctx, hunter);
 
-    expect(threatScore(hunter, mineLayer, 49)).toBeGreaterThan(threatScore(hunter, jeep, 36));
-    expect(hunter.target).toBe(jeep);
-  });
+	    expect(threatScore(hunter, mineLayer, 49)).toBeGreaterThan(threatScore(hunter, jeep, 36));
+	    expect(hunter.target).toBe(jeep);
+	  });
 
-  it('hunt acquires closest enemy within scan range', () => {
-    const hunter = makeEntity(UnitType.E1, House.USSR, 100, 100);
+	  it('hunt aircraft pre-scan ignores the scanner ground movement zone', () => {
+	    // C++ techno.cpp:2239-2250 full-map Greatest_Threat scans Aircraft.Count()
+	    // before Map.Layer[LAYER_GROUND]. That Evaluate_Object call is made without
+	    // the `zone` argument, unlike the later ground-layer pass. SCU35EA depends
+	    // on an E3 HUNT scan seeing an out-of-zone BADR and assigning NavCom before
+	    // TechnoClass::AI clears the aircraft TarCom.
+	    const map = new GameMap();
+	    map.setBounds(18, 23, 20, 20);
+
+	    const hunter = makeEntity(UnitType.I_E3, House.Greece,
+	      28 * CELL_SIZE + CELL_SIZE / 2,
+	      30 * CELL_SIZE + CELL_SIZE / 2);
+	    const badr = makeEntity(UnitType.V_BADR, House.USSR,
+	      17 * CELL_SIZE + CELL_SIZE / 2,
+	      40 * CELL_SIZE + CELL_SIZE / 2);
+	    badr.mission = Mission.ATTACK;
+
+	    const ctx = makeCtx({
+	      map,
+	      entities: [hunter, badr],
+	      playerHouse: House.USSR,
+	      isDiscoveredByPlayer: () => false,
+	      isRevealedToHouse: () => false,
+	    });
+
+	    hunter.mission = Mission.HUNT;
+	    hunter.target = null;
+	    updateHunt(ctx, hunter);
+
+	    expect(movementZoneCells(map, hunter.cell, false)[badr.cell.cy * MAP_CELLS + badr.cell.cx]).toBe(0);
+	    expect(hunter.target).toBe(badr);
+	    expect(hunter.animState).toBe(AnimState.WALK);
+	  });
+
+	  it('hunt acquires closest enemy within scan range', () => {
+	    const hunter = makeEntity(UnitType.E1, House.USSR, 100, 100);
     const near = makeEntity(UnitType.E1, House.Greece, 100 + 2 * CELL_SIZE, 100);
     const far = makeEntity(UnitType.E1, House.Greece, 100 + 4 * CELL_SIZE, 100);
 

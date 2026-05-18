@@ -22,6 +22,7 @@
 import { describe, it, expect } from 'vitest';
 import { Mission, MISSION_CONTROL } from '../engine/types';
 import { assignMission } from '../engine/missionLifecycle';
+import { missionFromIniName } from '../engine/scenario';
 
 // ─── C++ MissionType enum (defines.h:979-1008) ─────────────────────────────
 // The canonical enum order and numeric values from C++:
@@ -163,6 +164,40 @@ describe('Mission string names parity (C++ const.cpp:83-107)', () => {
     const deconstructionEntry = CPP_MISSION_STRINGS.find(([idx]) => idx === 18);
     expect(deconstructionEntry).toBeDefined();
     expect(deconstructionEntry![1]).toBe('Selling');
+  });
+
+  it('scenario INI mission names use the full C++ Missions[] string table', () => {
+    const expected: [string, Mission | null][] = [
+      ['None', null],
+      ['Sleep', Mission.SLEEP],
+      ['Attack', Mission.ATTACK],
+      ['Move', Mission.MOVE],
+      ['QMove', Mission.QMOVE],
+      ['Retreat', Mission.RETREAT],
+      ['Guard', Mission.GUARD],
+      ['Sticky', Mission.STICKY],
+      ['Enter', Mission.ENTER],
+      ['Capture', Mission.CAPTURE],
+      ['Harvest', Mission.HARVEST],
+      ['Area Guard', Mission.AREA_GUARD],
+      ['Return', Mission.RETURN],
+      ['Stop', Mission.STOP],
+      ['Ambush', Mission.AMBUSH],
+      ['Hunt', Mission.HUNT],
+      ['Unload', Mission.UNLOAD],
+      ['Sabotage', Mission.SABOTAGE],
+      ['Construction', Mission.CONSTRUCTION],
+      ['Selling', Mission.DECONSTRUCTION],
+      ['Repair', Mission.REPAIR],
+      ['Rescue', Mission.RESCUE],
+      ['Missile', Mission.MISSILE],
+      ['Harmless', Mission.HARMLESS],
+    ];
+    for (const [name, mission] of expected) {
+      expect(missionFromIniName(name), name).toBe(mission);
+      expect(missionFromIniName(name.toUpperCase()), `${name} is stricmp-compatible`).toBe(mission);
+    }
+    expect(missionFromIniName('Unknown Mission')).toBeNull();
   });
 });
 

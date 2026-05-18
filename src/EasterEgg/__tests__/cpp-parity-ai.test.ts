@@ -2144,10 +2144,10 @@ describe('updateAISellDamaged (HOUSE.CPP auto-sell)', () => {
   });
 });
 
-// ── 12. Income (rules.cpp passive income) ──────────────────────────────────────
+// ── 12. Income (no passive refinery stipend in C++) ────────────────────────────
 
-describe('updateAIIncome (HOUSE.CPP passive refinery income)', () => {
-  it('only runs on tick % 450 === 0', () => {
+describe('updateAIIncome (C++ has no passive refinery income)', () => {
+  it('does not grant money off-cycle', () => {
     const ctx = makeAIContext({
       tick: 449,
       structures: [makeStructure({ type: 'PROC', house: House.USSR, cx: 10, cy: 10 })],
@@ -2159,10 +2159,10 @@ describe('updateAIIncome (HOUSE.CPP passive refinery income)', () => {
     expect(ctx.houseCredits.get(House.USSR)).toBe(0);
   });
 
-  it('AI house earns 100 * incomeMult per refinery', () => {
+  it('does not grant money on the old 450-tick TS stipend frame', () => {
     const state = makeAIState({ house: House.USSR, incomeMult: 1.0 });
     const ctx = makeAIContext({
-      tick: 451, // (tick-1) % 450 === 0
+      tick: 451,
       structures: [
         makeStructure({ type: 'PROC', house: House.USSR, cx: 10, cy: 10 }),
         makeStructure({ type: 'PROC', house: House.USSR, cx: 16, cy: 10 }),
@@ -2172,20 +2172,20 @@ describe('updateAIIncome (HOUSE.CPP passive refinery income)', () => {
       isAllied: (a, b) => a === b,
     });
     updateAIIncome(ctx);
-    expect(ctx.houseCredits.get(House.USSR)).toBe(200); // 100 per refinery
+    expect(ctx.houseCredits.get(House.USSR)).toBe(0);
   });
 
-  it('incomeMult scales income (easy=0.7 → 70 per refinery)', () => {
+  it('ignores incomeMult because C++ income is harvester-driven', () => {
     const state = makeAIState({ house: House.USSR, incomeMult: 0.7 });
     const ctx = makeAIContext({
-      tick: 451, // (tick-1) % 450 === 0
+      tick: 451,
       structures: [makeStructure({ type: 'PROC', house: House.USSR, cx: 10, cy: 10 })],
       houseCredits: new Map([[House.USSR, 0]]),
       aiStates: new Map([[House.USSR, state]]),
       isAllied: (a, b) => a === b,
     });
     updateAIIncome(ctx);
-    expect(ctx.houseCredits.get(House.USSR)).toBe(70);
+    expect(ctx.houseCredits.get(House.USSR)).toBe(0);
   });
 
   it('player refineries do not earn AI income', () => {

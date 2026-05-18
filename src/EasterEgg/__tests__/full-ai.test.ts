@@ -616,14 +616,10 @@ describe('AI integration', () => {
     expect(states.get(House.USSR)!.phase).not.toBe(states.get(House.Ukraine)!.phase);
   });
 
-  it('updateAIIncome runs every 450 ticks', () => {
-    // Verify modulo check: 450 ticks = 30 seconds at 15 FPS
+  it('AI economy does not use a passive refinery income cadence', () => {
+    // C++ money flow is Credits= initialization plus harvester deposits/spend;
+    // the old TS 450-tick refinery stipend has no HouseClass::AI counterpart.
     expect(450 / 15).toBe(30);
-    for (let tick = 0; tick <= 900; tick++) {
-      if (tick % 450 === 0 && tick > 0) {
-        expect(tick).toBeGreaterThanOrEqual(450);
-      }
-    }
   });
 
   it('updateAIStrategicPlanner runs every 150 ticks', () => {

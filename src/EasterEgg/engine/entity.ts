@@ -668,6 +668,11 @@ export class Entity {
   occupiesCppLogic(): boolean {
     if (this.inLimbo) return false;
     if (this.alive) return true;
+    // C++ can leave sunk VesselClass objects active in Logic/Cell_Occupier with
+    // Strength=0. They no longer run normal mission AI, but TechnoClass timers
+    // and Cloaking_AI still tick; SCG07EA's destroyed SS at Logic index 72 burns
+    // the low-health cloak roll 23 ticks after reaching zero strength.
+    if (this.stats.isVessel) return true;
     return this.stats.isInfantry &&
       this.mission === Mission.DIE &&
       this.deathVariant >= 1 &&
@@ -1069,6 +1074,14 @@ export class Entity {
    *  Used to keep bullets/anims and later-spawned infantry in the same relative
    *  order when TS has to batch parts of the Logic array. */
   logicIndexHint?: number;
+  /** C++ CellClass::Cell_Occupier linked-list order.
+   *  CellClass::Occupy_Down prepends non-building objects, so the highest serial
+   *  is the first object Evaluate_Cell sees in a shared cell. */
+  cellOccupierSerial = 0;
+  /** Last tick this object was placed back down through the CellClass occupier path.
+   *  MapClass::Place_Down also marks overlap cells, and only that mark-down event
+   *  can reveal infantry through an already mapped overlap footprint. */
+  lastCellOccupierDownTick = -1;
   /** C++ building.cpp:2438-2455 — HPAD auto-spawned helicopter RNG parity.
    *  In C++, HPAD helicopters enter the Logic array right after their HPAD building
    *  and are processed interleaved with buildings, NOT in the aircraft pass.

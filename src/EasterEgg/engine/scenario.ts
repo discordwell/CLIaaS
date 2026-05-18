@@ -613,6 +613,8 @@ interface ScenarioData {
   houseMaxInfantry: Map<string, number>;
   /** Per-house MaxBuilding= from scenario INI (max buildings, -1=unlimited) */
   houseMaxBuilding: Map<string, number>;
+  /** C++ RulesClass::IsAllyReveal, overridden by scenario [General] AllyReveal=. */
+  allyReveal: boolean;
   /** C++ Scen.IsTanyaEvac — scenario.cpp:2262: CivEvac=yes in [Basic]. When true,
    *  Tanya (E7) counts as civilian for evacuation (aircraft.cpp:143). */
   isTanyaEvac: boolean;
@@ -633,6 +635,13 @@ const MISSION_NAMES: Record<string, string> = {
 
 const CXX_HOUSE_COUNT = 20;
 const CXX_TICKS_PER_MINUTE = 900;
+
+function parseIniBool(raw: string, fallback: boolean): boolean {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'yes' || normalized === 'true' || normalized === '1') return true;
+  if (normalized === 'no' || normalized === 'false' || normalized === '0') return false;
+  return fallback;
+}
 
 function consumeCxxHouseInitRNG(): void {
   for (let i = 0; i < CXX_HOUSE_COUNT; i++) {
@@ -1018,6 +1027,7 @@ export function parseScenarioINI(text: string, scenarioId = ''): ScenarioData {
     houseMaxUnit,
     houseMaxInfantry,
     houseMaxBuilding,
+    allyReveal: parseIniBool(get('General', 'AllyReveal', 'yes'), true),
   };
 }
 
@@ -2102,6 +2112,8 @@ export interface ScenarioResult {
   houseMaxInfantry: Map<House, number>;
   /** Per-house MaxBuilding= from scenario INI (max buildings, -1=unlimited) */
   houseMaxBuilding: Map<House, number>;
+  /** C++ RulesClass::IsAllyReveal after scenario [General] overrides. */
+  allyReveal: boolean;
   /** C++ Scen.IsTanyaEvac — CivEvac=yes in [Basic]. Tanya counts as civilian evacuation. */
   isTanyaEvac: boolean;
 }
@@ -2120,40 +2132,50 @@ function scenarioStrengthToHP(strength: number, maxHp: number): number {
   return hp;
 }
 
+const CPP_MISSION_NAME_MAP: Record<string, Mission> = {
+  'sleep': Mission.SLEEP,
+  'attack': Mission.ATTACK,
+  'move': Mission.MOVE,
+  'qmove': Mission.QMOVE,
+  'retreat': Mission.RETREAT,
+  'guard': Mission.GUARD,
+  'sticky': Mission.STICKY,
+  'enter': Mission.ENTER,
+  'capture': Mission.CAPTURE,
+  'harvest': Mission.HARVEST,
+  'area guard': Mission.AREA_GUARD,
+  'return': Mission.RETURN,
+  'stop': Mission.STOP,
+  'ambush': Mission.AMBUSH,
+  'hunt': Mission.HUNT,
+  'unload': Mission.UNLOAD,
+  'sabotage': Mission.SABOTAGE,
+  'construction': Mission.CONSTRUCTION,
+  'selling': Mission.DECONSTRUCTION,
+  'repair': Mission.REPAIR,
+  'rescue': Mission.RESCUE,
+  'missile': Mission.MISSILE,
+  'harmless': Mission.HARMLESS,
+};
+
+export function missionFromIniName(missionStr: string): Mission | null {
+  const key = missionStr.trim().toLowerCase();
+  if (key === '' || key === 'none') return null;
+  return CPP_MISSION_NAME_MAP[key] ?? null;
+}
+
 function applyMission(entity: Entity, missionStr: string): void {
-  const m = missionStr.trim();
-  if (m === 'Hunt') {
-    entity.mission = Mission.HUNT;
-  } else if (m === 'Area Guard') {
-    entity.mission = Mission.AREA_GUARD;
+  const mission = missionFromIniName(missionStr);
+  if (mission === null) {
+    // TechnoClass::Unlimbo enters the class idle mission before Read_INI
+    // Assign_Mission(). A MISSION_NONE/unknown token leaves that idle GUARD in
+    // place for active scenario objects.
+    entity.mission = Mission.GUARD;
+    return;
+  }
+  entity.mission = mission;
+  if (mission === Mission.AREA_GUARD) {
     entity.guardOrigin = { x: entity.pos.x, y: entity.pos.y };
-  } else if (m === 'Sleep') {
-    entity.mission = Mission.SLEEP;
-  } else if (m === 'None' || m === '') {
-    // C++ Mission_From_Name("None") → MISSION_NONE → default case calls Mission_Sleep.
-    // BUT: per-entity RNG tracking shows "None" entities consuming 1-3 RNG calls at
-    // tick 0, identical to GUARD entities (mission timer + Random_Animate). C++ likely
-    // converts MISSION_NONE to MISSION_GUARD during scenario init for active units.
-    entity.mission = Mission.GUARD;
-  } else if (m === 'Harvest') {
-    // C++ MISSION_HARVEST: harvester state machine (look/harvest/go home).
-    // Mission_Harvest returns fixed values (1 or 450), no Random_Pick consumed.
-    entity.mission = Mission.HARVEST;
-  } else if (m === 'Sticky') {
-    // C++ MISSION_STICKY: same as GUARD (cases fall through in mission.cpp:243-245)
-    entity.mission = Mission.STICKY;
-  } else if (m === 'Harmless') {
-    // C++ MISSION_HARMLESS: doesn't auto-attack, low-priority target.
-    // SCG03EA spawns Greece MEDI/E6 with Harmless mission so they don't auto-engage
-    // enemies and aren't easily picked off by enemy guard scans.
-    entity.mission = Mission.HARMLESS;
-  } else if (m === 'Move') {
-    // C++ MISSION_MOVE: idle but flagged as moving (used for transports queued up).
-    // No NavCom is set, so the unit just sits like GUARD until something assigns one.
-    entity.mission = Mission.MOVE;
-  } else {
-    // Default: Guard
-    entity.mission = Mission.GUARD;
   }
 }
 
@@ -2609,6 +2631,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     houseMaxBuilding: new Map(
       Array.from(data.houseMaxBuilding.entries()).map(([k, v]) => [toHouse(k), v])
     ),
+    allyReveal: data.allyReveal,
     isTanyaEvac: data.isTanyaEvac,
   };
 }
@@ -2952,6 +2975,11 @@ function lcwDecompressMapPack(
 export interface TriggerGameState {
   gameTick: number;
   globals: Set<number>;
+  /** C++ raw Scen memory view for out-of-bounds GlobalFlags reads.
+   *  TEVENT_GLOBAL_SET/CLEAR reads Scen.GlobalFlags[Data.Value] without the
+   *  bounds check used by TACTION_SET/CLEAR_GLOBAL. Index 30 aliases the first
+   *  byte of Scen.Views[0] because GlobalFlags has exactly 30 bool entries. */
+  cppGlobalFlagMemory?: Uint8Array;
   triggerStartTick: number;
   triggerName: string;
   playerEntered: boolean;
@@ -3014,6 +3042,12 @@ export function checkTriggerEvent(
   event: TriggerEvent,
   state: TriggerGameState,
 ): boolean {
+  const readCppGlobalFlag = (index: number): boolean => {
+    if (index < 0) return false;
+    if (index < 30) return state.globals.has(index);
+    return (state.cppGlobalFlagMemory?.[index] ?? 0) !== 0;
+  };
+
   switch (event.type) {
     case TEVENT_NONE:
       // C++ parity: TEVENT_NONE = "no event" = false. Triggers with TEVENT_NONE
@@ -3024,21 +3058,19 @@ export function checkTriggerEvent(
       return true;
     case TEVENT_TIME: {
       // C++ tevent.cpp:251-253: CDTimerClass fires when Value()==0.
-      // Timer = Data * (TICKS_PER_MINUTE/10) = Data * 90, started at Frame=0.
-      // Fires when Frame = Data*90 (Logic.AI sees Frame before Frame++).
-      // TS tick is incremented BEFORE processing (tick++ at start of update),
-      // so TS tick is Frame+1 at the same processing point. Use > to compensate.
+      // TEventClass::Reset assigns Data * (TICKS_PER_MINUTE/10), which starts
+      // a countdown from the current FrameTimer. CDTimerClass reaches zero as
+      // soon as elapsed >= delay; SCU32EA bom1/bom2 fires exactly at 90 ticks.
       const requiredTicks = event.data * TIME_UNIT_TICKS;
-      return (state.gameTick - state.triggerStartTick) > requiredTicks;
+      return (state.gameTick - state.triggerStartTick) >= requiredTicks;
     }
     case TEVENT_GLOBAL_SET:
-      // C++ scenario.h:197 — GlobalFlags[30]: indices must be in [0, 29]
-      if (event.data < 0 || event.data > 29) return false;
-      return state.globals.has(event.data);
+      // C++ tevent.cpp:238-244 intentionally has no bounds check here. That
+      // means index 30 aliases Scen.Views[0]'s low byte; SCU34EA's civ4 trigger
+      // relies on this and creates the opening help/hel1 teams at tick 0.
+      return readCppGlobalFlag(event.data);
     case TEVENT_GLOBAL_CLEAR:
-      // C++ scenario.h:197 — GlobalFlags[30]: indices must be in [0, 29]
-      if (event.data < 0 || event.data > 29) return false;
-      return !state.globals.has(event.data);
+      return !readCppGlobalFlag(event.data);
     case TEVENT_PLAYER_ENTERED:
       // C++ tevent.cpp:290-291 — object->Owner() must match Data.House
       if (!state.playerEntered) return false;

@@ -102,6 +102,13 @@ export interface AgentSuperweapon {
   needsTarget: boolean; // requires player to select target
 }
 
+export interface AgentHouse {
+  house: string;
+  money: number;
+  iq: number;
+  human: boolean;
+}
+
 export interface AgentState {
   tick: number;
   state: string;
@@ -115,6 +122,7 @@ export interface AgentState {
   units: AgentUnit[];
   enemies: AgentUnit[];
   structures: AgentStructure[];
+  houses: AgentHouse[];
   production: AgentQueueItem[];
   pending?: string;
   available: string[];
@@ -274,6 +282,14 @@ export function serializeState(game: Game): AgentState {
     structures.push(serializeStructure(s, i, reportAsAlly, game.isStructureRepairing(i)));
   }
 
+  const houseIQs = ((game as unknown as { houseIQs?: Map<House, number> }).houseIQs) ?? new Map<House, number>();
+  const houses: AgentHouse[] = Object.values(House).map((house) => ({
+    house,
+    money: house === game.playerHouse ? game.credits : (game.houseCredits.get(house) ?? 0),
+    iq: houseIQs.get(house) ?? 0,
+    human: house === game.playerHouse,
+  }));
+
   const production: AgentQueueItem[] = [];
   for (const [factoryKey, entry] of game.productionQueue) {
     production.push({
@@ -337,6 +353,7 @@ export function serializeState(game: Game): AgentState {
     units,
     enemies,
     structures,
+    houses,
     production,
     pending: game.pendingPlacement?.type,
     available,

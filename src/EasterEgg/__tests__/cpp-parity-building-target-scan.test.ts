@@ -90,6 +90,17 @@ function makePBOX(cx: number, cy: number, house: House = House.Greece): MapStruc
   } as MapStructure;
 }
 
+function makeHBOX(cx: number, cy: number, house: House = House.Greece): MapStructure {
+  const maxHp = STRUCTURE_MAX_HP['HBOX'] ?? 600;
+  return {
+    type: 'HBOX', image: 'hbox', house,
+    cx, cy, hp: maxHp, maxHp, alive: true, rubble: false,
+    weapon: { ...STRUCTURE_WEAPONS['HBOX'] },
+    attackCooldown: 0, ammo: -1, maxAmmo: -1,
+    missionTimer: 0,
+  } as MapStructure;
+}
+
 function makeTSLA(cx: number, cy: number, house: House = House.USSR): MapStructure {
   const maxHp = STRUCTURE_MAX_HP['TSLA'] ?? 400;
   return {
@@ -256,6 +267,29 @@ describe('building targeting: MissionControl NoThreat gate (C++ Evaluate_Object)
 });
 
 describe('building targeting: ground-layer cell scan', () => {
+  it('dead infantry still in Cell_Occupier can poison the HBOX half-range bailout', () => {
+    // SCG26EA tick 150: C++ HBOX at (38,72) scans from its fire coord.
+    // A zero-strength USSR E1 still active in Cell_Occupier at radius 3 is
+    // accepted by Evaluate_Object, so Greatest_Threat returns it at crange/2.
+    // BuildingClass::Assign_Target then clears that dead TarCom and the HBOX
+    // rolls its normal weapon guard delay instead of scanning onward to the
+    // live E1/E2 at radius 4.
+    const hbox = makeHBOX(38, 72, House.Greece);
+    const corpse = entityAtCell(UnitType.I_E1, House.USSR, 37, 69);
+    corpse.alive = false;
+    corpse.hp = 0;
+    corpse.mission = Mission.DIE;
+    corpse.deathVariant = 1;
+    corpse.deathTick = 1;
+    corpse.inLimbo = false;
+
+    const outerLive = entityAtCell(UnitType.I_E1, House.USSR, 38, 68);
+    outerLive.mission = Mission.HUNT;
+    const ctx = makeCombatCtx([hbox], [corpse, outerLive], House.Greece);
+
+    expect(findStructureThreatTarget(ctx, hbox)).toBeNull();
+  });
+
   it('ground defenses ignore parachuting infantry while ObjectClass keeps them in LAYER_TOP', () => {
     // C++ TechnoClass::Greatest_Threat scans aircraft separately, then scans
     // Map.Layer[LAYER_GROUND]/Cell_Occupier for ground targets. Non-air falling
@@ -275,6 +309,46 @@ describe('building targeting: ground-layer cell scan', () => {
     trooper.flightAltitude = 15;
 
     expect(findStructureThreatTarget(ctx, gun)?.id).toBe(trooper.id);
+  });
+
+  it('uses the first non-allied object in a shared ground cell as C++ Cell_Occupier head', () => {
+    // SCG26EA tick 188: two USSR infantry occupy (38,69). C++ Cell_Occupier
+    // returns the E2 first, and Evaluate_Cell does not continue to the E1
+    // behind it in the same cell.
+    const gun = makeGUN(34, 72, House.Greece);
+    const chainHead = entityAtCell(UnitType.I_E2, House.USSR, 38, 69);
+    chainHead.logicIndexHint = 90;
+    chainHead.cellOccupierSerial = 12;
+    chainHead.mission = Mission.HUNT;
+
+    const behindHead = entityAtCell(UnitType.I_E1, House.USSR, 38, 69);
+    behindHead.logicIndexHint = 92;
+    behindHead.cellOccupierSerial = 11;
+    behindHead.mission = Mission.HUNT;
+
+    const ctx = makeCombatCtx([gun], [chainHead, behindHead], House.Greece);
+
+    expect(findStructureThreatTarget(ctx, gun)?.id).toBe(chainHead.id);
+  });
+
+  it('uses the current Cell_Occupier head even when later than logic order', () => {
+    // SCG26EA tick 166: E2 and E1 both occupy (38,69), but the E1 is the
+    // current Cell_Occupier head because its later movement Mark_Down prepended
+    // it. Logic order alone would pick the E2.
+    const hbox = makeHBOX(38, 72, House.Greece);
+    const olderHead = entityAtCell(UnitType.I_E2, House.USSR, 38, 69);
+    olderHead.logicIndexHint = 90;
+    olderHead.cellOccupierSerial = 20;
+    olderHead.mission = Mission.HUNT;
+
+    const currentHead = entityAtCell(UnitType.I_E1, House.USSR, 38, 69);
+    currentHead.logicIndexHint = 92;
+    currentHead.cellOccupierSerial = 21;
+    currentHead.mission = Mission.HUNT;
+
+    const ctx = makeCombatCtx([hbox], [olderHead, currentHead], House.Greece);
+
+    expect(findStructureThreatTarget(ctx, hbox)?.id).toBe(currentHead.id);
   });
 });
 
