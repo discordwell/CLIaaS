@@ -12441,6 +12441,13 @@ export class Game {
     entity.moveTarget = cellTargetToLepton(bestCX, bestCY);
     this.clearDrivePath(entity);
     resetPathThreshold(entity);
+    // DriveClass::Assign_Destination immediately calls Start_Of_Move for
+    // stationary vehicles/vessels. Mission_Attack invokes Approach_Target
+    // inside FootClass::AI, before DriveClass::AI's rotation branch, so the
+    // requested Do_Turn can rotate in the same object AI pass.
+    if (!entity.stats.isInfantry && !entity.isAirUnit) {
+      this.startDriveClassMove(entity);
+    }
 
   }
 
