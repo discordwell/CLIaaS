@@ -202,7 +202,7 @@ function serializeEntity(e: Entity, isAlly: boolean): AgentUnit {
   if (e.isTransport) {
     u.cargo = e.passengers.length;
     if (e.passengers.length > 0) {
-      u.cargoTop = e.passengers[e.passengers.length - 1].type;
+      u.cargoTop = e.passengers[0].type;
     }
   }
   if (e.weapon) {

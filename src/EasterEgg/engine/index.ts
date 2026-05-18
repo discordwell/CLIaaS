@@ -7781,7 +7781,7 @@ export class Game {
       entity.doorClosingTicks = 0;
     }
 
-    const passenger = entity.passengers.pop()!;
+    const passenger = entity.passengers.shift()!;
     const primaryFacing = entity.bodyFacing256 >= 0 ? entity.bodyFacing256 & 0xff : (entity.facing * 32) & 0xff;
     const toface = (128 + primaryFacing) & 0xff; // DIR_S + PrimaryFacing
     const sourceCell = entity.cell;
@@ -7881,7 +7881,7 @@ export class Game {
     }
 
     // C++ re-attaches the passenger if no legal adjacent cell is found.
-    entity.passengers.push(passenger);
+    entity.passengers.unshift(passenger);
     return false;
   }
 

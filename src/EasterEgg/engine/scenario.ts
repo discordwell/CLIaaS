@@ -3544,8 +3544,8 @@ export function executeTriggerAction(
             //
             // _Create_Group prepends each normal object into a linked list
             // (`temp->Next = object; object = temp`), and CargoClass::Attach
-            // attaches that list head-first. Detach_Object/Paradrop_Cargo then
-            // unload the newest non-transport member first.
+            // stores that list head-first. Detach_Object/Paradrop_Cargo detach
+            // CargoHold, so TS passenger index 0 is the next C++ cargo object.
             cargo.unshift(entity);
           }
           teamCreationOrder.push(entity);
@@ -3598,6 +3598,8 @@ export function executeTriggerAction(
         const maxLoad = transport.maxPassengers;
         for (let i = 0; i < Math.min(cargo.length, maxLoad); i++) {
           const unit = cargo[i];
+          // C++ CargoClass::Attach(object-list) preserves the linked-list head
+          // as CargoHold. The passenger array stores that head at index 0.
           transport.passengers.push(unit);
           unit.transportRef = transport;
           if (transport.stats.isAircraft) {
