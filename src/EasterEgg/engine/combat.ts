@@ -184,6 +184,8 @@ export interface InflightProjectile {
   proximity: number;
   /** C++ Logic vector index at submit time, used to model DynamicVector ordering. */
   logicIndexHint?: number;
+  /** Logic tick when this BulletClass was submitted. New same-tick objects are not deletion-shift skips. */
+  createdLogicTick?: number;
   /** Set when a partial Logic-cursor projectile flush has already run this bullet this tick. */
   processedLogicTick?: number;
 }
@@ -1137,6 +1139,7 @@ function launchBarrelDeathBullet(ctx: CombatContext, s: MapStructure, dx: number
     armingTimer: 0,
     proximity: fuseDist,
     logicIndexHint,
+    createdLogicTick: ctx.tick,
   });
 }
 
@@ -3103,6 +3106,7 @@ export function launchProjectile(
     armingTimer: 0,
     proximity: fuseDist,
     logicIndexHint,
+    createdLogicTick: ctx.tick,
   });
 }
 
@@ -3198,6 +3202,7 @@ function launchStructureProjectile(
     armingTimer: 0,
     proximity: fuseDist,
     logicIndexHint,
+    createdLogicTick: ctx.tick,
   });
 }
 
@@ -3613,6 +3618,7 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
       : skipLogicHintRanges.find(range =>
           proj.logicIndexHint! >= range.after && proj.logicIndexHint! <= range.through);
     if (!spawnedThisPass.has(proj) &&
+        proj.createdLogicTick !== ctx.tick &&
         proj.logicIndexHint !== undefined &&
         skipRange !== undefined) {
       projectileTrace({
