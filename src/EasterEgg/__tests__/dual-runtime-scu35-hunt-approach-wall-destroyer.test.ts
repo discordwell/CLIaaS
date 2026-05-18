@@ -31,6 +31,141 @@ function adapterPage(adapter: unknown): EvalPage {
   return page;
 }
 
+async function wasmGreekWeapFactories(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const factories = (state.structures ?? [])
+      .filter((s: any) => s.t === 'WEAP' && s.house === 'Greece')
+      .map((s: any) => ({
+        exitCell: { cx: s.cx, cy: s.cy + 1 },
+        type: s.factory?.t ?? null,
+        progress: s.factory?.prog ?? null,
+        done: s.factory?.done ?? null,
+        building: s.factory?.building ?? null,
+      }))
+      .sort((a: any, b: any) => a.exitCell.cx - b.exitCell.cx);
+
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      factories,
+    };
+  }) as Promise<{
+    tick: number;
+    rngState: number;
+    factories: Array<{
+      exitCell: { cx: number; cy: number };
+      type: string | null;
+      progress: number | null;
+      done: boolean | null;
+      building: boolean | null;
+    }>;
+  }>;
+}
+
+async function tsGreekWeapFactories(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const factories = (game.structures ?? [])
+      .filter((s: any) => s.type === 'WEAP' && s.house === 'Greece')
+      .map((s: any) => ({
+        exitCell: { cx: s.cx + 1, cy: s.cy + 1 },
+        type: s.aiFactory?.productType ?? null,
+        progress: s.aiFactory?.stage ?? null,
+        done: s.aiFactory ? s.aiFactory.stage >= 54 : null,
+        building: s.aiFactory ? s.aiFactory.stage < 54 && !s.aiFactory.suspended : null,
+      }))
+      .sort((a: any, b: any) => a.exitCell.cx - b.exitCell.cx);
+
+    return {
+      tick: game.tick,
+      rngState: state.rngState,
+      factories,
+    };
+  }) as Promise<{
+    tick: number;
+    rngState: number;
+    factories: Array<{
+      exitCell: { cx: number; cy: number };
+      type: string | null;
+      progress: number | null;
+      done: boolean | null;
+      building: boolean | null;
+    }>;
+  }>;
+}
+
+async function wasmGreek2TnkAt(adapter: unknown, cx: number, cy: number) {
+  return adapterPage(adapter).evaluate(({ x, y }) => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const row = (state.logicLayer ?? []).find((entry: any[]) =>
+      entry[1] === '2TNK' &&
+      entry[2] === 'Greece' &&
+      entry[3] === x &&
+      entry[4] === y);
+    if (!row) throw new Error(`C++ SCU35EA Greek 2TNK at ${x},${y} missing`);
+
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      unit: {
+        type: row[1],
+        house: row[2],
+        cell: { cx: row[3], cy: row[4] },
+        mission: row[7],
+        missionTimer: row[8],
+      },
+    };
+  }, { x: cx, y: cy }) as Promise<{
+    tick: number;
+    rngState: number;
+    unit: {
+      type: string;
+      house: string;
+      cell: { cx: number; cy: number };
+      mission: number;
+      missionTimer: number;
+    };
+  }>;
+}
+
+async function tsGreek2TnkAt(adapter: unknown, cx: number, cy: number) {
+  return adapterPage(adapter).evaluate(({ x, y }) => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const entity = (game.entities ?? []).find((e: any) =>
+      e.alive !== false &&
+      e.type === '2TNK' &&
+      e.house === 'Greece' &&
+      e.cell?.cx === x &&
+      e.cell?.cy === y);
+    if (!entity) throw new Error(`TS SCU35EA Greek 2TNK at ${x},${y} missing`);
+
+    return {
+      tick: game.tick,
+      rngState: state.rngState,
+      unit: {
+        type: entity.type,
+        house: entity.house,
+        cell: { cx: entity.cell.cx, cy: entity.cell.cy },
+        mission: entity.mission === 'GUARD' ? 5 : entity.mission,
+        missionTimer: entity.missionTimer,
+      },
+    };
+  }, { x: cx, y: cy }) as Promise<{
+    tick: number;
+    rngState: number;
+    unit: {
+      type: string;
+      house: string;
+      cell: { cx: number; cy: number };
+      mission: number | string;
+      missionTimer: number;
+    };
+  }>;
+}
+
 async function wasmGreekE3Snapshot(adapter: unknown, logicIndex = 99) {
   return adapterPage(adapter).evaluate((hint: number) => {
     const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
@@ -494,6 +629,45 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU35 HUNT approach wall de
         headTo: cpp.headTo,
       });
       expect(ts.facings.slice(0, cpp.path.length)).toEqual(cpp.path);
+    }, { wasmSeed: 0 });
+  }, 300_000);
+
+  it('applies the C++ multi-factory build-time divisor to Greek WEAP production', async () => {
+    await withDualScenario('SCU35EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBoth(handle, 380);
+      const cppFactories = await wasmGreekWeapFactories(handle.wasm);
+      const tsFactories = await tsGreekWeapFactories(handle.ts);
+
+      expect(cppFactories.tick).toBe(380);
+      expect(tsFactories.tick).toBe(cppFactories.tick);
+      expect(tsFactories.rngState >>> 0).toBe(cppFactories.rngState >>> 0);
+      expect(cppFactories.factories).toEqual([
+        {
+          exitCell: { cx: 50, cy: 62 },
+          type: '2TNK',
+          progress: 54,
+          done: true,
+          building: false,
+        },
+        {
+          exitCell: { cx: 57, cy: 62 },
+          type: '2TNK',
+          progress: 53,
+          done: false,
+          building: true,
+        },
+      ]);
+      expect(tsFactories.factories).toEqual(cppFactories.factories);
+
+      await stepBoth(handle, 1);
+      const cppTank = await wasmGreek2TnkAt(handle.wasm, 50, 62);
+      const tsTank = await tsGreek2TnkAt(handle.ts, 50, 62);
+
+      expect(tsTank.tick).toBe(cppTank.tick);
+      expect(tsTank.rngState >>> 0).toBe(cppTank.rngState >>> 0);
+      expect(tsTank.unit).toEqual(cppTank.unit);
     }, { wasmSeed: 0 });
   }, 300_000);
 

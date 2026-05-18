@@ -15737,13 +15737,13 @@ export class Game {
     }
   }
 
-  private aiInfantryFactoryCount(house: House): number {
+  private aiFactoryCount(house: House, kind: AIFactoryKind): number {
     let count = 0;
     for (const s of this.structures) {
       if (!s.alive || s.house !== house) continue;
-      if (this.aiFactoryKindForStructure(s) === 'infantry') count++;
+      if (this.aiFactoryKindForStructure(s) === kind) count++;
     }
-    return Math.max(1, count);
+    return count;
   }
 
   private aiProductionPowerFraction(house: House): number {
@@ -15775,8 +15775,11 @@ export class Game {
     if (power < cppFixedRaw(1, 2)) power = cppFixedRaw(1, 2);
     time = cppFixedMulInt(cppFixedInverseRaw(power), time);
 
-    if (kind === 'infantry') {
-      time = Math.trunc(time / this.aiInfantryFactoryCount(house));
+    // C++ TechnoClass::Time_To_Build divides every product class by
+    // House->Factory_Count(What_Am_I()), not just infantry.
+    const factoryCount = this.aiFactoryCount(house, kind);
+    if (factoryCount !== 0) {
+      time = Math.trunc(time / factoryCount);
     }
 
     // C++ FactoryClass::Start build slowdown for computer houses
