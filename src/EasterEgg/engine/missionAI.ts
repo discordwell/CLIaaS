@@ -179,7 +179,7 @@ function consumeAmmoAfterSuccessfulFire(entity: Entity): void {
   if (entity.stats.isInfantry && entity.stats.isFraidyCat && entity.ammo === 0) {
     entity.fear = Entity.FEAR_MAXIMUM;
     if (entity.mission === Mission.ATTACK || entity.mission === Mission.HUNT) {
-      entity.mission = Mission.GUARD;
+      assignMission(entity, Mission.GUARD);
     }
   }
 }
