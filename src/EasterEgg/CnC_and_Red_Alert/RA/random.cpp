@@ -101,9 +101,12 @@ int g_rng_source_tag = 0; // current caller tag (set before calling Random_Pick)
 int g_rng_entity_tag = 0; // current entity tag (set by logic.cpp at entity loop start)
 int g_tarcom_tag = 0; // tarcom assignment tag (foot.cpp/team.cpp/techno.cpp debug hooks)
 
+extern RandomClass NonCriticalRandomNumber;
+
 int RandomClass::operator ()(void)
 {
-	if (g_rng_tracking) {
+	bool is_scenario_rng = (this != &NonCriticalRandomNumber);
+	if (is_scenario_rng && g_rng_tracking) {
 		g_rng_call_count++;
 	}
 #ifdef RANDOM_COUNT
@@ -117,7 +120,7 @@ int RandomClass::operator ()(void)
 	Seed = (Seed * MULT_CONSTANT) + ADD_CONSTANT;
 
 	// Log seed + source + entity for parity debugging
-	if (g_rng_log_enabled && g_rng_log_count < RNG_LOG_SIZE) {
+	if (is_scenario_rng && g_rng_log_enabled && g_rng_log_count < RNG_LOG_SIZE) {
 		g_rng_seed_log[g_rng_log_count] = Seed;
 		g_rng_source_log[g_rng_log_count] = g_rng_source_tag;
 		g_rng_entity_log[g_rng_log_count] = g_rng_entity_tag;
