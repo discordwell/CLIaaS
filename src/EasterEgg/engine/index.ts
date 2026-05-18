@@ -15383,10 +15383,12 @@ export class Game {
   /** Apply deferred win/lose — called by game tick. C++ house.cpp:945-960 HouseClass::AI() */
   private applyDeferredWinLose(): void {
     if (this.state !== 'playing') return;
-    // Decrement BorrowedTime each tick
+    // C++ BorrowedTime is a CDTimerClass<FrameTimerClass>. HouseClass::AI()
+    // tests the current value before Frame increments; a timer that reaches
+    // zero during this frame resolves on the next HouseClass::AI pass.
     if (this.borrowedTime > 0) {
       this.borrowedTime--;
-      if (this.borrowedTime > 0) return; // still counting down
+      return;
     }
     // C++ house.cpp:945-951 — IsToWin fires when BorrowedTime == 0 && Blockage <= 0
     if (this.isToWin && this.allowWin <= 0) {
