@@ -12206,6 +12206,10 @@ export class Game {
 	
 	    return scoreWeapon(w2) > scoreWeapon(w1) ? w2 : w1;
 	  }
+
+    private selectedWeaponForEntityTarget(entity: Entity, target: Entity): WeaponStats | null {
+      return entity.selectWeapon(target, (warhead, armor) => this.getWarheadMult(warhead, armor));
+    }
 	
 	  private entityInRangeOfStructureTarget(entity: Entity, structure: MapStructure, weapon: WeaponStats): boolean {
 	    const target = scenarioStructureTargetLeptons(structure);
@@ -12219,14 +12223,15 @@ export class Game {
 	    if (entity.moveTarget) return false;
 	
 	    if (entity.target?.alive) {
-	      if (!entity.weapon) return true;
-	      if (!entity.inRange(entity.target)) return true;
+	      const weapon = this.selectedWeaponForEntityTarget(entity, entity.target);
+	      if (!weapon) return true;
+	      if (!entity.inRangeWith(entity.target, weapon)) return true;
 	
 	      // C++ foot.cpp:947 uses TechnoClass::IsLocked here. That flag means the
 	      // object has entered the playable map/radar area, not that PrimaryFacing is
 	      // aimed at TarCom. In-range locked infantry should stay put and let
 	      // Firing_AI rotate/start DO_FIRE_WEAPON instead of assigning NavCom.
-	      return !this.map.inBounds(entity.cell.cx, entity.cell.cy);
+	      return !entity.isLocked;
 	    }
 	
 	    if (entity.targetStructure?.alive) {
@@ -12235,7 +12240,7 @@ export class Game {
 	      if (!weapon) return true;
 	      if (!this.canWeaponTargetStructure(weapon)) return false;
 	      if (!this.entityInRangeOfStructureTarget(entity, structure, weapon)) return true;
-	      return !this.map.inBounds(entity.cell.cx, entity.cell.cy);
+	      return !entity.isLocked;
 	    }
 	
 	    return false;
@@ -12269,7 +12274,7 @@ export class Game {
 	    let weaponRangeLeptons = 0;
 	    let structureRangeBonus = 0;
 	    if (entity.target?.alive) {
-	      const weapon = entity.weapon;
+	      const weapon = this.selectedWeaponForEntityTarget(entity, entity.target);
 	      if (weapon) weaponRangeLeptons = weapon.range * LEPTON_SIZE;
 	      const targetCoord = entity.target.targetCoordLeptons();
 	      targetLX = targetCoord.lx;

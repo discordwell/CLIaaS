@@ -376,6 +376,35 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU35 HUNT approach wall de
     }, { wasmSeed: 0 });
   }, 300_000);
 
+  it('approaches ground infantry using the selected Dragon range, not RedEye range', async () => {
+    await withDualScenario('SCU35EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBoth(handle, 165);
+      const cpp = await wasmGreekE3Snapshot(handle.wasm, 103);
+      const ts = await tsGreekE3Snapshot(handle.ts, 103);
+
+      expect(cpp.tick).toBe(165);
+      expect(cpp.target).toMatchObject({ rtti: 13, index: 57 });
+      expect(cpp.isDriving).toBe(true);
+      expect(cpp.headTo).not.toBeNull();
+
+      expect(ts.tick).toBe(cpp.tick);
+      expect(ts.target).toMatchObject({ type: 'GNRL' });
+      expect(ts).toMatchObject({
+        mission: 'HUNT',
+        missionTimer: cpp.missionTimer,
+        isDriving: cpp.isDriving,
+        doing: 'walk',
+        lx: cpp.lx,
+        ly: cpp.ly,
+        arm: cpp.arm,
+        nav: cpp.nav,
+        headTo: cpp.headTo,
+      });
+    }, { wasmSeed: 0 });
+  }, 300_000);
+
   it('paradrops BADR cargo in C++ linked-list order with scenario overrides', async () => {
     await withDualScenario('SCU35EA', async (handle) => {
       await handle.ts.syncRngSeed(handle.wasmState.rngState!);
