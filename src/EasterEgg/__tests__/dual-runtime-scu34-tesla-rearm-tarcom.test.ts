@@ -54,6 +54,8 @@ async function wasmTeslaState(adapter: unknown) {
       mission: row?.[7],
       missionTimer: row?.[8],
       arm: row?.[23],
+      primaryCurrent: row?.[28],
+      primaryDesired: row?.[29],
       tarKind: row?.[30],
     };
   });
@@ -74,6 +76,8 @@ async function tsTeslaState(adapter: unknown) {
       attackCooldown: tesla?.attackCooldown,
       ammo: tesla?.ammo,
       maxAmmo: tesla?.maxAmmo,
+      primaryCurrent: tesla?.turretFacing256,
+      primaryDesired: tesla?.desiredTurretFacing256,
     };
   });
 }
@@ -110,6 +114,26 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU34 Tesla rearm TarCom cl
       const postTs = await tsTeslaState(handle.ts);
       expect(postTs.tick).toBe(postCpp.tick);
       expect(postTs.rngState >>> 0).toBe(postCpp.rngState >>> 0);
+    });
+  }, 60_000);
+
+  it('keeps non-turret Tesla PrimaryFacing desired during rearm damage', async () => {
+    await withDualScenario('SCU34EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBothInChunks(handle, 414);
+      const cpp = await wasmTeslaState(handle.wasm);
+      const ts = await tsTeslaState(handle.ts);
+
+      expect(ts.tick).toBe(cpp.tick);
+      expect(ts.rngState >>> 0).toBe(cpp.rngState >>> 0);
+      expect(cpp.primaryDesired).not.toBe(cpp.primaryCurrent);
+      expect(ts.primaryCurrent).toBe(cpp.primaryCurrent);
+      expect(ts.primaryDesired).toBe(cpp.primaryDesired);
+
+      const step = await stepBoth(handle, 1);
+      expect(step.ts.state.tick).toBe(step.wasm.state.tick);
+      expect(step.ts.state.rngState! >>> 0).toBe(step.wasm.state.rngState! >>> 0);
     });
   }, 60_000);
 });

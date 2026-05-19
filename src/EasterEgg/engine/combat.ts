@@ -479,11 +479,12 @@ function setStructureRandomDamageFacing(s: MapStructure): void {
 }
 
 export function setStructureTurretDesired(s: MapStructure, target: Entity): void {
-  if (!TURRETED_STRUCTURES.has(s.type)) return;
-  syncStructureTurretFacingFields(s);
+  syncStructurePrimaryFacingFields(s);
   // C++ BuildingClass::Can_Fire/Mission_Attack use Direction(TarCom),
   // which is Center_Coord() -> As_Coord(TarCom). Fire_Coord is only used
-  // later for range checks and projectile launch.
+  // later for range checks and projectile launch. Even buildings without a
+  // rotating turret keep this PrimaryFacing desired value; Rotation_AI simply
+  // never advances it unless the class is turret-equipped.
   const center = structureCenterLeptons(s);
   const targetCoord = entityTargetLeptons(target);
   s.desiredTurretFacing256 = directionToLeptons256(center.lx, center.ly, targetCoord.lx, targetCoord.ly);
@@ -492,8 +493,7 @@ export function setStructureTurretDesired(s: MapStructure, target: Entity): void
 }
 
 function setStructureTurretDesiredToTargetNone(s: MapStructure): void {
-  if (!TURRETED_STRUCTURES.has(s.type)) return;
-  syncStructureTurretFacingFields(s);
+  syncStructurePrimaryFacingFields(s);
   const center = structureCenterLeptons(s);
   s.desiredTurretFacing256 = directionToLeptons256(center.lx, center.ly, 0, 0);
   s.desiredTurretDir = ((s.desiredTurretFacing256 + 16) >> 5) & 7;
@@ -5326,7 +5326,7 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
       s.missionTimer = Math.max(s.missionTimer ?? 0, s.attackCooldown);
       if (s.rearmFacingUpdatePending) {
         const rearmTarget = getAssignedStructureTarget(ctx, s);
-        if (rearmTarget && TURRETED_STRUCTURES.has(s.type)) {
+        if (rearmTarget) {
           setStructureTurretDesired(s, rearmTarget);
         }
         s.rearmFacingUpdatePending = false;
