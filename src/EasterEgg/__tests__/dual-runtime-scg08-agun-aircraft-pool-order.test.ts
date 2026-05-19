@@ -36,6 +36,17 @@ interface AgunTargetSnapshot {
   targetPoolIndex: number | undefined;
 }
 
+interface WestAgunSnapshot {
+  mission: string | number;
+  missionTimer: number | undefined;
+  targetPresent: boolean;
+  targetLX: number;
+  targetLY: number;
+  turretFacing256: number | undefined;
+  desiredTurretFacing256: number | undefined;
+  canFire: number | undefined;
+}
+
 function adapterPage(adapter: unknown): EvalPage {
   const page = (adapter as { page?: EvalPage }).page;
   if (!page) throw new Error('Adapter page is not available');
@@ -82,6 +93,54 @@ async function tsEastAgunTarget(adapter: unknown): Promise<AgunTargetSnapshot> {
       targetLY: target ? target.leptonY - (target.isAirUnit ? 256 : 0) : 0,
       targetHp: target?.hp,
       targetPoolIndex: undefined,
+    };
+  });
+}
+
+async function wasmWestAgunSnapshot(adapter: unknown): Promise<WestAgunSnapshot> {
+  const page = adapterPage(adapter);
+  return page.evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const row = state.logicLayer.find((r: any[]) =>
+      r[5] === 'B' &&
+      r[1] === 'AGUN' &&
+      r[3] === 55 &&
+      r[4] === 100);
+    if (!row) throw new Error('C++ western AGUN not found');
+    return {
+      mission: row[7],
+      missionTimer: row[8],
+      targetPresent: row[30] >= 0,
+      targetLX: row[21],
+      targetLY: row[22],
+      turretFacing256: row[28],
+      desiredTurretFacing256: row[29],
+      canFire: row[37],
+    };
+  });
+}
+
+async function tsWestAgunSnapshot(adapter: unknown): Promise<WestAgunSnapshot> {
+  const page = adapterPage(adapter);
+  return page.evaluate(() => {
+    const game = (window as any).__agentGame;
+    const agun = game.structures.find((s: any) =>
+      s.type === 'AGUN' &&
+      s.cx === 55 &&
+      s.cy === 100);
+    if (!agun) throw new Error('TS western AGUN not found');
+    const target = agun.targetEntityId !== undefined
+      ? game.entityById.get(agun.targetEntityId)
+      : undefined;
+    return {
+      mission: agun.mission,
+      missionTimer: agun.missionTimer,
+      targetPresent: !!target,
+      targetLX: target?.leptonX ?? 0,
+      targetLY: target ? target.leptonY - (target.isAirUnit ? 256 : 0) : 0,
+      turretFacing256: agun.turretFacing256,
+      desiredTurretFacing256: agun.desiredTurretFacing256,
+      canFire: undefined,
     };
   });
 }
@@ -133,6 +192,44 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCG08EA AGUN aircraft pool-
         result = await stepBoth(handle, 1);
       }
       expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
+    }, { wasmSeed: 0 });
+  }, 300_000);
+
+  it('turns the AGUN turret toward TARGET_NONE after an out-of-range aircraft clear', async () => {
+    await withDualScenario('SCG08EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBothOneTickAtATime(handle, 633);
+      const beforeClear = await wasmWestAgunSnapshot(handle.wasm);
+      expect(beforeClear, 'C++ west AGUN reaches the FIRE_RANGE mission tick').toMatchObject({
+        targetPresent: true,
+        turretFacing256: 57,
+        desiredTurretFacing256: 57,
+        canFire: 8,
+      });
+      expect(await tsWestAgunSnapshot(handle.ts), 'TS west AGUN pre-clear state').toMatchObject({
+        targetPresent: true,
+        targetLX: beforeClear.targetLX,
+        targetLY: beforeClear.targetLY,
+        turretFacing256: beforeClear.turretFacing256,
+        desiredTurretFacing256: beforeClear.desiredTurretFacing256,
+      });
+
+      await stepBoth(handle, 1);
+      const cppAfterClear = await wasmWestAgunSnapshot(handle.wasm);
+      const tsAfterClear = await tsWestAgunSnapshot(handle.ts);
+      expect(cppAfterClear.targetPresent).toBe(false);
+      expect(tsAfterClear, 'TS should preserve C++ turret retarget after FIRE_RANGE clears TarCom').toMatchObject({
+        targetPresent: false,
+        turretFacing256: cppAfterClear.turretFacing256,
+        desiredTurretFacing256: cppAfterClear.desiredTurretFacing256,
+      });
+
+      let result: Awaited<ReturnType<typeof stepBoth>> | null = null;
+      for (let tick = 635; tick <= 640; tick++) {
+        result = await stepBoth(handle, 1);
+      }
+      expect(result?.ts.state.rngState >>> 0).toBe(result?.wasm.state.rngState! >>> 0);
     }, { wasmSeed: 0 });
   }, 300_000);
 });

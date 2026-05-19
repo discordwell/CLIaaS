@@ -5229,7 +5229,7 @@ function structureTargetInTarcomRange(s: MapStructure, target: Entity): boolean 
   return leptonDist(fire.lx, fire.ly, targetCoord.lx, targetCoord.ly) <= Math.trunc(s.weapon.range * LEPTON_SIZE);
 }
 
-function clearStructureAttackTargetAfterCanFireFailure(s: MapStructure): void {
+export function clearStructureAttackTargetAfterCanFireFailure(s: MapStructure): void {
   s.targetEntityId = undefined;
   s.mission = Mission.GUARD;
   s.missionTimer = Math.max(s.missionTimer ?? 0, 1);

@@ -161,6 +161,7 @@ import {
   structureFireLeptons as _structureFireLeptons,
   entityTargetLeptons as _entityTargetLeptons,
   setStructureTurretDesired as _setStructureTurretDesired,
+  clearStructureAttackTargetAfterCanFireFailure as _clearStructureAttackTargetAfterCanFireFailure,
   tickStructureTurretRotation as _tickStructureTurretRotation,
   SPLASH_RADIUS,
 } from './combat';
@@ -17792,9 +17793,7 @@ export class Game {
           // C++ BuildingClass::Mission_Attack handles FIRE_CANT/FIRE_RANGE
           // before the Tesla charge gate, clearing TarCom and commencing GUARD
           // in the same mission tick.
-          s.targetEntityId = undefined;
-          s.mission = Mission.GUARD;
-          s.missionTimer = 1;
+          _clearStructureAttackTargetAfterCanFireFailure(s);
           return false;
         }
         if (this.isElectricStructureWeapon(s) && !s.isCharged) {
