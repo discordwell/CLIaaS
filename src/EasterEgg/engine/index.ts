@@ -13489,9 +13489,21 @@ export class Game {
                       if (this.edgeOfWorldAI(entity)) return false;
                       if (!entity.stats.isVessel) this.runMobileLookForPlayer(entity);
                       this.cutTransportTether(entity);
+                      const pcpMission = (entity.missionQueue ?? entity.mission) as Mission;
+                      const pathShortenEligible =
+                        pcpMission === Mission.RESCUE ||
+                        pcpMission === Mission.AREA_GUARD ||
+                        pcpMission === Mission.ATTACK ||
+                        pcpMission === Mission.HUNT;
+                      const liveTar = !!(entity.target?.alive) || entity.targetStructure != null;
+                      const inRangeNow = this.footPerCellTargetInRange(entity);
                       const runClassPerCellProcess = entity.stats.isVessel ? drivePerCellProcess : unitPerCellProcess;
                       const r = runClassPerCellProcess(entity, PCPType.PCP_END, {
                         rofBias: this.getROFBias(entity.house),
+                        hasLegalTarCom: liveTar,
+                        pathShortenEligible,
+                        targetInRange: inRangeNow,
+                        preservePathOnNavComClear: true,
                       });
                       const killedByMine = this.triggerMineAtCell(entity) === true && !entity.alive;
                       if (!killedByMine) this.runUnitCrusherPerCellProcess(entity);

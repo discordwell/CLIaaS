@@ -926,6 +926,13 @@ export interface UnitPerCellOptions {
   /** C++ House->ROFBias used by TechnoClass::Rearm_Delay(true). */
   rofBias?: number;
   /**
+   * drive.cpp track-jump PCP_END runs before Start_Driver(c) memmoves Path.
+   * C++ clears Path[0], then preserves Path[1..] through that memmove. TS
+   * models the memmove in the caller by consuming one path entry, so the PCP
+   * hook must clear NavCom without clearing the whole TS path array.
+   */
+  preservePathOnNavComClear?: boolean;
+  /**
    * C++ FootClass::Per_Cell_Process path-shorten inputs. DriveClass chains to
    * FootClass after its own PCP_END work, and VesselClass chains through
    * DriveClass, so these apply to vehicles/vessels as well as infantry.
@@ -993,7 +1000,7 @@ function drivePerCellProcessImpl<M>(
     const navCellY = Math.floor(entity.moveTarget.ly / 256);
     if (navCellX === entity.cell.cx && navCellY === entity.cell.cy) {
       entity.moveTarget = null;
-      clearFootPath(entity);
+      if (!opts?.preservePathOnNavComClear) clearFootPath(entity);
       result.navComCleared = true;
     }
   }
@@ -1006,7 +1013,7 @@ function drivePerCellProcessImpl<M>(
       && opts.pathShortenEligible === true
       && opts.targetInRange === true) {
     entity.moveTarget = null;
-    clearFootPath(entity);
+    if (!opts?.preservePathOnNavComClear) clearFootPath(entity);
     result.navComCleared = true;
   }
 
