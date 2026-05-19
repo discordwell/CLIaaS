@@ -338,6 +338,7 @@ describe('updateAttack projectile fire gates', () => {
     const ctx = makeMockContext({
       entities: [grenadier, target],
       incomingThreatScatterCell,
+      incomingProjectileSpeed: 10,
     });
     ScenarioRandom.seed = 0x12345678;
 
@@ -353,6 +354,40 @@ describe('updateAttack projectile fire gates', () => {
       target.cell.cy,
       grenadier,
     );
+  });
+
+  it('does not run CellClass::Incoming when scenario [General] resets Incoming to zero', () => {
+    const grenadier = makeEntity(
+      UnitType.I_E2,
+      House.USSR,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    const target = makeEntity(
+      UnitType.I_E1,
+      House.Greece,
+      22 * CELL_SIZE + CELL_SIZE / 2,
+      20 * CELL_SIZE + CELL_SIZE / 2,
+    );
+    grenadier.mission = Mission.ATTACK;
+    grenadier.attackCooldown = 0;
+    grenadier.target = target;
+
+    const incomingThreatScatterCell = vi.fn();
+    const ctx = makeMockContext({
+      entities: [grenadier, target],
+      incomingThreatScatterCell,
+      incomingProjectileSpeed: 0,
+    });
+    ScenarioRandom.seed = 0x12345678;
+
+    updateAttack(ctx, grenadier);
+    for (let i = 0; i < 20 && !(ctx.launchProjectile as any).mock.calls.length; i++) {
+      advanceInfantryFirePrep(ctx, grenadier);
+    }
+
+    expect(ctx.launchProjectile).toHaveBeenCalledTimes(1);
+    expect(incomingThreatScatterCell).not.toHaveBeenCalled();
   });
 
   it('launches projectile weapons even when armor reduces final damage to zero', () => {

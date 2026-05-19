@@ -120,6 +120,8 @@ export interface MissionAIContext {
   ): void;
   /** C++ CellClass::Incoming(threat, forced=true) for slow infantry projectiles. */
   incomingThreatScatterCell?(cx: number, cy: number, threat: Entity): void;
+  /** C++ RulesClass::Incoming raw INI speed; compared after Get_MPHType scaling. */
+  incomingProjectileSpeed?: number;
 
   // Warhead helpers
   getFirepowerBias(house: House): number;
@@ -738,7 +740,11 @@ function beginInfantryFirePrep(entity: Entity, tick: number): void {
   entity.firePrepUsesDoingStage = startedFireDoing || entity.doingRate > 0;
 }
 
-const RULE_INCOMING_PROJECTILE_SPEED = 10;
+const DEFAULT_INCOMING_PROJECTILE_SPEED = 10;
+
+function iniSpeedToMph(rawSpeed: number): number {
+  return Math.max(0, Math.min(255, Math.trunc((rawSpeed * 256) / 100)));
+}
 
 function maybeWarnIncomingSlowInfantryProjectile(
   ctx: MissionAIContext,
@@ -749,7 +755,8 @@ function maybeWarnIncomingSlowInfantryProjectile(
   // C++ InfantryClass::Firing_AI checks Class->PrimaryWeapon->MaxSpeed, not the
   // selected secondary weapon. `projSpeed` is the rules.ini Speed/MaxSpeed value.
   const primarySpeed = entity.weapon?.projSpeed;
-  if (primarySpeed === undefined || primarySpeed >= RULE_INCOMING_PROJECTILE_SPEED) return;
+  const incomingSpeed = ctx.incomingProjectileSpeed ?? DEFAULT_INCOMING_PROJECTILE_SPEED;
+  if (primarySpeed === undefined || iniSpeedToMph(primarySpeed) >= iniSpeedToMph(incomingSpeed)) return;
   ctx.incomingThreatScatterCell?.(targetCell.cx, targetCell.cy, entity);
 }
 

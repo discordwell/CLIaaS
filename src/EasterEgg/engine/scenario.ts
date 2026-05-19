@@ -616,6 +616,8 @@ interface ScenarioData {
   houseMaxBuilding: Map<string, number>;
   /** C++ RulesClass::IsAllyReveal, overridden by scenario [General] AllyReveal=. */
   allyReveal: boolean;
+  /** C++ RulesClass::Incoming raw INI speed after scenario [General] override pass. */
+  incomingProjectileSpeed: number;
   /** C++ Scen.IsTanyaEvac — scenario.cpp:2262: CivEvac=yes in [Basic]. When true,
    *  Tanya (E7) counts as civilian for evacuation (aircraft.cpp:143). */
   isTanyaEvac: boolean;
@@ -642,6 +644,19 @@ function parseIniBool(raw: string, fallback: boolean): boolean {
   if (normalized === 'yes' || normalized === 'true' || normalized === '1') return true;
   if (normalized === 'no' || normalized === 'false' || normalized === '0') return false;
   return fallback;
+}
+
+const DEFAULT_INCOMING_PROJECTILE_SPEED = 10;
+
+function parseIncomingProjectileSpeed(sections: Map<string, Map<string, string>>): number {
+  const general = sections.get('General');
+  if (!general) return DEFAULT_INCOMING_PROJECTILE_SPEED;
+  const raw = general.get('Incoming');
+  // C++ rules.cpp:482 passes MPH_IMMOBILE as Get_MPHType's default. A scenario
+  // [General] section without Incoming= therefore resets Rule.Incoming to 0.
+  if (raw === undefined) return 0;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 }
 
 function consumeCxxHouseInitRNG(): void {
@@ -1035,6 +1050,7 @@ export function parseScenarioINI(text: string, scenarioId = ''): ScenarioData {
     houseMaxInfantry,
     houseMaxBuilding,
     allyReveal: parseIniBool(get('General', 'AllyReveal', 'yes'), true),
+    incomingProjectileSpeed: parseIncomingProjectileSpeed(sections),
   };
 }
 
@@ -2110,6 +2126,8 @@ export interface ScenarioResult {
   scenarioUnitStats: Record<string, UnitStats>;
   /** Per-scenario weapon stats (WEAPON_STATS merged with INI overrides) */
   scenarioWeaponStats: Record<string, WeaponStats>;
+  /** C++ RulesClass::Incoming raw INI speed after scenario [General] override pass. */
+  incomingProjectileSpeed: number;
   /** Per-scenario warhead damage multipliers (overrides for WARHEAD_VS_ARMOR) */
   warheadOverrides: Record<string, [number, number, number, number, number]>;
   /** Per-scenario warhead metadata (Spread/Wall/Wood/Ore overrides) */
@@ -2632,6 +2650,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     theatre: data.theatre,
     scenarioUnitStats,
     scenarioWeaponStats,
+    incomingProjectileSpeed: data.incomingProjectileSpeed,
     warheadOverrides: scenarioWarheadVerses,
     scenarioWarheadMeta,
     scenarioWarheadProps,

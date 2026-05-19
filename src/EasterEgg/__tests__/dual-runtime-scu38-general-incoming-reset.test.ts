@@ -1,11 +1,11 @@
 /**
- * Dual-runtime check for CellClass::Incoming against moving drive-class units.
+ * Dual-runtime check for scenario [General] Incoming reset behavior.
  *
- * SCU38EA tick 143 has a USSR E2 launch a slow grenade at a Greece 1TNK
- * (C++ logic[98]). The target tank is already in DriveClass movement with no
- * legal NavCom, and C++ does not scatter it from CellClass::Incoming; no
- * Scatter Random_Pick calls occur. TS must not assign a fresh moveTarget to
- * that moving tank just because its logical cell matches the incoming cell.
+ * C++ RulesClass::General reads Incoming with MPH_IMMOBILE as the default. When
+ * a scenario has [General] but omits Incoming=, that pass resets Rule.Incoming
+ * to zero instead of preserving rules.ini Incoming=10. SCU38EA has [General]
+ * ParaTech=16 and no Incoming=, so its E2 grenade shots must not call
+ * CellClass::Incoming or consume scatter RNG.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -31,7 +31,7 @@ function adapterPage(adapter: unknown): EvalPage {
   return page;
 }
 
-async function wasmMovingTank(adapter: unknown) {
+async function wasmScenarioTank(adapter: unknown) {
   return adapterPage(adapter).evaluate(() => {
     const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
     const tankRow = ((state.logicLayer ?? []) as any[]).find(entry => entry[0] === 98);
@@ -68,7 +68,7 @@ async function wasmMovingTank(adapter: unknown) {
   });
 }
 
-async function tsMovingTank(adapter: unknown) {
+async function tsScenarioTank(adapter: unknown) {
   return adapterPage(adapter).evaluate(() => {
     const game = (window as any).__agentGame;
     const state = (window as any).__agentState();
@@ -101,11 +101,12 @@ async function tsMovingTank(adapter: unknown) {
         mission: shooter.mission,
         attackCooldown: shooter.attackCooldown,
       },
+      incomingProjectileSpeed: game.incomingProjectileSpeed,
     };
   });
 }
 
-describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU38 incoming moving drive-class target', () => {
+describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU38 scenario Incoming reset', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
   }, 180_000);
@@ -114,13 +115,13 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU38 incoming moving drive
     await stopParityServer(serverHandle);
   }, 20_000);
 
-  it('does not scatter a moving tank from slow infantry projectile incoming warning', async () => {
+  it('does not call CellClass::Incoming for E2 grenades when scenario Incoming resets to zero', async () => {
     await withDualScenario('SCU38EA', async (handle) => {
       await handle.ts.syncRngSeed(handle.wasmState.rngState!);
 
       await stepBoth(handle, 142);
-      const cppBefore = await wasmMovingTank(handle.wasm);
-      const tsBefore = await tsMovingTank(handle.ts);
+      const cppBefore = await wasmScenarioTank(handle.wasm);
+      const tsBefore = await tsScenarioTank(handle.ts);
       expect(cppBefore.tank).toMatchObject({
         logicIndex: 98,
         type: '1TNK',
@@ -139,10 +140,11 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU38 incoming moving drive
         isDriving: true,
         moveTarget: null,
       });
+      expect(tsBefore.incomingProjectileSpeed).toBe(0);
 
       const step = await stepBoth(handle, 1);
-      const cpp = await wasmMovingTank(handle.wasm);
-      const ts = await tsMovingTank(handle.ts);
+      const cpp = await wasmScenarioTank(handle.wasm);
+      const ts = await tsScenarioTank(handle.ts);
 
       expect(step.wasm.state.tick).toBe(143);
       expect(step.ts.state.tick).toBe(143);

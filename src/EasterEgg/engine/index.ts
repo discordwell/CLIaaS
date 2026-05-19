@@ -677,6 +677,7 @@ export class Game {
   private scenarioUnitStats: Record<string, UnitStats> = UNIT_STATS;
   private scenarioWeaponStats: Record<string, WeaponStats> = WEAPON_STATS;
   private scenarioProductionItems: ProductionItem[] = PRODUCTION_ITEMS;
+  private incomingProjectileSpeed = 10;
   private warheadOverrides: Record<string, [number, number, number, number, number]> = {};
   private scenarioWarheadMeta: Record<string, WarheadMeta> = WARHEAD_META;
   private scenarioWarheadProps: Record<string, WarheadProps> = WARHEAD_PROPS;
@@ -1880,6 +1881,7 @@ export class Game {
       revealShooterFromFire: (e) => this.revealShooterFromFire(e),
       applySplashDamage: (c, w, pid, ah, att) => this.applySplashDamage(c, w, pid, ah, att),
       incomingThreatScatterCell: (cx, cy, threat) => this.incomingThreatScatterCell(cx, cy, threat),
+      incomingProjectileSpeed: this.incomingProjectileSpeed,
       getFirepowerBias: (h) => this.getFirepowerBias(h),
       getArmorBias: (h) => this.getArmorBias(h),
       getROFBias: (h) => this.getROFBias(h),
@@ -2082,6 +2084,7 @@ export class Game {
     this.scenarioUnitStats = scenario.scenarioUnitStats;
     this.scenarioWeaponStats = scenario.scenarioWeaponStats;
     this.scenarioProductionItems = scenario.scenarioProductionItems;
+    this.incomingProjectileSpeed = scenario.incomingProjectileSpeed;
     this.warheadOverrides = scenario.warheadOverrides;
     this.scenarioWarheadMeta = scenario.scenarioWarheadMeta;
     this.scenarioWarheadProps = scenario.scenarioWarheadProps;
@@ -8842,12 +8845,6 @@ export class Game {
 	        entity.mission === Mission.UNLOAD) return;
 	    const mc = MISSION_CONTROL[entity.mission];
 	    if (mc?.isParalyzed) return;
-	    // C++ drive.cpp: Scatter was revised to never redirect a drive-class
-	    // object that is already following a Head_To_Coord track. In practice
-	    // SCU38EA's moving 1TNK remains in motion with NavCom already cleared
-	    // when an E2 grenade calls CellClass::Incoming; C++ spends no scatter
-	    // RNG and leaves the active track alone.
-	    if (entity.isDriving) return;
 	    if (mc && !mc.isScatter && !forced) return;
 	    if (entity.bodyFacing256 >= 0 &&
 	        entity.desiredFacing256 >= 0 &&

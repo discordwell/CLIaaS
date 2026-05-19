@@ -872,6 +872,55 @@ Theater=TEMPERATE
     const data = parseScenarioINI(testIni);
     expect(data.allyReveal).toBe(true);
   });
+
+  it('keeps rules.ini Incoming when the scenario has no [General] section', () => {
+    const testIni = `[Basic]
+Name=Default Incoming Test
+Player=Greece
+[Map]
+X=0
+Y=0
+Width=50
+Height=50
+Theater=TEMPERATE
+`;
+    const data = parseScenarioINI(testIni);
+    expect(data.incomingProjectileSpeed).toBe(10);
+  });
+
+  it('resets Incoming to MPH_IMMOBILE when scenario [General] omits Incoming', () => {
+    const testIni = `[General]
+ParaTech=16
+[Basic]
+Name=Scenario Incoming Reset Test
+Player=USSR
+[Map]
+X=0
+Y=0
+Width=50
+Height=50
+Theater=TEMPERATE
+`;
+    const data = parseScenarioINI(testIni);
+    expect(data.incomingProjectileSpeed).toBe(0);
+  });
+
+  it('reads Incoming from scenario [General] when present', () => {
+    const testIni = `[General]
+Incoming=12
+[Basic]
+Name=Scenario Incoming Override Test
+Player=USSR
+[Map]
+X=0
+Y=0
+Width=50
+Height=50
+Theater=TEMPERATE
+`;
+    const data = parseScenarioINI(testIni);
+    expect(data.incomingProjectileSpeed).toBe(12);
+  });
 });
 
 describe('C++ Parity: Terrain Template Classification (display.cpp, scenario.ts)', () => {
