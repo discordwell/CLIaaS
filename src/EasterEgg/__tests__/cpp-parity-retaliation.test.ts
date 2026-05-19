@@ -46,10 +46,11 @@ import {
   buildDefaultAlliances,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
-import { type CombatContext, triggerRetaliation, damageEntity } from '../engine/combat';
+import { type CombatContext, triggerRetaliation, damageEntity, structureDamage } from '../engine/combat';
 import { GameMap } from '../engine/map';
 import type { Effect } from '../engine/renderer';
 import { ScenarioRandom } from '../engine/random';
+import { STRUCTURE_WEAPONS, type MapStructure } from '../engine/scenario';
 
 beforeEach(() => resetEntityIds());
 
@@ -303,6 +304,51 @@ describe('C++ techno.cpp:4988 gate — human house + PlayerReturnFire=no', () =>
     const enemy = makeEntity(UnitType.V_3TNK, House.USSR, 100 + CELL_SIZE, 100);
     triggerRetaliation(ctx, tank, enemy);
     expect(tank.target).toBeNull();
+  });
+
+  it('player armed building burns random facing RNG without assigning TarCom', () => {
+    const ctx = makeMockCtx({ playerHouse: House.USSR });
+    const ftur: MapStructure = {
+      type: 'FTUR',
+      image: 'ftur',
+      house: House.USSR,
+      cx: 66,
+      cy: 91,
+      hp: 400,
+      maxHp: 400,
+      armor: 'heavy',
+      alive: true,
+      rubble: false,
+      weapon: STRUCTURE_WEAPONS.FTUR,
+      attackCooldown: 0,
+      ammo: -1,
+      maxAmmo: -1,
+      turretFacing256: 0,
+      desiredTurretFacing256: 0,
+    };
+    const attacker = makeEntity(UnitType.V_ARTY, House.Greece, 66 * CELL_SIZE, 87 * CELL_SIZE);
+    ctx.structures = [ftur];
+    ctx.entities = [attacker];
+    ctx.entityById = new Map([[attacker.id, attacker]]);
+
+    ScenarioRandom.seed = 557370109;
+    ScenarioRandom.callCount = 0;
+    ScenarioRandom._sourceTag = 52005;
+    ScenarioRandom._entityTag = 15157;
+    ScenarioRandom._tagLogging = true;
+    ScenarioRandom._seedLog = [];
+
+    structureDamage(ctx, ftur, 35, attacker, 'AP', { skipBaseAttack: true });
+
+    expect(ftur.hp).toBe(365);
+    expect(ftur.targetEntityId).toBeUndefined();
+    expect(ScenarioRandom._seedLog).toHaveLength(1);
+    expect(ScenarioRandom._seedLog[0]).toEqual([2947920882, 52005, 15157]);
+
+    ScenarioRandom._tagLogging = false;
+    ScenarioRandom._sourceTag = 0;
+    ScenarioRandom._entityTag = 0;
+    ScenarioRandom._seedLog = [];
   });
 
   it('player-allied computer house still auto-retaliates (strict House->IsHuman)', () => {

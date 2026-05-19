@@ -2415,14 +2415,13 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
       isAllowedToSell: !!s.sellable,
       footprintTerrain: captureStructureFootprintTerrain(map, s.type, pos.cx, pos.cy),
       // C++ BuildingClass::Read_INI passes the 5th structure field to
-      // Unlimbo(), which stores it in TechnoClass::PrimaryFacing. Turreted
-      // buildings therefore start from scenario facing, not bdata StartFace.
-      ...(['GUN', 'SAM', 'AGUN'].includes(s.type) ? {
-        turretFacing256: s.facing & 0xff,
-        desiredTurretFacing256: s.facing & 0xff,
-        turretDir: ((s.facing + 16) >> 5) & 7,
-        desiredTurretDir: ((s.facing + 16) >> 5) & 7,
-      } : {}),
+      // Unlimbo(), which stores it in TechnoClass::PrimaryFacing. TS keeps
+      // this in the turret-facing fields for all structures; only actual
+      // turreted buildings render it as a visible turret.
+      turretFacing256: s.facing & 0xff,
+      desiredTurretFacing256: s.facing & 0xff,
+      turretDir: ((s.facing + 16) >> 5) & 7,
+      desiredTurretDir: ((s.facing + 16) >> 5) & 7,
 	      triggerName: trigName,
 	      mission: Mission.GUARD,
 	      missionTimer: 0, // C++ MissionClass::Timer — initialized to 0, fires on first tick

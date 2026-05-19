@@ -448,6 +448,10 @@ function signedFacingDelta256(current: number, desired: number): number {
 
 function syncStructureTurretFacingFields(s: MapStructure): void {
   if (!TURRETED_STRUCTURES.has(s.type)) return;
+  syncStructurePrimaryFacingFields(s);
+}
+
+function syncStructurePrimaryFacingFields(s: MapStructure): void {
   if (s.turretFacing256 === undefined) {
     s.turretFacing256 = s.turretDir !== undefined
       ? normalizeFacing256(s.turretDir * 32)
@@ -460,6 +464,18 @@ function syncStructureTurretFacingFields(s: MapStructure): void {
   }
   s.turretDir = ((s.turretFacing256 + 16) >> 5) & 7;
   s.desiredTurretDir = ((s.desiredTurretFacing256 + 16) >> 5) & 7;
+}
+
+function structurePrimaryFacingIsRotating(s: MapStructure): boolean {
+  syncStructurePrimaryFacingFields(s);
+  return signedFacingDelta256(s.turretFacing256!, s.desiredTurretFacing256!) !== 0;
+}
+
+function setStructureRandomDamageFacing(s: MapStructure): void {
+  syncStructurePrimaryFacingFields(s);
+  s.desiredTurretFacing256 = ScenarioRandom.nextInRange(0, 255);
+  s.desiredTurretDir = ((s.desiredTurretFacing256 + 16) >> 5) & 7;
+  s.turretRotAccum = Math.abs(signedFacingDelta256(s.turretFacing256!, s.desiredTurretFacing256));
 }
 
 export function setStructureTurretDesired(s: MapStructure, target: Entity): void {
@@ -1327,7 +1343,7 @@ function recordStructureSourceAttack(ctx: CombatContext, s: MapStructure, source
   }
 }
 
-function maybeAssignStructureReturnFireTarget(
+function maybeApplyStructureReturnFireReaction(
   ctx: CombatContext,
   s: MapStructure,
   source: Entity | undefined,
@@ -1342,15 +1358,20 @@ function maybeAssignStructureReturnFireTarget(
   const hasLegalTarget = !!(currentTarget && currentTarget.alive && !currentTarget.inLimbo);
   if (hasLegalTarget && structureTargetInTarcomRange(s, currentTarget)) return;
 
-  // C++ building.cpp:1496-1512 — weapon buildings snap their TarCom to the
-  // non-aircraft source that damaged them when the existing TarCom is illegal
-  // or out of range. PlayerReturnFire is disabled in rules.ini, so only the
-  // actual human house declines this automatic retargeting.
-  if (source.isAirUnit) return;
-  if (s.house === ctx.playerHouse) return;
-  if (!source.alive || source.inLimbo) return;
+  // C++ building.cpp:1496-1514 — weapon buildings snap TarCom to a
+  // non-aircraft source only when smart defense is allowed. Human-owned
+  // buildings with PlayerReturnFire=no, and all buildings hit by aircraft, do
+  // not retarget; they still consume Random_Pick(DIR_N, DIR_MAX) when their
+  // PrimaryFacing is idle.
+  if (!source.isAirUnit && s.house !== ctx.playerHouse) {
+    if (!source.alive || source.inLimbo) return;
+    s.targetEntityId = source.id;
+    return;
+  }
 
-  s.targetEntityId = source.id;
+  if (!structurePrimaryFacingIsRotating(s)) {
+    setStructureRandomDamageFacing(s);
+  }
 }
 
 /** Warhead vs armor multiplier — checks scenario overrides first */
@@ -4667,7 +4688,7 @@ export function structureDamage(
   }
   s.hp = Math.max(0, s.hp - damage);
   if (damage > 0) {
-    maybeAssignStructureReturnFireTarget(ctx, s, source);
+    maybeApplyStructureReturnFireReaction(ctx, s, source);
   }
   const destroyedByThisHit = oldHp > 0 && s.hp <= 0;
   if (destroyedByThisHit) {
