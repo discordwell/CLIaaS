@@ -109,7 +109,10 @@ async function wasmHeliStateByAid(adapter: unknown, aid: number) {
   return adapterPage(adapter).evaluate((targetAid: number) => {
     const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
     const heli = (state.logicLayer ?? []).find((row: any[]) => row[6] === targetAid);
+    const detail = [...(state.units ?? []), ...(state.enemies ?? [])]
+      .find((unit: any) => unit.id === targetAid);
     if (!heli) throw new Error(`C++ SCU14EA HELI aid ${targetAid} missing`);
+    if (!detail) throw new Error(`C++ SCU14EA HELI aid ${targetAid} detail missing`);
 
     return {
       tick: state.tick,
@@ -121,6 +124,7 @@ async function wasmHeliStateByAid(adapter: unknown, aid: number) {
         mission: heli[7],
         missionTimer: heli[8],
         arm: heli[23],
+        ammo: detail.ammo,
         status: heli[27],
         lx: heli[12],
         ly: heli[13],
@@ -155,6 +159,7 @@ async function tsHeliStateById(adapter: unknown, id: number) {
         mission: heli.mission,
         missionTimer: heli.missionTimer,
         attackCooldown: heli.attackCooldown,
+        ammo: heli.ammo,
         isSecondShot: heli.isSecondShot,
         status: heli.aircraftAttackStatus,
         lx: heli.leptonX,
@@ -290,6 +295,60 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 helicopter attack run
         status: secondCpp.heli.status,
         attackCooldown: secondCpp.heli.arm,
         isSecondShot: false,
+      });
+    }, { wasmSeed: 0 });
+  }, 300_000);
+
+  it('does not fire on the tick C++ exposes a post-dispatch Arm value of zero', async () => {
+    await withDualScenario('SCU14EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBothInChunks(handle, 1205);
+      const readyCpp = await wasmHeliStateByAid(handle.wasm, 65543);
+      const readyTs = await tsHeliStateById(handle.ts, 206);
+
+      expect(readyTs.tick).toBe(readyCpp.tick);
+      expect(readyTs.rngState >>> 0).toBe(readyCpp.rngState >>> 0);
+      expect(readyCpp.heli).toMatchObject({
+        type: 'HELI',
+        house: 'Greece',
+        mission: 1,
+        status: 4,
+        arm: 0,
+        ammo: 4,
+      });
+      expect(readyTs.heli).toMatchObject({
+        type: readyCpp.heli.type,
+        house: readyCpp.heli.house,
+        mission: 'ATTACK',
+        missionTimer: readyCpp.heli.missionTimer,
+        status: readyCpp.heli.status,
+        attackCooldown: readyCpp.heli.arm,
+        ammo: readyCpp.heli.ammo,
+      });
+
+      await stepBoth(handle, 1);
+      const firedCpp = await wasmHeliStateByAid(handle.wasm, 65543);
+      const firedTs = await tsHeliStateById(handle.ts, 206);
+
+      expect(firedTs.tick).toBe(firedCpp.tick);
+      expect(firedTs.rngState >>> 0).toBe(firedCpp.rngState >>> 0);
+      expect(firedCpp.heli).toMatchObject({
+        type: 'HELI',
+        house: 'Greece',
+        mission: 1,
+        status: 5,
+        arm: 2,
+        ammo: 3,
+      });
+      expect(firedTs.heli).toMatchObject({
+        type: firedCpp.heli.type,
+        house: firedCpp.heli.house,
+        mission: 'ATTACK',
+        missionTimer: firedCpp.heli.missionTimer,
+        status: firedCpp.heli.status,
+        attackCooldown: firedCpp.heli.arm,
+        ammo: firedCpp.heli.ammo,
       });
     }, { wasmSeed: 0 });
   }, 300_000);

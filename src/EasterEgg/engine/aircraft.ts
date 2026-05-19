@@ -318,7 +318,7 @@ type FixedWingFireState = 'ok' | 'ammo' | 'rearm' | 'range' | 'facing';
 type HelicopterFireState = 'ok' | 'ammo' | 'rearm' | 'range' | 'cloaked' | 'cant';
 
 function fixedWingCanFire(entity: Entity, targetPos: WorldPos, weapon: WeaponStats): FixedWingFireState {
-  if (entity.attackCooldown > 0) return 'rearm';
+  if (entity.attackCooldownAtLogicStart > 0) return 'rearm';
   if (entity.ammo === 0) return 'ammo';
 
   const target = fixedWingTargetLeptons(targetPos);
@@ -759,7 +759,7 @@ function helicopterFireState(entity: Entity): HelicopterFireState {
   } else {
     return 'cant';
   }
-  if (entity.attackCooldown > 0) return 'rearm';
+  if (entity.attackCooldownAtLogicStart > 0) return 'rearm';
   const fire = entity.fireCoordForWeapon(weapon);
   if (leptonDist(fire.lx, fire.ly, target.lx, target.ly) > weapon.range * LEPTON_SIZE) return 'range';
   if (entity.ammo === 0) return 'ammo';
@@ -1661,7 +1661,11 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
   // Only process aircraft with active state
   if (!entity.stats.isAircraft) return false;
 
-  // Decrement attack cooldowns — aircraft skip normal mission processing
+  // C++ Can_Fire reads Arm.Value() during MissionClass dispatch before the
+  // frame timer exposes the post-tick value. Keep the entry snapshot for fire
+  // gates, then decrement the visible timer used by post-state parity traces.
+  entity.attackCooldownAtLogicStart = entity.attackCooldown;
+  // Decrement attack cooldowns — aircraft skip normal mission processing.
   if (entity.attackCooldown > 0) entity.attackCooldown--;
   if (entity.attackCooldown2 > 0) entity.attackCooldown2--;
 
