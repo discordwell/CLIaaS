@@ -106,6 +106,7 @@ function applyInfantryAssignDestinationPathClear(unit: Entity, ctx?: TeamAIConte
  */
 export interface TeamAIContext {
   structures?: MapStructure[];
+  mines?: Array<{ cx: number; cy: number }>;
   entities?: Entity[];
   map?: GameMap;
   canEnterCell?: (entity: Entity, cx: number, cy: number) => boolean;
@@ -1080,7 +1081,7 @@ export class Team {
           break;
 
         case TMISSION_DEPLOY:
-          this.tMissionDeploy();
+          this.tMissionDeploy(ctx);
           break;
 
         case TMISSION_LOOP:
@@ -2232,7 +2233,7 @@ export class Team {
    * C++ TMission_Deploy (team.cpp:2923-2950 approximately)
    * Tell MCV/minelayer members to deploy.
    */
-  tMissionDeploy(): void {
+  tMissionDeploy(ctx?: TeamAIContext): void {
     let finished = true;
     for (const unit of this._members) {
       if (!unit.alive) continue;
@@ -2247,11 +2248,20 @@ export class Team {
         }
       }
       if (unit.type === UnitType.V_MNLY && unit.ammo !== 0) {
-        if (unit.mission !== Mission.UNLOAD) {
+        const cellHasBuilding = ctx?.structures?.some(s => {
+          if (!s.alive) return false;
+          const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+          return unit.cell.cx >= s.cx && unit.cell.cx < s.cx + sw &&
+            unit.cell.cy >= s.cy && unit.cell.cy < s.cy + sh;
+        }) ?? false;
+        const cellHasMine = ctx?.mines?.some(m =>
+          m.cx === unit.cell.cx && m.cy === unit.cell.cy) ?? false;
+        if (!cellHasBuilding && !cellHasMine && unit.mission !== Mission.UNLOAD) {
           unit.moveTarget = null;
           unit.moveTargetEntityRef = null;
           unit.target = null;
           unit.targetStructure = null;
+          unit.minelayerUnloadStatus = 0;
           assignMission(unit, Mission.UNLOAD);
           finished = false;
         }

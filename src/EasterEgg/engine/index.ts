@@ -1490,14 +1490,14 @@ export class Game {
       entities: this.entities,
       entityById: this.entityById,
       structures: this.structures,
-	      mines: this.mines,
-	      activeVortices: this.activeVortices,
-	      effects: this.effects,
-	      logicAnims: this.logicAnims,
-	      logicAnimsAlreadyProcessed: this.logicAnimsProcessedThisTick,
-	      tick: this.tick,
-	      playerHouse: this.playerHouse,
-	      credits: this.credits,
+      mines: this.mines,
+      activeVortices: this.activeVortices,
+      effects: this.effects,
+      logicAnims: this.logicAnims,
+      logicAnimsAlreadyProcessed: this.logicAnimsProcessedThisTick,
+      tick: this.tick,
+      playerHouse: this.playerHouse,
+      credits: this.credits,
       houseCredits: this.houseCredits,
       map: this.map,
       evaMessages: this.evaMessages,
@@ -1508,19 +1508,20 @@ export class Game {
       playSoundAt: (n, x, y) => this.playSoundAt(n as SoundName, x, y),
       playSound: (n) => this.audio.play(n as SoundName),
       movementSpeed: (e) => this.movementSpeed(e),
-	      damageEntity: (t, a, w, opts) => this.damageEntity(t, a, w as WarheadType, undefined, opts?.forced ? {
-	        skipHouseArmorBias: true,
-	        skipEntityArmorBias: true,
-	        skipProneBias: true,
-	      } : undefined),
-	      damageStructure: (s, d) => this.damageStructure(s, d),
-	      handleUnitDeath: (v, o) => this.handleUnitDeath(v, o),
-		      addEntity: (e) => { this.markEntityCellOccupierDown(e); this.entities.push(e); this.entityById.set(e.id, e); },
-	      logicIndexHintForNewObject: () => this.logicIndexHintForNewObject(),
-	      reserveAnimSlot: () => this.reserveCppAnimSlot(),
-	      screenShake: this.renderer.screenShake,
-	    };
-	  }
+      damageEntity: (t, a, w, opts) => this.damageEntity(t, a, w as WarheadType, undefined, opts?.forced ? {
+        skipHouseArmorBias: true,
+        skipEntityArmorBias: true,
+        skipProneBias: true,
+      } : undefined),
+      damageStructure: (s, d) => this.damageStructure(s, d),
+      handleUnitDeath: (v, o) => this.handleUnitDeath(v, o),
+      addEntity: (e) => { this.markEntityCellOccupierDown(e); this.entities.push(e); this.entityById.set(e.id, e); },
+      logicIndexHintForNewObject: () => this.logicIndexHintForNewObject(),
+      createMineStructure: (type, house, cx, cy) => this.createMinelayerMineStructure(type, house, cx, cy),
+      reserveAnimSlot: () => this.reserveCppAnimSlot(),
+      screenShake: this.renderer.screenShake,
+    };
+  }
 
   /** Run special units function with state sync */
   private _runSpecialUnits<T>(fn: (ctx: SpecialUnitsContext) => T): T {
@@ -2767,6 +2768,7 @@ export class Game {
     }
     _updateAllTeams(this.waypoints, {
       structures: this.structures,
+      mines: this.mines,
       entities: this.entities,
       map: this.map,
       playerHouse: this.playerHouse,
@@ -6721,9 +6723,8 @@ export class Game {
           break;
         }
         if (entity.type === UnitType.V_MNLY) {
-          this.updateMinelayer(entity);
           if (missionTimerFired && entity.mission === Mission.UNLOAD) {
-            entity.missionTimer = 1;
+            entity.missionTimer = this.updateMinelayer(entity);
           }
           break;
         }
@@ -8536,8 +8537,8 @@ export class Game {
             entity.targetStructure = null;
             entity.forceFirePos = null;
             entity.moveTarget = null;
-            entity.mission = Mission.UNLOAD;
-            entity.missionTimer = 0;
+            entity.minelayerUnloadStatus = 0;
+            assignMission(entity, Mission.UNLOAD);
             // The team mission remains active until the unit has returned to
             // GUARD after Mission_Unload.
             break;
@@ -16525,6 +16526,38 @@ export class Game {
     return structure;
   }
 
+  private createMinelayerMineStructure(type: 'MINP' | 'MINV', house: House, cx: number, cy: number): boolean {
+    if (this.structures.some(s => s.alive && isMineStructureType(s.type) && s.cx === cx && s.cy === cy)) {
+      return false;
+    }
+
+    const maxHp = STRUCTURE_MAX_HP[type] ?? 1;
+    const maxAmmo = STRUCTURE_AMMO[type] ?? -1;
+    const structure: MapStructure = {
+      type,
+      image: STRUCTURE_IMAGES[type] ?? type.toLowerCase(),
+      house,
+      cx,
+      cy,
+      hp: maxHp,
+      maxHp,
+      armor: STRUCTURE_ARMOR[type] ?? 'none',
+      alive: true,
+      rubble: false,
+      weapon: STRUCTURE_WEAPONS[type],
+      attackCooldown: 0,
+      ammo: maxAmmo,
+      maxAmmo,
+      mission: Mission.GUARD,
+      missionTimer: 0,
+      logicIndexHint: this.logicIndexHintForNewObject(),
+      footprintTerrain: captureStructureFootprintTerrain(this.map, type, cx, cy),
+    };
+
+    this.structures.push(structure);
+    return true;
+  }
+
   /** C++ BuildingClass::Exit_Object RTTI_BUILDING branch (building.cpp:2120-2150). */
   private exitAIBuildingFactoryProduct(s: MapStructure): 0 | 1 | 2 {
     const factory = s.aiFactory;
@@ -18261,12 +18294,12 @@ export class Game {
     this._runSpecialUnits(ctx => _updateThief(ctx, entity));
   }
 
-  /** Agent 9: Minelayer places AP mines — delegates to specialUnits.ts */
+  /** C++ UnitClass::Mission_Unload for UNIT_MINELAYER. */
   static readonly MAX_MINES_PER_HOUSE = _MAX_MINES_PER_HOUSE;
   mines: Array<{ cx: number; cy: number; house: House; damage: number; type: 'AP' | 'AV' }> = [];
 
-  updateMinelayer(entity: Entity): void {
-    this._runSpecialUnits(ctx => _updateMinelayer(ctx, entity));
+  updateMinelayer(entity: Entity): number {
+    return this._runSpecialUnits(ctx => _updateMinelayer(ctx, entity));
   }
 
   /** Agent 9: Mine trigger check — delegates to specialUnits.ts */

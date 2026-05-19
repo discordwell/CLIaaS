@@ -1042,6 +1042,9 @@ export class Entity {
   mcvUnloadStatus = 0;
   /** C++ FootClass::IsDeploying for UNIT_MCV deploy-after-rotation. */
   mcvIsDeploying = false;
+  /** C++ UnitClass::Mission_Unload Status for UNIT_MINELAYER:
+   *  0 INITIAL_CHECK, 1 MANEUVERING, 2 OPENING_DOOR, 3 UNLOADING, 4 CLOSING_DOOR. */
+  minelayerUnloadStatus = 0;
 
   // Agent 9: New unit special ability fields
   c4Timer = 0;              // C4 countdown on structures (Tanya)

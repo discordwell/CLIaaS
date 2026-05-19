@@ -7,12 +7,13 @@
 
 import {
   type WorldPos, CELL_SIZE,
-  type House, UnitType, Mission, AnimState,
+  type House, UnitType, Mission, AnimState, Dir,
   worldDist, worldToCell, pixelToLepton, CHRONO_SHIFT_VISUAL_TICKS, CONDITION_RED,
   directionTo, HOUSE_FACTION,
   WARHEAD_META, modifyDamage, type WarheadType,
 } from './types';
 import { Entity, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION } from './entity';
+import { assignMission } from './missionLifecycle';
 import { type MapStructure, STRUCTURE_SIZE, isMineStructureType } from './scenario';
 import { type Effect } from './renderer';
 import { type GameMap } from './map';
@@ -81,6 +82,7 @@ export interface SpecialUnitsContext {
   }): void;
   addEntity(entity: Entity): void;
   logicIndexHintForNewObject?(): number;
+  createMineStructure?(type: 'MINP' | 'MINV', house: House, cx: number, cy: number): boolean;
   reserveAnimSlot?(): boolean;
 
   // Renderer
@@ -186,32 +188,141 @@ export function updateThief(ctx: SpecialUnitsContext, entity: Entity): void {
 
 // === 4. Minelayer ===
 
+const MINELAYER_INITIAL_CHECK = 0;
+const MINELAYER_MANEUVERING = 1;
+const MINELAYER_OPENING_DOOR = 2;
+const MINELAYER_UNLOADING = 3;
+const MINELAYER_CLOSING_DOOR = 4;
+const MINELAYER_UNLOAD_NORMAL_DELAY = 14;
+const DIR_NE_256 = 32;
+const DIR_NW_256 = 224;
+
+function minelayerUnloadDelay(): number {
+  return MINELAYER_UNLOAD_NORMAL_DELAY + ScenarioRandom.nextInRange(0, 2);
+}
+
+function currentBodyFacing256(entity: Entity): number {
+  return entity.bodyFacing256 >= 0 ? (entity.bodyFacing256 & 0xff) : ((entity.facing * 32) & 0xff);
+}
+
+function isDoorOpening(entity: Entity): boolean {
+  return entity.doorOpeningTicks > 0;
+}
+
+function isDoorOpen(entity: Entity): boolean {
+  return entity.doorOpen && entity.doorOpeningTicks <= 0 && entity.doorClosingTicks <= 0;
+}
+
+function isDoorClosed(entity: Entity): boolean {
+  return !entity.doorOpen && entity.doorOpeningTicks <= 0 && entity.doorClosingTicks <= 0;
+}
+
+function openApcDoor(entity: Entity): void {
+  if (entity.isDriving) return;
+  const facing = currentBodyFacing256(entity);
+  const rate = (facing === DIR_NE_256 || facing === DIR_NW_256) ? 10 : 1;
+  entity.doorOpen = true;
+  entity.doorOpeningTicks = rate * (2 - 1) + 1;
+  entity.doorClosingTicks = 0;
+}
+
+function closeApcDoor(entity: Entity): void {
+  if (!isDoorOpen(entity) && !isDoorOpening(entity)) return;
+  entity.doorOpen = true;
+  entity.doorOpeningTicks = 0;
+  entity.doorClosingTicks = 10 * (2 - 1) + 1;
+}
+
+function cellHasStructureOrMine(ctx: SpecialUnitsContext, cx: number, cy: number): boolean {
+  return ctx.structures.some(s => {
+    if (!s.alive) return false;
+    const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+    return cx >= s.cx && cx < s.cx + sw && cy >= s.cy && cy < s.cy + sh;
+  }) ||
+    ctx.mines.some(m => m.cx === cx && m.cy === cy);
+}
+
 /** Minelayer places AP/AV mines from MISSION_UNLOAD.
  *
  * C++ UnitClass::Mission_Unload handles UNIT_MINELAYER as a deploy state
  * machine (unit.cpp:2580-2636). Ordinary MISSION_MOVE is still just
  * DriveClass movement; there is no separate minelayer AI that moves toward
- * NavCom. Keep this function side-effect-only for mine deployment so MNLY
- * movement remains owned by DriveClass.
+ * NavCom. Returns the C++ mission delay for the next MissionClass dispatch.
  */
-export function updateMinelayer(ctx: SpecialUnitsContext, entity: Entity): void {
-  if (entity.type !== UnitType.V_MNLY || !entity.alive || entity.mission !== Mission.UNLOAD) return;
-  const targetCell = entity.cell;
-  // C++ parity: minelayer carries limited ammo (Ammo=5 in rules.ini)
-  if (entity.ammo === 0 && entity.maxAmmo > 0) { entity.moveTarget = null; entity.mission = Mission.GUARD; entity.animState = AnimState.IDLE; return; }
-  const houseMines = ctx.mines.filter(m => m.house === entity.house).length;
-  if (houseMines >= MAX_MINES_PER_HOUSE) { entity.moveTarget = null; entity.mission = Mission.GUARD; entity.animState = AnimState.IDLE; return; }
-  if (!ctx.mines.find(m => m.cx === targetCell.cx && m.cy === targetCell.cy)) {
-    // C++ unit.cpp:2616: Soviet houses (USSR, Ukraine, BadGuy) place AP mines, Allied place AV mines
-    const faction = HOUSE_FACTION[entity.house] ?? 'allied';
-    const mineType: 'AP' | 'AV' = faction === 'soviet' ? 'AP' : 'AV';
-    // C++ rules.ini: APMineDamage=1000, AVMineDamage=1200
-    const mineDamage = mineType === 'AP' ? AP_MINE_DAMAGE : AV_MINE_DAMAGE;
-    ctx.mines.push({ cx: targetCell.cx, cy: targetCell.cy, house: entity.house, damage: mineDamage, type: mineType });
-    entity.mineCount++;
-    if (entity.ammo > 0) entity.ammo--;
+export function updateMinelayer(ctx: SpecialUnitsContext, entity: Entity): number {
+  if (entity.type !== UnitType.V_MNLY || !entity.alive || entity.mission !== Mission.UNLOAD) {
+    return 1;
   }
-  entity.moveTarget = null; entity.mission = Mission.GUARD; entity.animState = AnimState.IDLE;
+
+  switch (entity.minelayerUnloadStatus) {
+    case MINELAYER_INITIAL_CHECK:
+      entity.moveTarget = null;
+      entity.moveTargetEntityRef = null;
+      if (entity.ammo > 0) {
+        entity.desiredFacing = Dir.NE;
+        entity.desiredFacing256 = DIR_NE_256;
+        entity.minelayerUnloadStatus = MINELAYER_MANEUVERING;
+        return 1;
+      }
+      assignMission(entity, Mission.GUARD);
+      entity.animState = AnimState.IDLE;
+      return minelayerUnloadDelay();
+
+    case MINELAYER_MANEUVERING:
+      if (!entity.isDriving) {
+        openApcDoor(entity);
+        if (isDoorOpening(entity)) {
+          entity.minelayerUnloadStatus = MINELAYER_OPENING_DOOR;
+          return 1;
+        }
+      }
+      return minelayerUnloadDelay();
+
+    case MINELAYER_OPENING_DOOR:
+      if (isDoorOpen(entity)) {
+        entity.minelayerUnloadStatus = MINELAYER_UNLOADING;
+        return 1;
+      }
+      if (!isDoorOpening(entity)) {
+        entity.minelayerUnloadStatus = MINELAYER_INITIAL_CHECK;
+      }
+      return minelayerUnloadDelay();
+
+    case MINELAYER_UNLOADING:
+      if (entity.ammo > 0 && !cellHasStructureOrMine(ctx, entity.cell.cx, entity.cell.cy)) {
+        const houseMines = ctx.mines.filter(m => m.house === entity.house).length;
+        if (houseMines < MAX_MINES_PER_HOUSE) {
+          // C++ unit.cpp:2616: Soviet houses (USSR, Ukraine, BadGuy) place AP mines, Allied place AV mines.
+          const faction = HOUSE_FACTION[entity.house] ?? 'allied';
+          const mineType: 'AP' | 'AV' = faction === 'soviet' ? 'AP' : 'AV';
+          const mineDamage = mineType === 'AP' ? AP_MINE_DAMAGE : AV_MINE_DAMAGE;
+          const structureType = mineType === 'AP' ? 'MINP' : 'MINV';
+          const created = ctx.createMineStructure?.(structureType, entity.house, entity.cell.cx, entity.cell.cy) ?? false;
+          if (!created) {
+            ctx.mines.push({ cx: entity.cell.cx, cy: entity.cell.cy, house: entity.house, damage: mineDamage, type: mineType });
+          }
+          entity.mineCount++;
+          entity.ammo--;
+        }
+      }
+      entity.minelayerUnloadStatus = MINELAYER_CLOSING_DOOR;
+      return minelayerUnloadDelay();
+
+    case MINELAYER_CLOSING_DOOR:
+      if (isDoorOpen(entity)) {
+        closeApcDoor(entity);
+      }
+      if (isDoorClosed(entity)) {
+        entity.minelayerUnloadStatus = MINELAYER_INITIAL_CHECK;
+        assignMission(entity, Mission.GUARD);
+        entity.animState = AnimState.IDLE;
+      }
+      return minelayerUnloadDelay();
+
+    default:
+      entity.minelayerUnloadStatus = MINELAYER_INITIAL_CHECK;
+      return 1;
+  }
 }
 
 // === 5. Mine Trigger ===
