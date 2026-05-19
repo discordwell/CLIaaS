@@ -2489,8 +2489,9 @@ export function updateFixedWingAttackRun(ctx: AircraftContext, entity: Entity): 
           if (entity.isTwoShooter()) entity.isSecondShot = !entity.isSecondShot;
           if (entity.ammo > 0) entity.ammo--;
         }
-        entity.attackCooldown = arm;
-        entity.missionTimer = Math.max(0, arm - 1);
+        const postFrameArm = Math.max(0, arm - 1);
+        entity.attackCooldown = postFrameArm;
+        entity.missionTimer = postFrameArm;
       } else if (fireState === 'range' || fireState === 'facing') {
         entity.attackRunPhase = 'flyToTarget';
         entity.aircraftAttackStatus = FLY_TO_TARGET;
