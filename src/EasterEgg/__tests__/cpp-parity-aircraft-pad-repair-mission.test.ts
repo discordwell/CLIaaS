@@ -102,6 +102,24 @@ describe('aircraft pad Mission_Repair', () => {
     expect(afld.repairMissionStatus).toBe(0);
     expect(afld.missionTimer).toBe(3);
     expect(yak.mission).toBe(Mission.GUARD);
+
+    const followup = (game as unknown as {
+      readonly _combatCtx: unknown;
+      dispatchStructureMissionTimer(s: MapStructure, combatCtx: unknown, guardNormalDelay: number, guardAADelay: number): boolean;
+    }).dispatchStructureMissionTimer(
+      afld,
+      (game as unknown as { readonly _combatCtx: unknown })._combatCtx,
+      42,
+      14,
+    );
+
+    expect(followup).toBe(false);
+    expect(ScenarioRandom.callCount).toBe(1);
+    expect(afld.mission).toBe(Mission.GUARD);
+    expect(afld.missionQueue).toBeNull();
+    expect(afld.isReadyToCommence).toBe(false);
+    expect(afld.missionTimer).toBeGreaterThanOrEqual(126);
+    expect(afld.missionTimer).toBeLessThanOrEqual(128);
   });
 
   it('docked rearming AFLD does not fall through to non-weapon guard jitter', () => {

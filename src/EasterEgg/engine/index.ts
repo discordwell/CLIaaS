@@ -17471,9 +17471,12 @@ export class Game {
         docked.missionQueue = null;
       }
       s.repairMissionStatus = 0;
-      s.mission = Mission.GUARD;
-      s.missionQueue = null;
-      s.isReadyToCommence = false;
+      // C++ Mission_Repair INITIAL calls Assign_Mission(MISSION_GUARD) when
+      // RADIO_PREPARED says the docked aircraft is already ready. That queues
+      // GUARD but leaves Mission=REPAIR until the building can Commence, so the
+      // next guard jitter still occurs on the C++ cadence.
+      s.missionQueue = Mission.GUARD;
+      s.isReadyToCommence = true;
       s.readyToCommenceTick = undefined;
       s.missionTimer = 3;
       return false;
