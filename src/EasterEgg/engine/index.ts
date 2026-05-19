@@ -7032,6 +7032,11 @@ export class Game {
         if (!destCell) return;
         const canStart = this.infantryCanEnterCell(entity, destCell.cx, destCell.cy);
         if (canStart !== MoveResult.OK) {
+          if (canStart === MoveResult.DESTROYABLE &&
+              this.overrideDestroyableBlocker(entity, destCell.cx, destCell.cy)) {
+            this.stopInfantryDriver(entity);
+            return;
+          }
           this.clearDrivePath(entity);
           if (entity.pathDelay > 0) return;
 
@@ -10212,6 +10217,14 @@ export class Game {
 
   /** C++ infantry.cpp:3931-3958 post-Basic_Path acell validation. */
   private handleInfantryBlockedStartCell(entity: Entity): void {
+    const nextCell = this.infantryNextPathCell(entity);
+    if (nextCell &&
+        this.infantryCanEnterCell(entity, nextCell.cx, nextCell.cy) === MoveResult.DESTROYABLE &&
+        this.overrideDestroyableBlocker(entity, nextCell.cx, nextCell.cy)) {
+      this.stopInfantryDriver(entity);
+      return;
+    }
+
     const closeEnough = 704; // rules.ini [General] CloseEnough=2.75 * 256
     if (entity.moveTarget &&
         ((entity.mission as Mission) === Mission.MOVE || (entity.mission as Mission) === Mission.ENTER) &&
@@ -10473,16 +10486,21 @@ export class Game {
     return entity.weapon ? MoveResult.DESTROYABLE : MoveResult.IMPASSABLE;
   }
 
-  /** C++ DriveClass::Start_Of_Move MOVE_DESTROYABLE branch.
+  /** C++ FootClass/DriveClass MOVE_DESTROYABLE branch.
    *
-   * drive.cpp:1143-1151 and 1253-1262 do not abandon a MOVE order when the
-   * next track cell is blocked by an enemy object/wall. They call
+   * infantry.cpp:3949-3957, drive.cpp:1143-1151, and drive.cpp:1253-1262
+   * do not abandon a movement order when the next path cell is blocked by an
+   * enemy object/wall. They call
    * Override_Mission(MISSION_ATTACK, blocker, TARGET_NONE), which queues ATTACK,
    * assigns TarCom, and clears NavCom. The post-DriveClass Commence gate then
-   * promotes ATTACK in the same UnitClass::AI pass.
+   * promotes ATTACK in the same UnitClass::AI pass; infantry promotes it at the
+   * next InfantryClass::AI Commence gate.
    */
-  private overrideDriveDestroyableBlocker(entity: Entity, cx: number, cy: number): boolean {
-    if (!entity.weapon || entity.stats.isInfantry || entity.isAirUnit) return false;
+  private overrideDestroyableBlocker(entity: Entity, cx: number, cy: number): boolean {
+    const hasWeapon = entity.stats.isInfantry
+      ? ((entity.weapon?.damage ?? 0) > 0 || (entity.weapon2?.damage ?? 0) > 0)
+      : !!entity.weapon;
+    if (!hasWeapon || entity.isAirUnit) return false;
 
     const suspendedMission = entity.missionQueue ?? entity.mission;
     const suspendedTarget = entity.target;
@@ -10861,7 +10879,7 @@ export class Game {
         }
       }
       if (entryMove === MoveResult.DESTROYABLE &&
-          this.overrideDriveDestroyableBlocker(entity, nextCell.cx, nextCell.cy)) {
+          this.overrideDestroyableBlocker(entity, nextCell.cx, nextCell.cy)) {
         return;
       }
       if (clearedCloseEnoughNavCom) return;
@@ -10900,7 +10918,7 @@ export class Game {
 		          this.incomingNoThreatScatterCell(longTrackCell.cx, longTrackCell.cy, entity.id);
 	        }
 	        if (longMove === MoveResult.DESTROYABLE &&
-	            this.overrideDriveDestroyableBlocker(entity, longTrackCell.cx, longTrackCell.cy)) {
+	            this.overrideDestroyableBlocker(entity, longTrackCell.cx, longTrackCell.cy)) {
 	          return;
 	        }
 	        this.clearDrivePath(entity);
@@ -11808,12 +11826,12 @@ export class Game {
                 clearedCloseEnoughNavCom = true;
               }
               if (entryMove === MoveResult.DESTROYABLE &&
-                  this.overrideDriveDestroyableBlocker(entity, chainCell.cx, chainCell.cy)) {
+                  this.overrideDestroyableBlocker(entity, chainCell.cx, chainCell.cy)) {
                 break;
               }
               if (clearedCloseEnoughNavCom) break;
             } else if (entryMove === MoveResult.DESTROYABLE &&
-                this.overrideDriveDestroyableBlocker(entity, chainCell.cx, chainCell.cy)) {
+                this.overrideDestroyableBlocker(entity, chainCell.cx, chainCell.cy)) {
               break;
             }
             if (entryMove !== MoveResult.OCCUPIED) {
@@ -11860,7 +11878,7 @@ export class Game {
 		                this.incomingNoThreatScatterCell(longTrackCell.cx, longTrackCell.cy, entity.id);
 		              }
 	              if (longMove === MoveResult.DESTROYABLE &&
-	                  this.overrideDriveDestroyableBlocker(entity, longTrackCell.cx, longTrackCell.cy)) {
+	                  this.overrideDestroyableBlocker(entity, longTrackCell.cx, longTrackCell.cy)) {
 	                break;
 	              }
 	              this.clearDrivePath(entity);

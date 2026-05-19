@@ -2054,6 +2054,38 @@ function detachDestroyedEntity(ctx: CombatContext, victim: Entity): void {
   }
 }
 
+function detachLimboEntityFromTargeting(ctx: CombatContext, victim: Entity): void {
+  for (const entity of ctx.entities) {
+    if (entity.id === victim.id) continue;
+    if (entity.target === victim) {
+      entity.target = null;
+      entity.firePrepActive = false;
+      entity.firePrepStage = 0;
+      entity.firePrepUsesDoingStage = false;
+      restoreSuspendedMissionAfterDetach(ctx, entity, victim);
+      if (entity.stats.isInfantry) {
+        clearInfantryAssignTargetPathHead(entity);
+        entity.isFiringAnim = false;
+        entity.firingAnimTicks = 0;
+      }
+    }
+    if (entity.moveTargetEntityRef === victim) {
+      entity.moveTarget = null;
+      entity.moveTargetEntityRef = null;
+      clearFootPath(entity);
+      restoreSuspendedMissionAfterDetach(ctx, entity, victim);
+    }
+  }
+  for (const structure of ctx.structures) {
+    if (structure.targetEntityId === victim.id) {
+      structure.targetEntityId = undefined;
+    }
+  }
+  for (const team of getActiveTeams()) {
+    team.detachTargetEntity(victim);
+  }
+}
+
 /**
  * AI scatter — infantry scatter per C++ infantry.cpp:1852-1929 (InfantryClass::Scatter).
  *
@@ -3252,6 +3284,11 @@ export function launchProjectile(
   // and rides the bullet to the target. On impact, the dog unlimbos at the impact point.
   let dogRiderId = -1;
   if (attacker.type === UnitType.I_DOG && attacker.alive) {
+    // C++ InfantryClass::Firing_AI wraps dog Limbo() in ScenarioInit++.
+    // ObjectClass::Limbo still runs Detach_All(), so other objects restore
+    // overridden missions that were targeting the dog, but FootClass::Detach_All
+    // does not remove the dog from its team while ScenarioInit is non-zero.
+    detachLimboEntityFromTargeting(ctx, attacker);
     if (attacker.claimedCellIdx >= 0 && attacker.claimedSubCell >= 0) {
       ctx.map.vacateClaimedSubCell(attacker.claimedCellIdx, attacker.id, attacker.claimedSubCell);
     }
