@@ -3840,8 +3840,13 @@ function advanceProjectileOneTick(ctx: CombatContext, proj: InflightProjectile):
  *  that C++ Logic index are eligible. This lets the TS batched projectile pass
  *  run a BulletClass object before a later runtime-spawned infantry object,
  *  matching LogicClass::AI's re-read of Count(). */
-export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint = Infinity): void {
-  const processAll = maxLogicIndexHint === Infinity;
+export function updateInflightProjectiles(
+  ctx: CombatContext,
+  maxLogicIndexHint: number | (() => number) = Infinity,
+): void {
+  const processAll = typeof maxLogicIndexHint === 'number' && maxLogicIndexHint === Infinity;
+  const currentMaxLogicIndexHint = () =>
+    typeof maxLogicIndexHint === 'function' ? maxLogicIndexHint() : maxLogicIndexHint;
   const queue: InflightProjectile[] = [];
   const deferred: InflightProjectile[] = [];
   const alreadyProcessed: InflightProjectile[] = [];
@@ -3852,7 +3857,7 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
       continue;
     }
     if (processAll ||
-        (proj.logicIndexHint !== undefined && proj.logicIndexHint <= maxLogicIndexHint)) {
+        (proj.logicIndexHint !== undefined && proj.logicIndexHint <= currentMaxLogicIndexHint())) {
       queue.push(proj);
     } else {
       deferred.push(proj);
@@ -3870,6 +3875,12 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
 
   for (let i = 0; i < queue.length; i++) {
     const proj = queue[i];
+    if (!processAll &&
+        (proj.logicIndexHint === undefined ||
+         proj.logicIndexHint > currentMaxLogicIndexHint())) {
+      deferred.push(proj);
+      continue;
+    }
     const skipRange = proj.logicIndexHint === undefined
       ? undefined
       : skipLogicHintRanges.find(range =>
@@ -3978,7 +3989,7 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
         headToLY: spawned.headToLY,
       });
       if (processAll ||
-          (spawned.logicIndexHint !== undefined && spawned.logicIndexHint <= maxLogicIndexHint)) {
+          (spawned.logicIndexHint !== undefined && spawned.logicIndexHint <= currentMaxLogicIndexHint())) {
         queue.push(spawned);
       } else {
         deferred.push(spawned);

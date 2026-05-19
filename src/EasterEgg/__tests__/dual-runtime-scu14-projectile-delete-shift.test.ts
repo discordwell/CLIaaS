@@ -180,6 +180,58 @@ async function tsDeleteShiftState(adapter: unknown) {
   });
 }
 
+async function wasmShiftedMoveInfantryState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const rifle = (state.logicLayer ?? []).find((row: any[]) =>
+      row[1] === 'E1' &&
+      row[2] === 'USSR' &&
+      row[6] === 852025);
+    if (!rifle) throw new Error('C++ SCU14EA shifted USSR E1 852025 missing');
+
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      rifle: {
+        logicIndex: rifle[0],
+        mission: rifle[7],
+        missionTimer: rifle[8],
+        isDriving: !!rifle[10],
+        lx: rifle[12],
+        ly: rifle[13],
+        hp: rifle[14],
+      },
+    };
+  });
+}
+
+async function tsShiftedMoveInfantryState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const rifle = game.entities.find((entity: any) =>
+      entity.type === 'E1' &&
+      entity.house === 'USSR' &&
+      entity.cell?.cx === 89 &&
+      entity.cell?.cy === 84);
+    if (!rifle) throw new Error('TS SCU14EA shifted USSR E1 missing');
+
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      rifle: {
+        logicIndexHint: rifle.logicIndexHint,
+        mission: rifle.mission,
+        missionTimer: rifle.missionTimer,
+        isDriving: rifle.isDriving,
+        lx: rifle.leptonX,
+        ly: rifle.leptonY,
+        hp: rifle.hp,
+      },
+    };
+  });
+}
+
 async function wasmCombatAnimWindow(adapter: unknown) {
   return adapterPage(adapter).evaluate(() => {
     const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
@@ -328,6 +380,59 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 projectile delete shi
       expect(ts.rifle.ly).toBe(cpp.rifle.ly);
     }, { wasmSeed: 0 });
   }, 300_000);
+
+  it('keeps a current-tick rifle bullet behind a shifted infantry Logic slot', async () => {
+    await withDualScenario('SCU14EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBothOneTickAtATime(handle, 1324);
+      const cppBefore = await wasmShiftedMoveInfantryState(handle.wasm);
+      const tsBefore = await tsShiftedMoveInfantryState(handle.ts);
+      expect(tsBefore.tick).toBe(cppBefore.tick);
+      expect(cppBefore.tick).toBe(1324);
+      expect(tsBefore.rngState >>> 0).toBe(cppBefore.rngState >>> 0);
+      expect(cppBefore.rifle).toMatchObject({
+        mission: 2,
+        missionTimer: 0,
+        isDriving: true,
+        lx: 22912,
+        ly: 21632,
+        hp: 10,
+      });
+      expect(tsBefore.rifle).toMatchObject({
+        mission: 'MOVE',
+        missionTimer: 0,
+        isDriving: true,
+        lx: cppBefore.rifle.lx,
+        ly: cppBefore.rifle.ly,
+        hp: cppBefore.rifle.hp,
+      });
+
+      await stepBoth(handle, 1);
+      const cppAfter = await wasmShiftedMoveInfantryState(handle.wasm);
+      const tsAfter = await tsShiftedMoveInfantryState(handle.ts);
+      expect(tsAfter.tick).toBe(cppAfter.tick);
+      expect(cppAfter.tick).toBe(1325);
+      expect(tsAfter.rngState >>> 0).toBe(cppAfter.rngState >>> 0);
+
+      expect(cppAfter.rifle).toMatchObject({
+        mission: 2,
+        missionTimer: 14,
+        isDriving: true,
+        lx: 22909,
+        ly: 21642,
+        hp: 10,
+      });
+      expect(tsAfter.rifle).toMatchObject({
+        mission: 'MOVE',
+        missionTimer: cppAfter.rifle.missionTimer,
+        isDriving: cppAfter.rifle.isDriving,
+        lx: cppAfter.rifle.lx,
+        ly: cppAfter.rifle.ly,
+        hp: cppAfter.rifle.hp,
+      });
+    }, { wasmSeed: 0, preserveSourceFog: true });
+  }, 360_000);
 
   it('keeps SCUD combat AnimClass slots aligned through damage smoke and small-arms piffs', async () => {
     await withDualScenario('SCU14EA', async (handle) => {

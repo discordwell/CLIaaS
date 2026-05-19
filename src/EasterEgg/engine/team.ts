@@ -78,6 +78,11 @@ function applyInfantryAssignDestinationPathClear(unit: Entity, ctx?: TeamAIConte
 
   if (!unit.isDriving || stoppedDriver) {
     clearFootPath(unit);
+  } else {
+    // C++ still writes Path[0] = FACING_NONE after the Stop_Driver predicate.
+    // When the active Head_To_Coord hop cannot be stopped, preserve Path[1..]
+    // for arrival memmove while marking the current head as invalid.
+    unit.drivePathHeadCleared = true;
   }
 }
 
@@ -1256,6 +1261,8 @@ export class Team {
             unit.moveTarget.lx !== nextMoveTarget.lx ||
             unit.moveTarget.ly !== nextMoveTarget.ly;
 
+        const missionBeforeAssign = unit.mission as Mission;
+        const queueBeforeAssign = unit.missionQueue;
         assignMission(unit, Mission.MOVE);
 
         if (targetChanged) {
@@ -1290,6 +1297,20 @@ export class Team {
           if (ctx?.startDriveClassMove && !unit.stats.isInfantry && !unit.isAirUnit) {
             ctx.startDriveClassMove(unit);
           }
+        } else if (unit.stats.isInfantry &&
+            !unit.isDriving &&
+            missionBeforeAssign === Mission.GUARD &&
+            queueBeforeAssign === null &&
+            unit.moveTarget) {
+          // C++ InfantryClass::Movement_AI invalidates Path[0] whenever a
+          // stationary GUARD infantry is left with a legal NavCom and no queued
+          // mission. Team Coordinate_Move can then queue MOVE to the same
+          // coordinate without calling Assign_Destination again, but the stale
+          // path head has already been cleared in C++'s object state. Mirror
+          // that generic path-cache invalidation here so the next MOVE
+          // recomputes from the current cell instead of consuming an old
+          // pre-GUARD facing tail.
+          clearFootPath(unit);
         }
         finished = false;
       } else {

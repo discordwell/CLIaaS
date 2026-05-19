@@ -25,6 +25,16 @@ let serverHandle: ParityServerHandle | undefined;
 
 const WASM_MISSION_RETREAT = 4;
 
+type EvalPage = {
+  evaluate<T>(fn: () => T): Promise<T>;
+};
+
+function adapterPage(adapter: unknown): EvalPage {
+  const page = (adapter as { page?: EvalPage }).page;
+  if (!page) throw new Error('Adapter page is not available');
+  return page;
+}
+
 function findWasmEasternGreekLST(state: RAGameState): RAEntity | undefined {
   return [...state.units, ...state.enemies]
     .find(u => u.t === 'LST' && u.house === 'Greece' && u.cx >= 90);
@@ -33,6 +43,45 @@ function findWasmEasternGreekLST(state: RAGameState): RAEntity | undefined {
 function findTsEasternGreekLST(state: AgentState): AgentUnit | undefined {
   return [...state.units, ...state.enemies]
     .find(u => u.t === 'LST' && u.h === 'Greece' && u.cx >= 90);
+}
+
+async function stepBothOneTickAtATime(
+  handle: Parameters<typeof stepBoth>[0],
+  ticks: number,
+): Promise<Awaited<ReturnType<typeof stepBoth>>> {
+  let result: Awaited<ReturnType<typeof stepBoth>> | null = null;
+  for (let i = 0; i < ticks; i++) {
+    result = await stepBoth(handle, 1);
+  }
+  if (!result) throw new Error('No ticks stepped');
+  return result;
+}
+
+async function tsMapExitedLSTLogicSlots(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    return (game.entities ?? [])
+      .filter((entity: any) =>
+        entity.type === 'LST' &&
+        entity.alive === false &&
+        entity.inLimbo !== true &&
+        entity.logicIndexHint !== undefined)
+      .map((entity: any) => ({
+        id: entity.id,
+        house: entity.house,
+        logicIndexHint: entity.logicIndexHint,
+        mission: entity.mission,
+        cx: entity.cell?.cx,
+        cy: entity.cell?.cy,
+      }));
+  }) as Promise<Array<{
+    id: number;
+    house: string;
+    logicIndexHint: number;
+    mission: string;
+    cx: number;
+    cy: number;
+  }>>;
 }
 
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 LST retreat with open door', () => {
@@ -80,4 +129,17 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 LST retreat with open
       expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
     }, { wasmSeed: 0 });
   }, 300_000);
+
+  it('removes map-exited LSTs from Logic before late infantry guard timers', async () => {
+    await withDualScenario('SCU14EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      let result = await stepBothOneTickAtATime(handle, 1586);
+      expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
+      expect(await tsMapExitedLSTLogicSlots(handle.ts)).toEqual([]);
+
+      result = await stepBoth(handle, 1);
+      expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
+    }, { wasmSeed: 0, preserveSourceFog: true });
+  }, 360_000);
 });

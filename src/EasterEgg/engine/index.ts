@@ -2004,7 +2004,11 @@ export class Game {
         leavingTeam.members.every((member: Entity) => member === entity || !member.alive)) {
       this.leftMapTeamTypes.add(leavingTeam.teamTypeIndex);
     }
-    if (occupiedLogicBefore && !entity.occupiesCppLogic()) this.releaseCppLogicSlotForEntity(entity);
+    if (occupiedLogicBefore) this.releaseCppLogicSlotForEntity(entity);
+    // Leaving the map deletes the object from C++ Logic. Dead vessels can
+    // otherwise remain in TS Logic for sunk-ship lifetimes, but retreat/escape
+    // is a removal path, not a sinking animation.
+    entity.inLimbo = true;
     this.unitsLeftMap++;
     if (CIVILIAN_UNIT_TYPES.has(entity.type) || (this.isTanyaEvac && entity.type === 'E7')) {
       this.civiliansEvacuated++;
@@ -2840,7 +2844,9 @@ export class Game {
     //   14000 + logicIdx  vessels
     this._runCombat(ctx => {
       let logicIdx = this._terrainLogicCount;
-      const updateProjectilesThrough = (maxLogicIndexHint: number) => {
+      const currentLogicMax = (maxLogicIndexHint: number | (() => number)): number =>
+        typeof maxLogicIndexHint === 'function' ? maxLogicIndexHint() : maxLogicIndexHint;
+      const updateProjectilesThrough = (maxLogicIndexHint: number | (() => number)) => {
         _updateInflightProjectiles(ctx, maxLogicIndexHint);
         this.inflightProjectiles = ctx.inflightProjectiles;
       };
@@ -2862,8 +2868,8 @@ export class Game {
         logicIdx = Math.max(logicIdx + 1, effectiveLogicIdx + 1);
         return true;
       };
-      const processLogicAnimsThrough = (maxLogicIndexHint: number) => {
-        const processAll = maxLogicIndexHint === Infinity;
+      const processLogicAnimsThrough = (maxLogicIndexHint: number | (() => number)) => {
+        const processAll = currentLogicMax(maxLogicIndexHint) === Infinity;
         const releaseProcessedLogicObject = (logicIndexHint: number | undefined, kind: string) => {
           if (logicIndexHint === undefined) return;
           this.traceCppLogicRelease(kind, logicIndexHint);
@@ -2878,7 +2884,7 @@ export class Game {
             const anim = this.logicAnims[i];
             if (anim.processedLogicTick === this.tick) continue;
             const effectiveLogicIdx = anim.logicIndexHint ?? (processAll ? logicIdx : Infinity);
-            if (!processAll && effectiveLogicIdx > maxLogicIndexHint) continue;
+            if (!processAll && effectiveLogicIdx > currentLogicMax(maxLogicIndexHint)) continue;
             if (effectiveLogicIdx < bestLogicIdx) {
               bestLogicIdx = effectiveLogicIdx;
               bestAnimIndex = i;
@@ -2892,7 +2898,7 @@ export class Game {
             }
             const effectiveLogicIdx = entity.fallParachuteAnimLogicIndexHint ??
               (processAll ? logicIdx : Infinity);
-            if (!processAll && effectiveLogicIdx > maxLogicIndexHint) continue;
+            if (!processAll && effectiveLogicIdx > currentLogicMax(maxLogicIndexHint)) continue;
             if (effectiveLogicIdx < bestLogicIdx) {
               bestLogicIdx = effectiveLogicIdx;
               bestAnimIndex = -1;
@@ -2957,7 +2963,7 @@ export class Game {
             }
           }
         }
-        if (!processAll) updateProjectilesThrough(maxLogicIndexHint);
+        if (!processAll) updateProjectilesThrough(() => currentLogicMax(maxLogicIndexHint));
       };
 
       // C++ Logic.AI (logic.cpp:284) processes objects in Logic array order.
@@ -2970,7 +2976,7 @@ export class Game {
         if (!entity || entity.isAirUnit) continue;
         if (!entity.occupiesCppLogic()) continue;
         let effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
-        updateProjectilesThrough(effectiveLogicIdx - 1);
+        updateProjectilesThrough(() => (entity.logicIndexHint ?? effectiveLogicIdx) - 1);
         effectiveLogicIdx = entity.logicIndexHint ?? effectiveLogicIdx;
         if (skipShiftedLogicObject(effectiveLogicIdx)) {
           entity.lastLogicProcessedTick = this.tick;
@@ -2996,7 +3002,7 @@ export class Game {
       const GUARD_AA_DELAY = 14;
       const isLowPower = ctx.powerConsumed > ctx.powerProduced;
       let runtimeEntityCursor = this._preBuildingEntityCount;
-      const processRuntimeEntitiesThrough = (maxLogicIndexHint: number) => {
+      const processRuntimeEntitiesThrough = (maxLogicIndexHint: number | (() => number)) => {
         for (; runtimeEntityCursor < this.entities.length; runtimeEntityCursor++) {
           const entity = this.entities[runtimeEntityCursor];
           if (!entity) continue;
@@ -3008,8 +3014,8 @@ export class Game {
               continue;
             }
             let effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
-            if (effectiveLogicIdx > maxLogicIndexHint) break;
-            processLogicAnimsThrough(effectiveLogicIdx - 1);
+            if (effectiveLogicIdx > currentLogicMax(maxLogicIndexHint)) break;
+            processLogicAnimsThrough(() => (entity.logicIndexHint ?? effectiveLogicIdx) - 1);
             effectiveLogicIdx = entity.logicIndexHint ?? effectiveLogicIdx;
             if (skipShiftedLogicObject(effectiveLogicIdx)) {
               entity.lastLogicProcessedTick = this.tick;
@@ -3032,8 +3038,8 @@ export class Game {
           if (!entity.occupiesCppLogic()) continue;
 
           let effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
-          if (effectiveLogicIdx > maxLogicIndexHint) break;
-          processLogicAnimsThrough(effectiveLogicIdx - 1);
+          if (effectiveLogicIdx > currentLogicMax(maxLogicIndexHint)) break;
+          processLogicAnimsThrough(() => (entity.logicIndexHint ?? effectiveLogicIdx) - 1);
           effectiveLogicIdx = entity.logicIndexHint ?? effectiveLogicIdx;
           if (skipShiftedLogicObject(effectiveLogicIdx)) {
             entity.lastLogicProcessedTick = this.tick;
@@ -3055,8 +3061,9 @@ export class Game {
       for (let structureIndex = 0; structureIndex < this.structures.length; structureIndex++) {
         const s = this.structures[structureIndex];
         let effectiveLogicIdx = s.logicIndexHint ?? logicIdx;
-        processRuntimeEntitiesThrough(effectiveLogicIdx - 1);
-        updateProjectilesThrough(effectiveLogicIdx - 1);
+        processRuntimeEntitiesThrough(() => (s.logicIndexHint ?? effectiveLogicIdx) - 1);
+        effectiveLogicIdx = s.logicIndexHint ?? effectiveLogicIdx;
+        updateProjectilesThrough(() => (s.logicIndexHint ?? effectiveLogicIdx) - 1);
         effectiveLogicIdx = s.logicIndexHint ?? effectiveLogicIdx;
         if (skipShiftedLogicObject(effectiveLogicIdx)) continue;
 		        if (ScenarioRandom._tagLogging) {
@@ -3146,7 +3153,7 @@ export class Game {
           const heli = this.entityById.get(s.hpadHelicopterId);
           if (heli && heli.alive && heli.isAirUnit) {
             let effectiveLogicIdx = heli.logicIndexHint ?? logicIdx;
-            updateProjectilesThrough(effectiveLogicIdx - 1);
+            updateProjectilesThrough(() => (heli.logicIndexHint ?? effectiveLogicIdx) - 1);
             effectiveLogicIdx = heli.logicIndexHint ?? effectiveLogicIdx;
             if (skipShiftedLogicObject(effectiveLogicIdx)) {
               heli.lastLogicProcessedTick = this.tick;
@@ -3303,7 +3310,7 @@ export class Game {
           if (entity.unlimboTick !== this.tick || entity.lastLogicProcessedTick === this.tick) continue;
 
           let effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
-          processLogicAnimsThrough(effectiveLogicIdx - 1);
+          processLogicAnimsThrough(() => (entity.logicIndexHint ?? effectiveLogicIdx) - 1);
           effectiveLogicIdx = entity.logicIndexHint ?? effectiveLogicIdx;
           if (skipShiftedLogicObject(effectiveLogicIdx)) {
             entity.lastLogicProcessedTick = this.tick;
@@ -13738,7 +13745,7 @@ export class Game {
    *  bullet.cpp:736-738 + logic.cpp:285 — same-tick end-of-Logic-loop). This
    *  runs after entity AI for standard (non-invisible, travelling) projectile
    *  arrival. */
-  private updateInflightProjectiles(maxLogicIndexHint = Infinity): void {
+  private updateInflightProjectiles(maxLogicIndexHint: number | (() => number) = Infinity): void {
     this._runCombat(ctx => _updateInflightProjectiles(ctx, maxLogicIndexHint));
   }
 
