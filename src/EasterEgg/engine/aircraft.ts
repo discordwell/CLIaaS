@@ -223,6 +223,21 @@ function facingDiff256(a: number, b: number): number {
   return Math.abs(diff);
 }
 
+function signedFacingDelta256(current: number, desired: number): number {
+  let diff = (desired - current) & 0xff;
+  if (diff >= 128) diff -= 256;
+  return diff;
+}
+
+function setAircraftPrimaryFacing256(entity: Entity, dir256: number): void {
+  const dir = dir256 & 0xff;
+  entity.facing256 = dir;
+  entity.desiredFacing256 = dir;
+  entity.facing = dir256ToFacing8(dir);
+  entity.desiredFacing = entity.facing;
+  entity.bodyFacing32 = dir256ToFacing32(dir);
+}
+
 function syncFixedWingSecondaryFacing(entity: Entity): void {
   if (!entity.isFixedWing) return;
   const current = currentAircraftFacing256(entity);
@@ -725,9 +740,11 @@ function updateHelicopterMissionAttack(ctx: AircraftContext, entity: Entity): bo
       entity.aircraftAttackStatus = ATTACK_FLY_TO_POSITION;
       if (entity.moveTarget) {
         const dir = directionToLeptons256(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly);
-        entity.facing256 = currentAircraftFacing256(entity);
-        entity.desiredFacing256 = dir;
-        entity.desiredFacing = Math.round(dir / 32) & 7;
+        const secondary = entity.turretFacing256 >= 0
+          ? entity.turretFacing256 & 0xff
+          : currentAircraftFacing256(entity);
+        const diff = Math.max(-128, Math.min(128, signedFacingDelta256(secondary, dir)));
+        setAircraftPrimaryFacing256(entity, secondary + diff);
       }
       flyCurrentFacing();
       return true;
