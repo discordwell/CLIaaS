@@ -238,6 +238,56 @@ function setAircraftPrimaryFacing256(entity: Entity, dir256: number): void {
   entity.bodyFacing32 = dir256ToFacing32(dir);
 }
 
+function setDesiredAircraftSecondaryFacing256(entity: Entity, dir256: number): void {
+  const dir = dir256 & 0xff;
+  entity.desiredTurretFacing256 = dir;
+  entity.desiredTurretFacing = dir256ToFacing8(dir);
+}
+
+function rotateAircraftSecondaryFacing(entity: Entity): void {
+  if (!entity.stats.isAircraft || entity.isFixedWing) return;
+
+  if (entity.turretFacing256 < 0 ||
+      dir256ToFacing32(entity.turretFacing256) !== entity.turretFacing32 ||
+      dir256ToFacing8(entity.turretFacing256) !== entity.turretFacing) {
+    entity.turretFacing32 = entity.turretFacing * 4;
+    entity.turretFacing256 = (entity.turretFacing * 32) & 0xff;
+  }
+  if (entity.desiredTurretFacing256 < 0 ||
+      dir256ToFacing8(entity.desiredTurretFacing256) !== entity.desiredTurretFacing) {
+    entity.desiredTurretFacing256 = (entity.desiredTurretFacing * 32) & 0xff;
+  }
+
+  const desired256 = entity.desiredTurretFacing256 & 0xff;
+  if (entity.turretFacing256 === desired256) {
+    entity.turretIsRotating = false;
+    entity.turretFacing = dir256ToFacing8(entity.turretFacing256);
+    entity.desiredTurretFacing = dir256ToFacing8(desired256);
+    entity.turretFacing32 = dir256ToFacing32(entity.turretFacing256);
+    return;
+  }
+  if (entity.turretRotTickedThisFrame) return;
+  entity.turretRotTickedThisFrame = true;
+
+  const rate = Math.min(entity.stats.rot, 127);
+  if (rate > 0) {
+    let diff = (desired256 - entity.turretFacing256) & 0xff;
+    if (diff >= 128) diff -= 256;
+    if (Math.abs(diff) < rate) {
+      entity.turretFacing256 = desired256;
+    } else if (diff < 0) {
+      entity.turretFacing256 = (entity.turretFacing256 - rate + 256) & 0xff;
+    } else {
+      entity.turretFacing256 = (entity.turretFacing256 + rate) & 0xff;
+    }
+  }
+
+  entity.turretFacing = dir256ToFacing8(entity.turretFacing256);
+  entity.desiredTurretFacing = dir256ToFacing8(desired256);
+  entity.turretFacing32 = dir256ToFacing32(entity.turretFacing256);
+  entity.turretIsRotating = entity.turretFacing256 !== desired256;
+}
+
 function syncFixedWingSecondaryFacing(entity: Entity): void {
   if (!entity.isFixedWing) return;
   const current = currentAircraftFacing256(entity);
@@ -265,6 +315,7 @@ function fixedWingTargetLeptons(targetPos: WorldPos): { lx: number; ly: number }
 }
 
 type FixedWingFireState = 'ok' | 'ammo' | 'rearm' | 'range' | 'facing';
+type HelicopterFireState = 'ok' | 'ammo' | 'rearm' | 'range' | 'cloaked' | 'cant';
 
 function fixedWingCanFire(entity: Entity, targetPos: WorldPos, weapon: WeaponStats): FixedWingFireState {
   if (entity.attackCooldown > 0) return 'rearm';
@@ -660,30 +711,74 @@ function setHelicopterAttackFacing(entity: Entity): void {
   if (!target) return;
   const dir = directionToLeptons256(entity.leptonX, entity.leptonY, target.lx, target.ly);
   entity.desiredFacing256 = dir;
-  entity.desiredTurretFacing256 = dir;
   entity.desiredFacing = Math.round(dir / 32) & 7;
-  entity.desiredTurretFacing = entity.desiredFacing;
+  setDesiredAircraftSecondaryFacing256(entity, dir);
 }
 
-function fireHelicopterWeapon(ctx: AircraftContext, entity: Entity): boolean {
+function setHelicopterSecondaryFacingToTarget(entity: Entity): void {
+  const target = aircraftTargetLeptons(entity);
+  if (!target) return;
+  setDesiredAircraftSecondaryFacing256(
+    entity,
+    directionToLeptons256(entity.leptonX, entity.leptonY, target.lx, target.ly),
+  );
+}
+
+function setHelicopterSecondaryFacingToCoordFromFireCoord(entity: Entity, coord: LeptonPos): void {
+  const fire = entity.fireCoordForWeapon(entity.weapon);
+  setDesiredAircraftSecondaryFacing256(
+    entity,
+    directionToLeptons256(fire.lx, fire.ly, coord.lx, coord.ly),
+  );
+}
+
+function helicopterFireState(entity: Entity): HelicopterFireState {
   const weapon = entity.weapon;
   const target = aircraftTargetLeptons(entity);
-  if (!weapon || !target || entity.attackCooldown > 0 || entity.ammo === 0) return false;
-  if (leptonDist(entity.leptonX, entity.leptonY, target.lx, target.ly) > weapon.range * LEPTON_SIZE) return false;
+  if (!weapon || !target) return 'cant';
+  if (entity.target?.alive) {
+    if (entity.target.cloakState === CloakState.CLOAKED) return 'cant';
+    if (!entity.canWeaponTarget(entity.target, weapon)) return 'cant';
+  } else if (entity.targetStructure && (entity.targetStructure as MapStructure).alive) {
+    if (weapon.isAntiGround === false) return 'cant';
+  } else {
+    return 'cant';
+  }
+  if (entity.attackCooldown > 0) return 'rearm';
+  const fire = entity.fireCoordForWeapon(weapon);
+  if (leptonDist(fire.lx, fire.ly, target.lx, target.ly) > weapon.range * LEPTON_SIZE) return 'range';
+  if (entity.ammo === 0) return 'ammo';
+  if (entity.stats.isCloakable && entity.cloakState !== CloakState.UNCLOAKED) return 'cloaked';
+  return 'ok';
+}
+
+function helicopterInRange(entity: Entity): boolean {
+  const weapon = entity.weapon;
+  const target = aircraftTargetLeptons(entity);
+  if (!weapon || !target) return false;
+  const fire = entity.fireCoordForWeapon(weapon);
+  return leptonDist(fire.lx, fire.ly, target.lx, target.ly) <= weapon.range * LEPTON_SIZE;
+}
+
+function fireHelicopterWeapon(ctx: AircraftContext, entity: Entity): HelicopterFireState {
+  const fireState = helicopterFireState(entity);
+  if (fireState !== 'ok') return fireState;
+  const weapon = entity.weapon!;
+  const target = aircraftTargetLeptons(entity)!;
 
   if (entity.target?.alive) {
     ctx.fireWeaponAt(entity, entity.target, weapon);
   } else if (entity.targetStructure && (entity.targetStructure as MapStructure).alive) {
     ctx.fireWeaponAtStructure(entity, entity.targetStructure as MapStructure, weapon);
   } else {
-    return false;
+    return 'cant';
   }
 
   const targetCell = leptonToCell(target.lx, target.ly);
   ctx.incomingThreatScatterCell?.(targetCell.cx, targetCell.cy, entity);
   entity.attackCooldown = Math.max(1, Math.round(weapon.rof * ctx.getROFBias(entity.house)));
   if (entity.ammo > 0) entity.ammo--;
-  return true;
+  return 'ok';
 }
 
 function updateHelicopterMissionAttack(ctx: AircraftContext, entity: Entity): boolean {
@@ -760,10 +855,15 @@ function updateHelicopterMissionAttack(ctx: AircraftContext, entity: Entity): bo
         flyCurrentFacing();
         return true;
       }
-      aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity), 1);
       {
-        const distance = leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly);
-        if (distance < 0x0200) setHelicopterAttackFacing(entity);
+        const moveTarget = entity.moveTarget;
+        const distance = leptonDist(entity.leptonX, entity.leptonY, moveTarget.lx, moveTarget.ly);
+        if (distance < 0x0200) {
+          setHelicopterSecondaryFacingToTarget(entity);
+        } else {
+          setHelicopterSecondaryFacingToCoordFromFireCoord(entity, moveTarget);
+        }
+        aircraftFlyInFacing(entity, moveTarget, ctx.movementSpeed(entity), 1);
         if (distance < 0x0010) {
           entity.aircraftAttackStatus = ATTACK_FIRE_AT_TARGET;
           entity.moveTarget = null;
@@ -779,10 +879,17 @@ function updateHelicopterMissionAttack(ctx: AircraftContext, entity: Entity): bo
         return true;
       }
       setHelicopterAttackFacing(entity);
-      if (fireHelicopterWeapon(ctx, entity)) {
-        entity.aircraftAttackStatus = ATTACK_FIRE_AT_TARGET2;
-      } else if (entity.ammo === 0) {
-        entity.aircraftAttackStatus = ATTACK_RETURN_TO_BASE;
+      {
+        const fireState = fireHelicopterWeapon(ctx, entity);
+        if (fireState === 'ok') {
+          entity.aircraftAttackStatus = ATTACK_FIRE_AT_TARGET2;
+        } else if (fireState === 'cloaked') {
+          entity.cloakState = CloakState.UNCLOAKING;
+        } else if (fireState !== 'rearm') {
+          entity.aircraftAttackStatus = entity.ammo === 0
+            ? ATTACK_RETURN_TO_BASE
+            : ATTACK_FIRE_AT_TARGET2;
+        }
       }
       flyCurrentFacing();
       return true;
@@ -794,19 +901,21 @@ function updateHelicopterMissionAttack(ctx: AircraftContext, entity: Entity): bo
         return true;
       }
       setHelicopterAttackFacing(entity);
-      if (fireHelicopterWeapon(ctx, entity)) {
-        entity.aircraftAttackStatus = entity.ammo > 0
-          ? ATTACK_FIRE_AT_TARGET
-          : ATTACK_RETURN_TO_BASE;
-      } else if (entity.ammo === 0) {
-        entity.aircraftAttackStatus = ATTACK_RETURN_TO_BASE;
-      } else {
-        const targetLeptons = aircraftTargetLeptons(entity);
-        entity.aircraftAttackStatus =
-          targetLeptons &&
-          leptonDist(entity.leptonX, entity.leptonY, targetLeptons.lx, targetLeptons.ly) > (entity.weapon?.range ?? 5) * LEPTON_SIZE
-            ? ATTACK_PICK_ATTACK_LOCATION
-            : ATTACK_FIRE_AT_TARGET;
+      {
+        const fireState = fireHelicopterWeapon(ctx, entity);
+        if (fireState === 'ok') {
+          entity.aircraftAttackStatus = entity.ammo > 0
+            ? ATTACK_FIRE_AT_TARGET
+            : ATTACK_RETURN_TO_BASE;
+        } else if (fireState === 'cloaked') {
+          entity.cloakState = CloakState.UNCLOAKING;
+        } else if (fireState !== 'rearm') {
+          entity.aircraftAttackStatus = entity.ammo === 0
+            ? ATTACK_RETURN_TO_BASE
+            : helicopterInRange(entity)
+              ? ATTACK_FIRE_AT_TARGET
+              : ATTACK_PICK_ATTACK_LOCATION;
+        }
       }
       aircraftMissionAttackFinalDelay(entity);
       flyCurrentFacing();
@@ -906,6 +1015,7 @@ function aircraftFlyCurrentFacing(entity: Entity, baseSpeed: number): void {
   // C++ Mission_Retreat FACE_MAP_EDGE sets Desired facing once; Movement_AI then
   // rotates and applies Physics(Coord, PrimaryFacing) without a NavCom target.
   entity.rotTickedThisFrame = false;
+  entity.turretRotTickedThisFrame = false;
   if (entity.facing256 >= 0) {
     entity.tickRotation256();
   } else {
@@ -914,6 +1024,7 @@ function aircraftFlyCurrentFacing(entity: Entity, baseSpeed: number): void {
   // C++ aircraft.cpp:4294-4295 — fixed-wing Rotation_AI copies
   // SecondaryFacing from PrimaryFacing before any secondary rotation.
   syncFixedWingSecondaryFacing(entity);
+  rotateAircraftSecondaryFacing(entity);
   moveAircraftCurrentFacing(entity, baseSpeed);
 }
 
@@ -923,11 +1034,13 @@ function fixedWingProcessFlyTo(ctx: AircraftContext, entity: Entity, target: Lep
   }
   const distance = leptonDist(entity.leptonX, entity.leptonY, target.lx, target.ly);
   entity.rotTickedThisFrame = false;
+  entity.turretRotTickedThisFrame = false;
   const desired = directionToLeptons256(entity.leptonX, entity.leptonY, target.lx, target.ly);
   entity.desiredFacing256 = desired;
   entity.desiredFacing = dir256ToFacing8(desired);
   entity.tickRotation256();
   syncFixedWingSecondaryFacing(entity);
+  rotateAircraftSecondaryFacing(entity);
   moveAircraftCurrentFacing(entity, ctx.movementSpeed(entity));
   return distance;
 }
@@ -1120,6 +1233,7 @@ function aircraftFlyInFacing(
 
   // Step 1: Set desired facing toward target and rotate.
   entity.rotTickedThisFrame = false;
+  entity.turretRotTickedThisFrame = false;
 
   // C++ Process_Fly_To runs every 5 ticks when far (dist>=256 leptons), 1 tick when close
   const flyToInterval = flyToIntervalOverride ?? (distLeptons >= 256 ? 5 : 1);
@@ -1136,6 +1250,8 @@ function aircraftFlyInFacing(
     if (updateDesired) entity.desiredFacing = directionTo(entity.pos, targetWorld);
     entity.tickRotation();
   }
+  syncFixedWingSecondaryFacing(entity);
+  rotateAircraftSecondaryFacing(entity);
 
   // Step 2: C++ Process_Fly_To(true, NavCom) approach slowdown within 3 cells.
   // Uses octagonal lepton distance. Speed updated only on flyToInterval ticks.
