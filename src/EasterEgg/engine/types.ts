@@ -1518,9 +1518,12 @@ export function projectileVisualConfig(weaponName: string): ProjectileVisualConf
     case 'ParaBomb':
       return { projImage: 'bomblet', projTumble: true, projTumbleFrames: 6, projTranslucent: true };
     // Fireball projectile (Image=FB1, Frames=8, Animates=yes)
-    // rules.ini:2636-2639 — Flamer, FireballLauncher, Napalm
-    case 'FireballLauncher': case 'Flamer': case 'Napalm':
-      return { projImage: 'fball1', projTumble: true, projTumbleFrames: 8 };
+    // rules.ini:2636-2639 — Flamer and FireballLauncher use Projectile=Fireball.
+    case 'FireballLauncher': case 'Flamer':
+      return { projImage: 'fball1', projTumble: true, projTumbleFrames: 8, projFlameTrail: true };
+    // Napalm uses Projectile=Bomblet, not Fireball (rules.ini:2317-2323).
+    case 'Napalm':
+      return { projImage: 'bomblet', projTumble: true, projTumbleFrames: 6, projTranslucent: true };
     // Torpedo (Image=MISSILE, Rotates=yes, UnderWater=yes, ASW=yes)
     // rules.ini:2506-2510 — TorpTube weapon (submarine)
     case 'TorpTube':

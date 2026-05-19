@@ -550,6 +550,8 @@ describe('FTUR fire effects (rendering parity)', () => {
     expect(ctx.inflightProjectiles).toHaveLength(1);
     expect(ctx.inflightProjectiles[0].weapon.name).toBe('FireballLauncher');
     expect(ctx.inflightProjectiles[0].targetId).toBe(enemy.id);
+    expect(ctx.inflightProjectiles[0].isFlameEquipped).toBe(true);
+    expect(ctx.inflightProjectiles[0].flameTrailAnim).toBe('fball_fade');
   });
 
   it('muzzle effect originates from structure center', () => {

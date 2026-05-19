@@ -93,25 +93,34 @@ describe('projectileVisualConfig — rules.ini BulletTypeClass parity', () => {
   });
 
   describe('Bomblet projectile (Image=BOMBLET, Frames=6, Translucent=yes)', () => {
-    it('ParaBomb uses bomblet sprite with 6 tumble frames + translucency', () => {
-      const cfg = projectileVisualConfig('ParaBomb');
-      expect(cfg.projImage).toBe('bomblet');
-      expect(cfg.projTumble).toBe(true);
-      expect(cfg.projTumbleFrames).toBe(6);
-      expect(cfg.projTranslucent).toBe(true);
-    });
+    for (const w of ['ParaBomb', 'Napalm']) {
+      it(`${w} uses bomblet sprite with 6 tumble frames + translucency`, () => {
+        const cfg = projectileVisualConfig(w);
+        expect(cfg.projImage).toBe('bomblet');
+        expect(cfg.projTumble).toBe(true);
+        expect(cfg.projTumbleFrames).toBe(6);
+        expect(cfg.projTranslucent).toBe(true);
+      });
+    }
   });
 
   describe('Fireball projectile (Image=FB1, Frames=8, Animates=yes)', () => {
-    const flameWeapons = ['FireballLauncher', 'Flamer', 'Napalm'];
+    const flameWeapons = ['FireballLauncher', 'Flamer'];
     for (const w of flameWeapons) {
-      it(`${w} uses fball1 sprite with 8 tumble frames`, () => {
+      it(`${w} uses fball1 sprite with 8 tumble frames and flame trail`, () => {
         const cfg = projectileVisualConfig(w);
-        expect(cfg.projImage, `${w} → fball1`).toBe('fball1');
+        expect(cfg.projImage, `${w} -> fball1`).toBe('fball1');
         expect(cfg.projTumble).toBe(true);
         expect(cfg.projTumbleFrames).toBe(8);
+        expect(cfg.projFlameTrail).toBe(true);
       });
     }
+
+    it('Napalm is not a Fireball projectile', () => {
+      const cfg = projectileVisualConfig('Napalm');
+      expect(cfg.projImage).toBe('bomblet');
+      expect(cfg.projFlameTrail).toBeFalsy();
+    });
   });
 
   describe('Torpedo (Image=MISSILE, Rotates=yes, UnderWater=yes)', () => {
