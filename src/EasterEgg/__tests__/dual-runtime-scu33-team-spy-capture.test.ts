@@ -154,6 +154,65 @@ async function tsGen2PopOutState(adapter: unknown) {
   });
 }
 
+async function wasmAtk2MoveTailState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const row = (state.logicLayer ?? []).find((r: any[]) => r[0] === 58);
+    if (!row) throw new Error('C++ SCU33EA atk2 E1 logic row 58 not found');
+    const all = [
+      ...(state.units ?? []),
+      ...(state.infantry ?? []),
+      ...(state.enemies ?? []),
+      ...(state.neutrals ?? []),
+    ];
+    const foot = all.find((u: any) => u.id === row[6]);
+    if (!foot) throw new Error('C++ SCU33EA atk2 E1 foot state not found');
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      type: row[1],
+      house: row[2],
+      cx: row[3],
+      cy: row[4],
+      mission: row[7],
+      missionTimer: row[8],
+      missionQueue: row[9],
+      isDriving: row[10] === true,
+      lx: row[12],
+      ly: row[13],
+      headToLX: foot.hlx ?? 0,
+      headToLY: foot.hly ?? 0,
+    };
+  });
+}
+
+async function tsAtk2MoveTailState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const e1 = game.entities.find((e: any) =>
+      e.alive !== false && e.type === 'E1' && e.house === 'Greece' && e.logicIndexHint === 58);
+    if (!e1) throw new Error('TS SCU33EA atk2 E1 logic hint 58 not found');
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      type: e1.type,
+      house: e1.house,
+      cx: e1.cell.cx,
+      cy: e1.cell.cy,
+      mission: e1.mission,
+      missionTimer: e1.missionTimer,
+      missionQueue: e1.missionQueue,
+      isDriving: e1.isDriving === true,
+      lx: e1.leptonX,
+      ly: e1.leptonY,
+      headToLX: e1.headToLX,
+      headToLY: e1.headToLY,
+      path: e1.path.slice(e1.pathIndex).map((p: any) => [p.cx, p.cy]),
+    };
+  });
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU33 team SPY capture handoff', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -238,6 +297,42 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU33 team SPY capture hand
       expect(ts.missionTimer).toBe(cpp.missionTimer);
       expect(ts.isDriving).toBe(cpp.isDriving);
       expect(ts.facing).toBe(cpp.facing);
+      expect(ts.rngState >>> 0).toBe(cpp.rngState >>> 0);
+    }, { wasmSeed: 0 });
+  }, 180_000);
+
+  it('preserves a driving infantry path tail when Team MOVE rewrites NavCom', async () => {
+    await withDualScenario('SCU33EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      const result = await stepBoth(handle, 342);
+      expect(result.ts.state.tick).toBe(result.wasm.state.tick);
+
+      const cpp = await wasmAtk2MoveTailState(handle.wasm);
+      const ts = await tsAtk2MoveTailState(handle.ts);
+
+      expect(cpp.tick).toBe(342);
+      expect(cpp.type).toBe('E1');
+      expect(cpp.house).toBe('Greece');
+      expect(cpp.mission).toBe(2);
+      expect(cpp.isDriving).toBe(true);
+      expect(cpp.headToLX).toBe(11328);
+      expect(cpp.headToLY).toBe(17472);
+
+      expect(ts.tick).toBe(cpp.tick);
+      expect(ts.type).toBe(cpp.type);
+      expect(ts.house).toBe(cpp.house);
+      expect(ts.cx).toBe(cpp.cx);
+      expect(ts.cy).toBe(cpp.cy);
+      expect(ts.lx).toBe(cpp.lx);
+      expect(ts.ly).toBe(cpp.ly);
+      expect(ts.mission).toBe('MOVE');
+      expect(ts.missionTimer).toBe(cpp.missionTimer);
+      expect(ts.missionQueue).toBeNull();
+      expect(ts.isDriving).toBe(cpp.isDriving);
+      expect(ts.headToLX).toBe(cpp.headToLX);
+      expect(ts.headToLY).toBe(cpp.headToLY);
+      expect(ts.path).toEqual([[44, 68]]);
       expect(ts.rngState >>> 0).toBe(cpp.rngState >>> 0);
     }, { wasmSeed: 0 });
   }, 180_000);

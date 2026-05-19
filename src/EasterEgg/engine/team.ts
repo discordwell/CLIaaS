@@ -54,6 +54,26 @@ function clearFootPath(unit: Entity): void {
   unit.drivePathHeadCleared = false;
 }
 
+function applyInfantryAssignDestinationPathClear(unit: Entity, ctx?: TeamAIContext): void {
+  let stoppedDriver = false;
+  if (unit.isDriving && !unit.formationOffset &&
+      (ctx?.canStopInfantryDriverForAssignDestination?.(unit) ?? true)) {
+    if (ctx?.stopInfantryDriver) {
+      ctx.stopInfantryDriver(unit);
+    } else {
+      unit.isDriving = false;
+      unit.headToLX = 0;
+      unit.headToLY = 0;
+      unit.doStopDriverAction(ctx?.tick ?? -1);
+    }
+    stoppedDriver = true;
+  }
+
+  if (!unit.isDriving || stoppedDriver) {
+    clearFootPath(unit);
+  }
+}
+
 /**
  * Optional context threaded through Team.ai() for a full per-tick pass.
  *
@@ -474,7 +494,7 @@ export class Team {
     unit.moveTargetEntityRefLY = target.ly;
     unit.pathThreshold = 1; // C++ MOVE_CLOAK
     if (unit.stats.isInfantry) {
-      clearFootPath(unit);
+      applyInfantryAssignDestinationPathClear(unit, ctx);
       return;
     }
     if (!unit.isAirUnit) {
@@ -1239,29 +1259,17 @@ export class Team {
             // C++ InfantryClass::Assign_Destination override (infantry.cpp:1044):
             // if a moving infantry unit receives a legal destination and is not
             // formation-moving, Stop_Driver() first. Then, for ordinary
-            // destinations (non ENTER), infantry.cpp:1099 sets Path[0] =
-            // FACING_NONE before FootClass::Assign_Destination updates NavCom
-            // + PathThreshhold. TS stores a cell path plus pathIndex, so clearing
-            // the path is the Path[0]=FACING_NONE equivalent and forces the next
-            // Movement_AI pass to Basic_Path from the current cell.
+            // destinations (non ENTER), infantry.cpp:1099 sets only Path[0] =
+            // FACING_NONE before FootClass::Assign_Destination updates NavCom.
+            // If Stop_Driver cannot run, the existing Path[1..] tail must
+            // survive until the active Head_To_Coord hop completes.
             //
             // SCG06EA t66: team retaliation changes the team Target while the
             // BadGuy E1 is mid-hop. C++ stops the old driver and invalidates
             // Path[0], so the next Movement_AI computes a fresh northward path.
             // Preserving TS's stale path sends the unit southwest and delays the
             // follow-up rifle shot that becomes the tick-100 bullet[121] impact.
-            if (unit.isDriving && !unit.formationOffset &&
-                (ctx?.canStopInfantryDriverForAssignDestination?.(unit) ?? true)) {
-              if (ctx?.stopInfantryDriver) {
-                ctx.stopInfantryDriver(unit);
-              } else {
-                unit.isDriving = false;
-                unit.headToLX = 0;
-                unit.headToLY = 0;
-                unit.doStopDriverAction(ctx?.tick ?? -1);
-              }
-            }
-            clearFootPath(unit);
+            applyInfantryAssignDestinationPathClear(unit, ctx);
           } else if (!ctx?.startDriveClassMove) {
             clearFootPath(unit);
           }
