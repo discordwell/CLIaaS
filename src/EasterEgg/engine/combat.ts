@@ -171,8 +171,8 @@ export interface InflightProjectile {
   startY: number;        // origin Y position (attacker pos at launch)
   // C++ bullet.cpp:96-175 — dog-rides-bullet: dog entity ID riding this projectile (enters limbo on fire, unlimbos on impact)
   dogRiderId: number;    // entity ID of dog riding this bullet (-1 = none)
-  // C++ fuse.cpp — IsFueled: fuel timer counts down; when 0, force-explode mid-air (bullet.cpp:710, fuse.h:62)
-  fuelTimer: number;     // ticks remaining before fuel-forced explosion (0xFF max, 0 = explode now)
+  // C++ FuseClass::Timer. Ranged/fueled projectiles use the same timer, gated by Arm=.
+  fuelTimer: number;     // ticks remaining before timer-forced explosion (0xFF max, 0 = explode now)
   isFueled: boolean;     // true if weapon has IsFueled flag (SCUD/V2)
   // C++ bullet.cpp:790-802 — IsDropping: vertical drop from ObjectClass::FLIGHT_LEVEL.
   isDropping: boolean;   // true if weapon has IsDropping flag
@@ -1187,6 +1187,20 @@ function launchBarrelDeathBullet(ctx: CombatContext, s: MapStructure, dx: number
     logicIndexHint,
     createdLogicTick: ctx.tick,
   });
+}
+
+function projectileArmingDelay(
+  weapon: Pick<WeaponStats, 'projectileArm'>,
+  target: Entity | null,
+): number {
+  // C++ bullet.cpp:774 passes zero arming when TarCom is an AircraftClass.
+  if (target?.stats.isAircraft) return 0;
+  return Math.min(0xFF, Math.max(0, Math.trunc(weapon.projectileArm ?? 0)));
+}
+
+function projectileFuseTimer(travelFrames: number, armingDelay: number): number {
+  // C++ fuse.cpp:94-99: timeto = max(timeto, arming); Timer = min(timeto, 0xFF).
+  return Math.min(0xFF, Math.max(travelFrames, armingDelay));
 }
 
 /** Minimal AI state slice needed by damageStructure */
@@ -3254,6 +3268,8 @@ export function launchProjectile(
   }
 
   const logicIndexHint = ctx.logicIndexHintForNewObject?.();
+  const armingDelay = projectileArmingDelay(weapon, target);
+  const fuseTimer = projectileFuseTimer(travelFrames, armingDelay);
   ctx.inflightProjectiles.push({
     attackerId: attacker.id,
     targetId: target?.id ?? -1,
@@ -3273,9 +3289,9 @@ export function launchProjectile(
     startX: bulletStartLX * CELL_SIZE / LEPTON_SIZE,
     startY: bulletStartLY * CELL_SIZE / LEPTON_SIZE,
     dogRiderId,
-    // C++ fuse.cpp — Timer = range = (distance/speed) + 4, capped at 0xFF.
+    // C++ fuse.cpp — Timer = max(range, arming), capped at 0xFF.
     // `travelFrames` already includes bullet.cpp's +4 range bias.
-    fuelTimer: Math.min(0xFF, travelFrames),
+    fuelTimer: fuseTimer,
     isFueled: !!weapon.isFueled,
     // C++ bullet.cpp:790-802 — IsDropping starts at ObjectClass::FLIGHT_LEVEL
     // (256 leptons). IsParachuted attaches ANIM_PARA_BOMB, so ObjectClass::AI
@@ -3302,8 +3318,8 @@ export function launchProjectile(
       : directionToLeptons256(bulletStartLX, bulletStartLY, targetLX, targetLY),
     speedAccum: 0,
     speedAdd,
-    fuseTimer: Math.min(0xFF, travelFrames),
-    armingTimer: 0,
+    fuseTimer,
+    armingTimer: armingDelay,
     proximity: fuseDist,
     logicIndexHint,
     createdLogicTick: ctx.tick,
@@ -3349,6 +3365,8 @@ function launchStructureProjectile(
 
   const logicIndexHint = ctx.logicIndexHintForNewObject?.();
   const attackerStructureIndex = ctx.structures.indexOf(s);
+  const armingDelay = projectileArmingDelay(weapon, target);
+  const fuseTimer = projectileFuseTimer(travelFrames, armingDelay);
   ctx.inflightProjectiles.push({
     attackerId: -1,
     attackerHouse: s.house,
@@ -3363,6 +3381,7 @@ function launchStructureProjectile(
       warhead: (weapon.warhead ?? 'HE') as WarheadType,
       splash: weapon.splash,
       projSpeed: weapon.projSpeed,
+      projectileArm: weapon.projectileArm,
       isInvisible,
       isAntiAir: weapon.isAntiAir,
     },
@@ -3381,7 +3400,7 @@ function launchStructureProjectile(
     startX: bulletStartLX * CELL_SIZE / LEPTON_SIZE,
     startY: bulletStartLY * CELL_SIZE / LEPTON_SIZE,
     dogRiderId: -1,
-    fuelTimer: Math.min(0xFF, travelFrames),
+    fuelTimer: fuseTimer,
     isFueled: false,
     isDropping: false,
     dropHeight: 0,
@@ -3398,8 +3417,8 @@ function launchStructureProjectile(
     desiredFacing256: scatter.facing256 ?? directionToLeptons256(bulletStartLX, bulletStartLY, targetLX, targetLY),
     speedAccum: 0,
     speedAdd,
-    fuseTimer: Math.min(0xFF, travelFrames),
-    armingTimer: 0,
+    fuseTimer,
+    armingTimer: armingDelay,
     proximity: fuseDist,
     logicIndexHint,
     createdLogicTick: ctx.tick,
@@ -3566,7 +3585,6 @@ function countLiveProjectilePredecessors(ctx: CombatContext, snapshot: LogicPred
 
 function projectileRemainsInLogic(proj: InflightProjectile): boolean {
   if (proj.isDropping) return proj.dropHeight > 0 || proj.currentFrame === 0;
-  if (proj.isFueled && proj.fuelTimer <= 0) return false;
   if (proj.isArcing) return proj.arcHeight > 0 || proj.currentFrame <= 1;
   return true;
 }
@@ -3736,9 +3754,8 @@ function advanceProjectileOneTick(ctx: CombatContext, proj: InflightProjectile):
     return true;
   }
 
-  // C++ fuse.cpp:139 — IsFueled: force-explode when fuel timer reaches 0 (ran out of fuel mid-air)
-  // Fuse_Checkup returns true when Timer == 0 after arming delay expires
-  if (proj.isFueled && proj.fuelTimer <= 0) {
+  // C++ fuse.cpp:139 — Timer exhaustion only triggers after the arming delay expires.
+  if (proj.isFueled && proj.fuelTimer <= 0 && proj.armingTimer <= 0) {
     return true;
   }
 

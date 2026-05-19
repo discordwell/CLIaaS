@@ -659,6 +659,28 @@ describe('Projectile Arm and RangeLimit values from rules.ini', () => {
   it('FROG Arm=10 (V2 rocket arming delay)', () => {
     expect(iniInt('FROG', 'Arm')).toBe(10);
   });
+
+  it('WEAPON_STATS carries projectile Arm= for every armed projectile weapon', () => {
+    const armedWeapons = Object.keys(WEAPON_STATS).filter((wName) => {
+      if (TS_ONLY_WEAPONS.has(wName)) return false;
+      const rawProjectile = iniStr(wName, 'Projectile');
+      if (!rawProjectile) return false;
+      return iniInt(resolveProjectileName(rawProjectile), 'Arm') > 0;
+    });
+
+    expect(armedWeapons).toEqual(expect.arrayContaining([
+      'Dragon', 'RedEye', 'MammothTusk', 'Stinger', 'SubSCUD',
+      'APTusk', 'Maverick', 'Hellfire', 'SCUD', 'Napalm', 'ParaBomb',
+    ]));
+
+    for (const wName of armedWeapons) {
+      const projectile = resolveProjectileName(iniStr(wName, 'Projectile')!);
+      expect(
+        WEAPON_STATS[wName].projectileArm,
+        `${wName} uses [${projectile}] Arm=`,
+      ).toBe(iniInt(projectile, 'Arm'));
+    }
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════

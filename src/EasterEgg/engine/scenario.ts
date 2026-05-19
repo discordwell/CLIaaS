@@ -1459,6 +1459,7 @@ export interface StructureWeapon {
   splash?: number;   // AOE radius in cells
   warhead?: string;  // warhead type for damage multiplier (default 'HE')
   projSpeed?: number; // projectile visual speed in cells/second (C++ BulletClass Speed)
+  projectileArm?: number; // projectile Arm= arming delay in game frames
   isInvisible?: boolean; // Projectile=Invisible/Ack Inviso=yes
   isAntiAir?: boolean; // can target airborne aircraft
 }
@@ -1609,7 +1610,7 @@ export const STRUCTURE_WEAPONS: Record<string, StructureWeapon> = {
   PBOX:  { weaponName: 'Vulcan', damage: 40, range: 5, rof: 40, warhead: 'SA', projSpeed: 100, isInvisible: true }, // Vulcan → Invisible
   GUN:   { weaponName: 'TurretGun', damage: 40, range: 6, rof: 50, warhead: 'AP', splash: 0.5, projSpeed: 40 },
   TSLA:  { weaponName: 'TeslaZap', damage: 100, range: 8.5, rof: 120, warhead: 'Super', splash: 1, projSpeed: 100, isInvisible: true },
-  SAM:   { weaponName: 'Nike', damage: 50, range: 7.5, rof: 20, warhead: 'AP', projSpeed: 50, isAntiAir: true },
+  SAM:   { weaponName: 'Nike', damage: 50, range: 7.5, rof: 20, warhead: 'AP', projSpeed: 50, projectileArm: 3, isAntiAir: true },
   AGUN:  { weaponName: 'ZSU-23', secondaryWeaponName: 'ZSU-23', damage: 25, range: 6, rof: 10, warhead: 'AP', projSpeed: 100, isInvisible: true, isAntiAir: true },
   FTUR:  { weaponName: 'FireballLauncher', damage: 125, range: 4, rof: 50, warhead: 'Fire', projSpeed: 12 },
   QUEE:  { weaponName: 'TeslaZap', damage: 60, range: 5, rof: 30, splash: 1, warhead: 'Super', projSpeed: 40 }, // Queen Ant

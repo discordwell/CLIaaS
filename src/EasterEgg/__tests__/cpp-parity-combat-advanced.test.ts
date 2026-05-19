@@ -939,9 +939,9 @@ describe('Fuel timer (fuse.cpp:120-149, fuse.h:62)', () => {
     expect(weapon.isFueled).toBe(true);
   });
 
-  it('fuelTimer is initialized to min(0xFF, range)', () => {
+  it('fuelTimer is initialized to min(0xFF, max(range, Arm))', () => {
     // C++ bullet.cpp:749: range = (Distance/speed) + 4.
-    // C++ fuse.cpp:97: Timer = min(range, 0xFF).
+    // C++ fuse.cpp:96-97: timeto = max(timeto, arming); Timer = min(timeto, 0xFF).
     const attacker = entityAtCell(UnitType.V_V2RL, House.USSR, 2, 5);
     const target = entityAtCell(UnitType.V_2TNK, House.Spain, 8, 5);
     const ctx = makeCombatCtx([attacker, target]);
@@ -953,9 +953,10 @@ describe('Fuel timer (fuse.cpp:120-149, fuse.h:62)', () => {
     expect(proj.isFueled).toBe(true);
 
     // TS `travelFrames` is the C++ range value, including bullet.cpp's +4 bias.
-    const expectedTimer = Math.min(0xFF, proj.travelFrames);
+    const expectedTimer = Math.min(0xFF, Math.max(proj.travelFrames, weapon.projectileArm!));
     expect(proj.fuelTimer).toBe(expectedTimer);
     expect(proj.fuseTimer).toBe(expectedTimer);
+    expect(proj.armingTimer).toBe(weapon.projectileArm);
   });
 
   it('fuelTimer decrements by 1 each tick (fuse.cpp:127)', () => {
@@ -994,8 +995,11 @@ describe('Fuel timer (fuse.cpp:120-149, fuse.h:62)', () => {
     launchProjectile(ctx, attacker, target, weapon, 600, target.pos.x, target.pos.y, true);
 
     const proj = ctx.inflightProjectiles[0];
-    // Manually set a small fuel timer to test force-explosion
+    // Manually set a small FuseClass timer to test force-explosion. C++ has one
+    // Timer field, mirrored by TS fuelTimer/fuseTimer diagnostics.
     proj.fuelTimer = 5;
+    proj.fuseTimer = 5;
+    proj.armingTimer = 0;
 
     // Run 5 ticks to exhaust fuel
     for (let i = 0; i < 5; i++) {
@@ -1009,6 +1013,32 @@ describe('Fuel timer (fuse.cpp:120-149, fuse.h:62)', () => {
     // An explosion effect should have been created
     const explosions = ctx.effects.filter(e => e.type === 'explosion');
     expect(explosions.length).toBeGreaterThan(0);
+  });
+
+  it('ground-target SCUD keeps the FROG Arm=10 arming delay before proximity detonation', () => {
+    const attacker = entityAtCell(UnitType.V_V2RL, House.USSR, 2, 5);
+    const target = entityAtCell(UnitType.V_2TNK, House.Spain, 3, 5);
+    const ctx = makeCombatCtx([attacker, target]);
+
+    launchProjectile(ctx, attacker, target, WEAPON_STATS.SCUD, 600, target.pos.x, target.pos.y, true);
+
+    const proj = ctx.inflightProjectiles[0];
+    expect(proj.armingTimer).toBe(10);
+    expect(proj.fuseTimer).toBe(Math.min(0xFF, Math.max(proj.travelFrames, 10)));
+    expect(proj.fuelTimer).toBe(proj.fuseTimer);
+  });
+
+  it('aircraft targets bypass projectile arming delay like As_Aircraft(TarCom)', () => {
+    const attacker = entityAtCell(UnitType.I_E3, House.USSR, 2, 5);
+    const target = entityAtCell(UnitType.V_HELI, House.Spain, 3, 5);
+    const ctx = makeCombatCtx([attacker, target]);
+
+    launchProjectile(ctx, attacker, target, WEAPON_STATS.RedEye, 50, target.pos.x, target.pos.y, true);
+
+    const proj = ctx.inflightProjectiles[0];
+    expect(WEAPON_STATS.RedEye.projectileArm).toBe(3);
+    expect(proj.armingTimer).toBe(0);
+    expect(proj.fuseTimer).toBe(Math.min(0xFF, proj.travelFrames));
   });
 
   it('fuelTimer capped at 0xFF (255) — C++ fuse.h:62 unsigned char', () => {
@@ -1060,12 +1090,8 @@ describe('Fuel timer (fuse.cpp:120-149, fuse.h:62)', () => {
   it('C++ Arm_Fuse ensures Timer >= Arming (fuse.cpp:96)', () => {
     // C++ fuse.cpp:96: timeto = max(timeto, arming);
     // This means the fuel timer is always >= the arming delay.
-    // In TS, the fuelTimer is travelFrames + 4, and arming is weapon.arming (usually 0).
+    // In TS, travelFrames is the C++ range value; Arm= is carried from the projectile section.
     // The important constraint: timer must be >= arming delay.
-    //
-    // For SCUD, C++ RULES.INI has Arm=0 (or small value), so this is trivially satisfied.
-    // The TS code (combat.ts:595) uses: fuelTimer = min(0xFF, travelFrames + 4)
-    // Since arming=0 for most fueled weapons, this constraint is automatically met.
     const attacker = entityAtCell(UnitType.V_V2RL, House.USSR, 2, 5);
     const target = entityAtCell(UnitType.V_2TNK, House.Spain, 8, 5);
     const ctx = makeCombatCtx([attacker, target]);
@@ -1074,10 +1100,11 @@ describe('Fuel timer (fuse.cpp:120-149, fuse.h:62)', () => {
     launchProjectile(ctx, attacker, target, weapon, 600, target.pos.x, target.pos.y, true);
 
     const proj = ctx.inflightProjectiles[0];
-    // fuelTimer should be >= 0 (arming delay is 0 for SCUD)
-    expect(proj.fuelTimer).toBeGreaterThan(0);
+    expect(proj.armingTimer).toBe(WEAPON_STATS.SCUD.projectileArm);
     // fuelTimer should be >= travelFrames (enough to reach target)
     expect(proj.fuelTimer).toBeGreaterThanOrEqual(proj.travelFrames);
+    // fuelTimer should be >= projectile Arm= (arming delay before proximity/timer can trigger)
+    expect(proj.fuelTimer).toBeGreaterThanOrEqual(WEAPON_STATS.SCUD.projectileArm!);
   });
 });
 

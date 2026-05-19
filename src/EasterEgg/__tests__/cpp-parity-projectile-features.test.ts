@@ -399,7 +399,7 @@ describe('IsFueled — fuel timer detonation (fuse.cpp:127-139)', () => {
     expect(ctx.inflightProjectiles.length).toBe(1);
   });
 
-  it('launchProjectile sets fuelTimer = min(0xFF, travelFrames) for fueled weapons', () => {
+  it('launchProjectile sets FuseClass Timer = min(0xFF, max(range, Arm)) for fueled weapons', () => {
     const attacker = entityAtCell(UnitType.V_V2RL, House.USSR, 5, 5);
     const target = entityAtCell(UnitType.I_E1, House.Spain, 10, 5);
     const ctx = makeCombatCtx([attacker, target]);
@@ -410,8 +410,10 @@ describe('IsFueled — fuel timer detonation (fuse.cpp:127-139)', () => {
     expect(ctx.inflightProjectiles.length).toBe(1);
     const proj = ctx.inflightProjectiles[0];
     expect(proj.isFueled).toBe(true);
+    expect(proj.armingTimer).toBe(WEAPON_STATS.SCUD.projectileArm);
     // travelFrames already includes bullet.cpp's +4 launch offset.
-    expect(proj.fuelTimer).toBe(Math.min(0xFF, proj.travelFrames));
+    expect(proj.fuelTimer).toBe(Math.min(0xFF, Math.max(proj.travelFrames, WEAPON_STATS.SCUD.projectileArm!)));
+    expect(proj.fuseTimer).toBe(proj.fuelTimer);
   });
 });
 
