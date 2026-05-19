@@ -3083,6 +3083,7 @@ export class Game {
         if (runStructureAttack) _updateSingleStructureCombat(ctx, s, isLowPower);
 
         this.maintainStructureTarcom(s);
+        this.reloadBuildingAmmo(s);
 
         this.updateStructureChargingAI(s, ctx, isLowPower);
 
@@ -17345,6 +17346,11 @@ export class Game {
     return s.type === 'TSLA';
   }
 
+  /** C++ BuildingClass::AI reloads MaxAmmo buildings immediately after TechnoClass::AI. */
+  private reloadBuildingAmmo(s: MapStructure): void {
+    if (s.ammo === 0 && s.maxAmmo > 0) s.ammo = s.maxAmmo;
+  }
+
   /** C++ BuildingClass::Animation_AI stage advance for Tesla charge animation.
    *  Charging_AI sets Set_Rate(3), and the stage is tested against 9 on the
    *  later Charging_AI pass. This helper represents that pre-mission
@@ -17565,6 +17571,18 @@ export class Game {
           s.targetEntityId = undefined;
           s.mission = Mission.GUARD;
           s.missionTimer = 1;
+          return false;
+        }
+        if (s.attackCooldown > 0) {
+          // C++ TechnoClass::Can_Fire checks Arm before range, ammo, or the
+          // BuildingClass electric-charge gate. Mission_Attack therefore
+          // returns Arm while rearming; later TechnoClass::AI TarCom
+          // maintenance may clear the target without waking Guard jitter.
+          if (s.rearmFacingUpdatePending) {
+            _setStructureTurretDesired(s, assignedTarget);
+            s.rearmFacingUpdatePending = false;
+          }
+          s.missionTimer = Math.max(s.missionTimer ?? 0, s.attackCooldown);
           return false;
         }
         if (this.isElectricStructureWeapon(s) && !s.isCharged) {
@@ -17875,6 +17893,7 @@ export class Game {
       if (runStructureAttack) _updateSingleStructureCombat(combatCtx, s, isLowPower);
 
       this.maintainStructureTarcom(s);
+      this.reloadBuildingAmmo(s);
 
       this.updateStructureChargingAI(s, combatCtx, isLowPower);
 
