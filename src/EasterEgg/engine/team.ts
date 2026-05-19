@@ -137,6 +137,10 @@ export interface TeamAIContext {
   structureThreatScore?: (scanner: Entity, structure: MapStructure, distCells: number, quarry?: number) => number;
   /** C++ ScenarioClass::Set_Global_To(true) used by TMISSION_SET_GLOBAL. */
   setGlobal?: (globalIndex: number) => void;
+  /** C++ ObjectClass::Attach_Trigger(team trigger) when TeamClass::Add runs. */
+  attachTeamTrigger?: (entity: Entity, triggerName: string) => void;
+  /** C++ ObjectClass::Attach_Trigger(NULL) when TeamClass::Remove detaches an alive member. */
+  detachTeamTrigger?: (entity: Entity, triggerName: string) => void;
   /** Game tick counter — used by TMission_Patrol for periodic threat scan
    *  (C++ team.cpp:2965 — Frame % (Rule.PatrolTime * TICKS_PER_MINUTE) == 0).
    *  Rule.PatrolTime=.016, TICKS_PER_MINUTE=900 → fires every 14 ticks. */
@@ -227,6 +231,8 @@ export class Team {
   readonly typeName: string | null;
   /** Scenario TeamTypes array index, used to mirror C++ TeamTypeClass::Number. */
   readonly teamTypeIndex: number | null;
+  /** Common TriggerClass instance assigned by this TeamType, if any. */
+  readonly triggerName: string | null;
 
   // ── C++ TeamTypeClass fields ──
   /** Desired member composition: array of { type, count } */
@@ -340,6 +346,7 @@ export class Team {
     isReinforcable?: boolean;
     isSuicide?: boolean;
     origin?: WorldPos | null;
+    triggerName?: string | null;
     forcedActive?: boolean;
     /** Skip entire first ai() call for CREATE_TEAM submarine teams. */
     skipFirstAiCall?: boolean;
@@ -354,6 +361,7 @@ export class Team {
     this.isReinforcable = opts.isReinforcable ?? true;
     this.isSuicide = opts.isSuicide ?? false;
     this.origin = opts.origin ?? null;
+    this.triggerName = opts.triggerName ?? null;
     if (opts.skipFirstAiCall) {
       this._skipFirstAiCall = true;
     }
@@ -454,13 +462,21 @@ export class Team {
 
     // C++ team.cpp:904-906 — remove from old team first
     if (entity.teamRef && entity.teamRef !== this) {
-      entity.teamRef.remove(entity);
+      entity.teamRef.remove(entity, ctx);
     }
 
     const isFirstMember = this._members.length === 0;
     this._members.unshift(entity);
     entity.teamRef = this;
     entity.teamInitiated = isFirstMember;
+    if (this.triggerName && entity.triggerName !== this.triggerName) {
+      if (ctx?.attachTeamTrigger) {
+        ctx.attachTeamTrigger(entity, this.triggerName);
+      } else {
+        entity.triggerName = this.triggerName;
+        entity.triggerDeathProcessed = false;
+      }
+    }
 
     // C++ parity: Team::Add does NOT copy missions to entity members.
     // The TeamInstance coordinator (coordinateMove/coordinateDo) handles
@@ -706,6 +722,17 @@ export class Team {
     entity.teamInitiated = false;
     // C++ team.cpp:2285-2289 — clears IsFormationMove when member is removed/dies
     this.clearFormationMove(entity);
+    if (entity.alive &&
+        this.triggerName &&
+        entity.triggerName === this.triggerName &&
+        !(ctx?.isPlayerControlled?.(entity) ?? false)) {
+      if (ctx?.detachTeamTrigger) {
+        ctx.detachTeamTrigger(entity, this.triggerName);
+      } else {
+        entity.triggerName = undefined;
+        entity.triggerDeathProcessed = true;
+      }
+    }
     // C++ TeamClass::Remove sets both IsAltered and JustAltered.
     this.isAltered = true;
     this.justAltered = true;
@@ -2232,7 +2259,7 @@ export class Team {
       } else if (unit.isALoaner) {
         // C++ team.cpp:2165-2170 — once a loaner transport has offloaded all
         // cargo, remove it from the team and immediately start RETREAT.
-        this.remove(unit);
+        this.remove(unit, ctx);
         assignMission(unit, Mission.RETREAT);
         commence(unit, 'TeamClass::TMission_Unload loaner retreat');
       }

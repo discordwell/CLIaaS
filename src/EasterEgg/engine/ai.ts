@@ -263,6 +263,7 @@ export interface AIContext {
   autocreateTeamCounts: Map<number, number>;
   waypoints: Map<number, { cx: number; cy: number }>;
   houseEdges: Map<House, string>;
+  teamTriggerName?: (teamIdx: number) => string | null;
 
   // Effects (for structure footprint clear)
   effects: Array<{ type: string; x: number; y: number; frame: number; maxFrames: number; size: number; sprite?: string; spriteStart?: number; [k: string]: unknown }>;
@@ -2410,6 +2411,7 @@ function createTeamClassInstance(ctx: AIContext, teamIdx: number, house: House):
     isReinforcable: !!(teamType.flags & 16),
     isSuicide: !!(teamType.flags & 2),
     origin: originPos,
+    triggerName: ctx.teamTriggerName?.(teamIdx) ?? null,
     forcedActive: false,
   }));
 }

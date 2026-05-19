@@ -177,6 +177,92 @@ async function tsVehicleFlagClearedGreekE1(adapter: unknown) {
   }>;
 }
 
+async function wasmLst6Reinforcement(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const M = (window as any).Module;
+    const state = JSON.parse(M.ccall('agent_get_state', 'string', [], []));
+    const team = (state.teams ?? []).find((t: any) => t.cls === 'lst6');
+    if (!team) throw new Error('C++ SCU14EA lst6 team missing');
+    const vessel = [...(state.units ?? []), ...(state.enemies ?? [])]
+      .find((u: any) => u.t === 'LST' && u.house === 'Greece' && u.cx === 73 && u.cy === 108);
+    if (!vessel) throw new Error('C++ SCU14EA lst6 LST missing');
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      teamTotal: team.total,
+      teamDesired: team.desired,
+      vessel: {
+        type: vessel.t,
+        house: vessel.house,
+        cx: vessel.cx,
+        cy: vessel.cy,
+        mission: vessel.m,
+        missionTimer: vessel.mt,
+      },
+    };
+  }) as Promise<{
+    tick: number;
+    rngState: number;
+    teamTotal: number;
+    teamDesired: number;
+    vessel: {
+      type: string;
+      house: string;
+      cx: number;
+      cy: number;
+      mission: number;
+      missionTimer: number;
+    };
+  }>;
+}
+
+async function tsLst6Reinforcement(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const teams = typeof (window as any).__rawTeams === 'function'
+      ? (window as any).__rawTeams()
+      : [];
+    const team = teams.find((t: any) => t.typeName === 'lst6');
+    const vessel = (game.entities ?? []).find((entity: any) =>
+      entity.type === 'LST' &&
+      entity.house === 'Greece' &&
+      entity.alive === true &&
+      entity.inLimbo !== true &&
+      entity.cell?.cx === 73 &&
+      entity.cell?.cy === 108);
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      team: team ? {
+        total: team._members?.length ?? 0,
+        desired: (team.desiredMembers ?? [])
+          .reduce((sum: number, member: any) => sum + (member.count ?? 0), 0),
+      } : null,
+      vessel: vessel ? {
+        type: vessel.type,
+        house: vessel.house,
+        cx: vessel.cell.cx,
+        cy: vessel.cell.cy,
+        mission: vessel.mission,
+        missionTimer: vessel.missionTimer,
+      } : null,
+    };
+  }) as Promise<{
+    tick: number;
+    rngState: number;
+    team: { total: number; desired: number } | null;
+    vessel: {
+      type: string;
+      house: string;
+      cx: number;
+      cy: number;
+      mission: string;
+      missionTimer: number;
+    } | null;
+  }>;
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 LST retreat with open door', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -261,4 +347,39 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 LST retreat with open
       });
     }, { wasmSeed: 0, preserveSourceFog: true });
   }, 360_000);
+
+  it('springs destroyed team-member triggers before post-projectile logic', async () => {
+    await withDualScenario('SCU14EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      let result = await stepBothOneTickAtATime(handle, 1896);
+      expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
+
+      result = await stepBoth(handle, 1);
+      const cpp = await wasmLst6Reinforcement(handle.wasm);
+      const ts = await tsLst6Reinforcement(handle.ts);
+
+      expect(cpp.teamTotal).toBe(4);
+      expect(cpp.teamDesired).toBe(4);
+      expect(cpp.vessel).toMatchObject({
+        type: 'LST',
+        house: 'Greece',
+        cx: 73,
+        cy: 108,
+      });
+      expect(ts).toEqual({
+        tick: cpp.tick,
+        rngState: cpp.rngState >>> 0,
+        team: { total: cpp.teamTotal, desired: cpp.teamDesired },
+        vessel: {
+          type: 'LST',
+          house: 'Greece',
+          cx: 73,
+          cy: 108,
+          mission: 'GUARD',
+          missionTimer: cpp.vessel.missionTimer,
+        },
+      });
+    }, { wasmSeed: 0, preserveSourceFog: true });
+  }, 420_000);
 });

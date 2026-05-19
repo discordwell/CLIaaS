@@ -1537,7 +1537,8 @@ function paradropOnePassenger(ctx: AircraftContext, entity: Entity): boolean {
   // C++ AircraftClass::Paradrop_Cargo removes the passenger from the team,
   // then (bug-compatible unqualified call) assigns the aircraft GUARD/HUNT.
   if (entity.teamRef && passenger.teamRef) {
-    passenger.teamRef.remove(passenger);
+    if (ctx.removeFromTeamForRetreat) ctx.removeFromTeamForRetreat(passenger);
+    else passenger.teamRef.remove(passenger);
   }
   assignMission(passenger, passenger.isPlayerUnit ? Mission.GUARD : Mission.HUNT);
   if (entity.teamRef) {
@@ -1675,7 +1676,10 @@ function updateFixedWingPassengerHunt(ctx: AircraftContext, entity: Entity): boo
       ScenarioRandom.nextInRange(0, 2);
       ScenarioRandom._sourceTag = prevTag;
       if (entity.isALoaner) {
-        if (entity.teamRef) entity.teamRef.remove(entity);
+        if (entity.teamRef) {
+          if (ctx.removeFromTeamForRetreat) ctx.removeFromTeamForRetreat(entity);
+          else entity.teamRef.remove(entity);
+        }
         entity.mission = Mission.RETREAT;
         entity.missionQueue = null;
         entity.missionTimer = LOANER_RETREAT_DELAY;
@@ -2623,7 +2627,10 @@ export function updateFixedWingAttackRun(ctx: AircraftContext, entity: Entity): 
       // Mission_Hunt's final Normal_Delay + Random_Pick(0,2) return.
       entity.animState = AnimState.WALK;
       if (entity.ammo === 0) {
-        if (entity.teamRef) entity.teamRef.remove(entity);
+        if (entity.teamRef) {
+          if (ctx.removeFromTeamForRetreat) ctx.removeFromTeamForRetreat(entity);
+          else entity.teamRef.remove(entity);
+        }
         if (!entity.teamRef) {
           enterFixedWingDockingMission(ctx, entity);
         }

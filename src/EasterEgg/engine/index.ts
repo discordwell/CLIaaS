@@ -59,6 +59,7 @@ import {
   type TeamType, type ScenarioTrigger, type MapStructure,
   type TriggerGameState, type TriggerActionResult,
   checkTriggerEvent, executeTriggerAction, houseIdToHouse, houseToId, consumeSemiPersistentAttachment,
+  noteTriggerAttachment,
 	  STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_ARMOR, STRUCTURE_MAX_HP, getBibCells, getStructureOccupyCells,
 	  STRUCTURE_AMMO,
 	  calculateHouseEdgeSpawnCell,
@@ -884,6 +885,7 @@ export class Game {
       suspendTeamsByPriority: (house, priority) => suspendTeamsByPriority(house, priority),
       houseTechLevel: (house) => this.houseTechLevels.get(house) ?? this.defaultScenarioTechLevel(),
       springAttackedTriggerByName: (triggerName) => this.springAttackedTriggerByName(triggerName),
+      springDestroyedTriggerByName: (triggerName) => this.springDestroyedTriggerByName(triggerName),
       aiIQ: (h) => this.aiStates.get(h)?.iq ?? 0,
       warheadMuzzleColor: (w) => this.warheadMuzzleColor(w as WarheadType),
       // damageStructure callbacks
@@ -1832,6 +1834,10 @@ export class Game {
       waypoints: this.waypoints,
       houseEdges: this.houseEdges,
       effects: this.effects as AIContext['effects'],
+      teamTriggerName: (teamIdx) => {
+        const triggerIndex = this.teamTypes[teamIdx]?.trigger ?? -1;
+        return triggerIndex >= 0 ? this.triggers[triggerIndex]?.name ?? null : null;
+      },
       isAllied: (a, b) => this.isAllied(a, b),
       isPlayerControlled: (e) => this.isPlayerControlled(e),
       clearStructureFootprint: (s) => this.clearStructureFootprint(s),
@@ -1934,6 +1940,9 @@ export class Game {
       entities: this.entities,
       map: this.map,
       tick: this.tick,
+      isPlayerControlled: (entity) => this.isPlayerControlled(entity),
+      attachTeamTrigger: (entity, triggerName) => this.attachTeamTrigger(entity, triggerName),
+      detachTeamTrigger: (entity, triggerName) => this.detachTeamTrigger(entity, triggerName),
       canEnterCell: (entity, cx, cy) => this.teamFootCanEnterCell(entity, cx, cy),
       canEnterCellResult: (entity, cx, cy) => this.teamFootCanEnterCellResultForCalcCenter(entity, cx, cy),
       startDriveClassMove: (entity) => this.startDriveClassMove(entity),
@@ -1995,6 +2004,11 @@ export class Game {
     const occupiedLogicBefore = entity.occupiesCppLogic();
     const leavingTeam = entity.teamRef;
     if (leavingTeam) leavingTeam.isLeaveMap = true;
+    if (leavingTeam?.triggerName &&
+        entity.triggerName === leavingTeam.triggerName &&
+        !this.isPlayerControlled(entity)) {
+      this.detachTeamTrigger(entity, leavingTeam.triggerName);
+    }
     entity.triggerName = '';
     entity.triggerDeathProcessed = true;
     entity.alive = false;
@@ -2780,6 +2794,8 @@ export class Game {
       entitiesAllied: (a, b) => this.entitiesAllied(a, b),
       housesAllied: (a, b) => this.isAllied(a, b),
       isPlayerControlled: (entity) => this.isPlayerControlled(entity),
+      attachTeamTrigger: (entity, triggerName) => this.attachTeamTrigger(entity, triggerName),
+      detachTeamTrigger: (entity, triggerName) => this.detachTeamTrigger(entity, triggerName),
       isDiscoveredByPlayer: (entity) => entity.house === this.playerHouse || this.discoveredEntityIds.has(entity.id),
       isDiscoveredStructureByPlayer: (structure) => {
         if (structure.house === this.playerHouse) return true;
@@ -14739,6 +14755,30 @@ export class Game {
     }
   }
 
+  private attachTeamTrigger(entity: Entity, triggerName: string): void {
+    if (!triggerName) return;
+    if (entity.triggerName === triggerName) return;
+    if (entity.triggerName) {
+      this.detachTriggerAttachmentByName(entity.triggerName);
+    }
+    entity.triggerName = triggerName;
+    entity.triggerDeathProcessed = false;
+    noteTriggerAttachment(this.triggers, triggerName);
+  }
+
+  private detachTriggerAttachmentByName(triggerName: string): void {
+    const trigger = this.triggers.find(t => t.name === triggerName);
+    if (!trigger) return;
+    trigger.remainingAttachCount = Math.max(0, (trigger.remainingAttachCount ?? 0) - 1);
+  }
+
+  private detachTeamTrigger(entity: Entity, triggerName: string): void {
+    if (entity.triggerName !== triggerName) return;
+    this.detachTriggerAttachmentByName(triggerName);
+    entity.triggerName = undefined;
+    entity.triggerDeathProcessed = true;
+  }
+
   private springDestroyedTriggerByName(triggerName: string): void {
     const trigger = this.triggers.find(t => t.name === triggerName);
     if (!trigger || (trigger.fired && trigger.persistence <= 1)) return;
@@ -15228,6 +15268,7 @@ export class Game {
             isReinforcable: !!(teamType.flags & 16),
             isSuicide: !!(teamType.flags & 2),
             origin: originPos,
+            triggerName: teamType.trigger >= 0 ? this.triggers[teamType.trigger]?.name ?? null : null,
             // C++ taction.cpp:658-661: ScenarioInit++ wraps Create_One_Of but does
             // NOT call Force_Active. Team activates via normal Percent_Chance(50)
             // in Team::AI on subsequent ticks.
@@ -15319,6 +15360,7 @@ export class Game {
           isReinforcable: !!(teamType.flags & 16),
           isSuicide: !!(teamType.flags & 2),
           origin: originPos,
+          triggerName: teamType.trigger >= 0 ? this.triggers[teamType.trigger]?.name ?? null : null,
           // C++ reinf.cpp:173: team->Force_Active() — team activates immediately
           forcedActive: true,
         });

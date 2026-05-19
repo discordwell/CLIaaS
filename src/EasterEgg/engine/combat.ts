@@ -1322,6 +1322,8 @@ export interface CombatContext {
   houseTechLevel?(house: House): number;
   /** C++ TechnoClass::Take_Damage object trigger spring for TEVENT_ATTACKED. */
   springAttackedTriggerByName?(triggerName: string): void;
+  /** C++ TechnoClass::Record_The_Kill object trigger spring for TEVENT_DESTROYED. */
+  springDestroyedTriggerByName?(triggerName: string): void;
   aiIQ(house: House): number;
   warheadMuzzleColor(warhead: string): string;
 
@@ -1779,6 +1781,10 @@ export function damageEntity(
   if (target.triggerName) {
     ctx.attackedTriggerNames.add(target.triggerName);
     if (attacker && amount > 0) ctx.springAttackedTriggerByName?.(target.triggerName);
+  }
+  if (killed && target.triggerName && !target.triggerDeathProcessed && ctx.springDestroyedTriggerByName) {
+    ctx.springDestroyedTriggerByName(target.triggerName);
+    target.triggerDeathProcessed = true;
   }
   // C++ negative damage is healing. TechnoClass::Take_Damage repairs strength,
   // but it must not flow into FootClass retaliation/scatter handling as if the
@@ -4795,6 +4801,10 @@ export function structureDamage(
   }
   if (s.triggerName && source && damage > 0) {
     ctx.springAttackedTriggerByName?.(s.triggerName);
+  }
+  if (destroyedByThisHit && s.triggerName && !s.triggerDeathProcessed && ctx.springDestroyedTriggerByName) {
+    ctx.springDestroyedTriggerByName(s.triggerName);
+    s.triggerDeathProcessed = true;
   }
   if (!destroyedByThisHit && !s.alive) {
     return true;
