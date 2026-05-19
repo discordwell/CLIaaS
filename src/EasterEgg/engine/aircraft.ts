@@ -121,6 +121,8 @@ export interface AircraftContext {
   fireWeaponAtCoord?(attacker: Entity, weapon: WeaponStats, impact: WorldPos): void;
   /** C++ CellClass::Incoming(threat, forced=true) for aircraft fire/drop target cells. */
   incomingThreatScatterCell?(cx: number, cy: number, threat: Entity): void;
+  /** C++ HouseClass::IsHuman/player-control gate. */
+  isHumanControlledHouse?: (house: House) => boolean;
   /** C++ house.cpp:293,303: ROFBias — difficulty-scaled rate-of-fire */
   getROFBias(house: House): number;
   /** C++ house.cpp:291,301: AirspeedBias; fixed-wing landing speed divides by this. */
@@ -1114,13 +1116,23 @@ function leavePadRepairMission(ctx: AircraftContext, entity: Entity): void {
 function enterPadRepairHandoff(ctx: AircraftContext, entity: Entity): void {
   const pad = landedServicePad(ctx, entity);
   if (!pad || (pad.type !== 'AFLD' && pad.type !== 'HPAD')) return;
-  // C++ BuildingClass::Receive_Message(RADIO_IM_IN) calls Assign_Mission,
-  // so the pad keeps its current mission/timer until BuildingClass::AI
-  // Commence() promotes MissionQueue into MISSION_REPAIR.
+  // Prepared aircraft report RADIO_IM_IN but do not require pad service.
+  // Player-controlled pads still expose the same short handoff window observed
+  // in C++: the airstrip enters Mission_Repair, sees RADIO_PREPARED, queues
+  // GUARD, then lets the normal Guard jitter run. AI pads keep their live
+  // GUARD cadence; synthesizing the same handoff there injects an extra
+  // full-ammo landing jitter (SCU34EA).
   pad.dockedAircraft = entity.id;
-  pad.missionQueue = Mission.REPAIR;
+  if (ctx.isHumanControlledHouse?.(entity.house)) {
+    pad.missionQueue = Mission.REPAIR;
+    pad.isReadyToCommence = false;
+    pad.readyToCommenceTick = (ctx.tick ?? 0) + 2;
+    return;
+  }
+
+  if (pad.missionQueue === Mission.REPAIR) pad.missionQueue = null;
   pad.isReadyToCommence = false;
-  pad.readyToCommenceTick = (ctx.tick ?? 0) + 2;
+  pad.readyToCommenceTick = undefined;
 }
 
 function updateFixedWingMissionEnter(ctx: AircraftContext, entity: Entity): boolean {

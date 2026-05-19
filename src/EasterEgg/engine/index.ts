@@ -1700,6 +1700,7 @@ export class Game {
 	      fireWeaponAtCoord: (a, w, p) => this.fireWeaponAtCoord(a, w, p),
 	      fireWeaponAtStructure: (a, s, w) => this.fireWeaponAtStructure(a, s, w),
 	      incomingThreatScatterCell: (cx, cy, threat) => this.incomingThreatScatterCell(cx, cy, threat),
+      isHumanControlledHouse: (h) => this.isHouseHumanOrPlayerControl(h),
 	      getROFBias: (h) => this.getROFBias(h),
       getAirspeedBias: (h) => this.getAirspeedBias(h),
       getPowerFraction: (h) => this._housePowerFraction(h),
