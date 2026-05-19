@@ -7750,19 +7750,9 @@ export class Game {
       }
     }
 
-    // Wall crush: crusher vehicles destroy crushable walls on cell entry
-    // C++ unit.cpp:1855-1871 — Per_Cell_Process: IsCrusher && overlay IsCrushable → Reduce_Wall(-1)
-    if (entity.alive && entity.stats.crusher &&
-        entity.stats.speed > 0 && entity.animState === AnimState.WALK) {
-      this.checkWallCrush(entity);
-    }
-
-    // Vehicle crush: heavy tracked vehicles (crusher=true) kill crushable units on cell entry
-    // C++ DriveClass::Ok_To_Move — only vehicles with Crusher flag crush infantry/ants
-    if (entity.alive && entity.stats.crusher &&
-        entity.stats.speed > 0 && entity.animState === AnimState.WALK) {
-      this.checkVehicleCrush(entity);
-    }
+    // UnitClass crusher side effects run from Per_Cell_Process(PCP_DURING/PCP_END)
+    // call sites. A generic WALK-tail check can crush at sub-cell positions where
+    // C++ has not reached a raw track processing point yet.
 
     // Auto-load into transport: infantry moving toward a friendly transport
     // C++ parity: infantry must reach the transport's cell before loading.
@@ -8750,6 +8740,14 @@ export class Game {
    *  C++ unit.cpp:1855-1871: crusher vehicles destroy crushable walls on cell entry */
   private checkWallCrush(vehicle: Entity): void {
     this._runCombat(ctx => _checkWallCrush(ctx, vehicle));
+  }
+
+  private runUnitCrusherPerCellProcess(entity: Entity): void {
+    if (!entity.alive || entity.stats.isInfantry || entity.isAirUnit || entity.stats.isVessel) return;
+    if (!entity.stats.crusher) return;
+
+    this.checkWallCrush(entity);
+    if (entity.alive) this.checkVehicleCrush(entity);
   }
 
   /** C++ UnitClass::Scatter(0, true) — no-threat forced scatter.
@@ -11584,6 +11582,8 @@ export class Game {
         if (r.commenceFired) entity._commenceFiredThisTick = true;
         const killedByMine = this.triggerMineAtCell(entity) && !entity.alive;
         if (killedByMine) return true;
+        this.runUnitCrusherPerCellProcess(entity);
+        if (!entity.alive) return true;
         if (!this.springFootCellTriggers(entity)) return true;
         return r.navComCleared;
       };
@@ -13394,10 +13394,7 @@ export class Game {
           // clear this track's head-cell reservation after the raw cell point.
           this.releaseDriveTrackReservation(entity, cellIdx);
         }
-        // Vehicle crush: heavy tracked vehicles crush infantry at mid-cell
-        if (entity.stats.crusher) {
-          this.checkVehicleCrush(entity);
-        }
+        this.runUnitCrusherPerCellProcess(entity);
         // Fog reveal around the mid-cell position (C++ Look() equivalent)
         const midCx = Math.floor(entity.pos.x / CELL_SIZE);
         const midCy = Math.floor(entity.pos.y / CELL_SIZE);
@@ -13486,23 +13483,24 @@ export class Game {
                     // so the key identifies the boundary being left).
                     const boundaryKey = `${entity.trackIndex}-${entity.pathIndex}`;
                     if (!entity._commenceFiredBoundaries.has(boundaryKey)) {
-		                      // C++ IsDriving=true bracket (drive.cpp:773-775)
-		                      entity.isDriving = true;
-			                      if (entity.stats.isVessel) this.runMobileLookForPlayer(entity);
-			                      if (this.edgeOfWorldAI(entity)) return false;
-			                      if (!entity.stats.isVessel) this.runMobileLookForPlayer(entity);
-			                      this.cutTransportTether(entity);
-				                      const runClassPerCellProcess = entity.stats.isVessel ? drivePerCellProcess : unitPerCellProcess;
-					                      const r = runClassPerCellProcess(entity, PCPType.PCP_END, {
-					                        rofBias: this.getROFBias(entity.house),
-					                      });
-			                      const killedByMine = this.triggerMineAtCell(entity) === true && !entity.alive;
-			                      entity.isDriving = false;
-		                      if (killedByMine) return false;
-		                      if (this.springFootCellTriggers(entity) !== true) return false;
-		                      if (r.commenceFired) {
-	                        entity._commenceFiredBoundaries.add(boundaryKey);
-	                        entity._commenceFiredThisTick = true;
+                      // C++ IsDriving=true bracket (drive.cpp:773-775)
+                      entity.isDriving = true;
+                      if (entity.stats.isVessel) this.runMobileLookForPlayer(entity);
+                      if (this.edgeOfWorldAI(entity)) return false;
+                      if (!entity.stats.isVessel) this.runMobileLookForPlayer(entity);
+                      this.cutTransportTether(entity);
+                      const runClassPerCellProcess = entity.stats.isVessel ? drivePerCellProcess : unitPerCellProcess;
+                      const r = runClassPerCellProcess(entity, PCPType.PCP_END, {
+                        rofBias: this.getROFBias(entity.house),
+                      });
+                      const killedByMine = this.triggerMineAtCell(entity) === true && !entity.alive;
+                      if (!killedByMine) this.runUnitCrusherPerCellProcess(entity);
+                      entity.isDriving = false;
+                      if (killedByMine || !entity.alive) return false;
+                      if (this.springFootCellTriggers(entity) !== true) return false;
+                      if (r.commenceFired) {
+                        entity._commenceFiredBoundaries.add(boundaryKey);
+                        entity._commenceFiredThisTick = true;
                       }
                     }
                   }
