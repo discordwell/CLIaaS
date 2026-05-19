@@ -15056,6 +15056,7 @@ export class Game {
     if (result.playSound !== undefined) {
       this.handleTriggerSound(result.playSound);
     }
+    this.applyInfantryPopOutReinforcement(result);
     // C++ Create_Army — recruit existing idle units into team (TACTION_CREATE_TEAM)
     // C++ taction.cpp:659-661: ScenarioInit++ → Create_One_Of() → ScenarioInit--
     // ScenarioInit bypasses MaxAllowed check, so TeamClass is ALWAYS created.
@@ -15145,28 +15146,6 @@ export class Game {
     const createdEntities = result.teamCreationOrder ?? result.spawned;
     if (createdEntities.length > 0) {
       applyScenarioOverrides(createdEntities, this.scenarioUnitStats, this.scenarioWeaponStats);
-    }
-    if (result.spawned.length > 0) {
-      // C++ parity: if reinforcement units spawned on impassable terrain (water, rock),
-      // relocate to nearest passable cell. C++ uses Nearest_Free_Cell() in reinf.cpp.
-      // Aircraft skip this check — they spawn OUTSIDE the map boundary intentionally
-      // and fly into the map (C++ reinf.cpp:467 unlimbo at Calculated_Cell which is
-      // 1 cell outside the boundary).
-      for (const entity of result.spawned) {
-        if (entity.isAirUnit) continue; // aircraft spawn outside map boundary
-        // C++ parity: edge-spawned reinforcements are 1 cell OUTSIDE the map boundary.
-        // Don't relocate them — they move in via team mission scripts (TMISSION_MOVE).
-        const cell = worldToCell(entity.pos.x, entity.pos.y);
-        if (!this.map.inBounds(cell.cx, cell.cy)) continue;
-        const naval = entity.stats.isVessel;
-        const passable = naval ? this.map.isWaterPassable(cell.cx, cell.cy) : this.map.isTerrainPassable(cell.cx, cell.cy);
-        if (!passable) {
-          const alt = nearbyLocation(this.map, cell, naval ?? false);
-          if (alt) {
-            entity.setPosition(alt.cx * CELL_SIZE + CELL_SIZE / 2, alt.cy * CELL_SIZE + CELL_SIZE / 2);
-          }
-        }
-      }
     }
     const ants = result.spawned.filter(e => e.isAnt);
     if (ants.length > 1) {
@@ -16525,6 +16504,120 @@ export class Game {
       lx: Math.floor(coord.lx / LEPTON_SIZE) * LEPTON_SIZE + off.lx,
       ly: Math.floor(coord.ly / LEPTON_SIZE) * LEPTON_SIZE + off.ly,
     };
+  }
+
+  private findInfantryPopOutBuilding(origin: CellPos): MapStructure | null {
+    let candidate: MapStructure | null = null;
+    for (let facing = -1; facing < DIR_DX.length; facing++) {
+      const cx = facing < 0 ? origin.cx : origin.cx + DIR_DX[facing];
+      const cy = facing < 0 ? origin.cy : origin.cy + DIR_DY[facing];
+      const structure = this.findStructureAtCell(cx, cy);
+      if (structure?.alive) candidate = structure;
+    }
+    return candidate;
+  }
+
+  private findInfantryBuildingExitCell(s: MapStructure, entity: Entity): CellPos | null {
+    if (s.type === 'BARR' || s.type === 'TENT' || s.type === 'KENN') {
+      return this.findInfantryFactoryExitCell(s, entity.type);
+    }
+
+    const [w, h] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+    const canExit = (cx: number, cy: number): boolean =>
+      this.map.inBounds(cx, cy) &&
+      this.infantryCanEnterCell(entity, cx, cy) === MoveResult.OK;
+
+    for (let x = -1; x <= w; x++) {
+      const top = { cx: s.cx + x, cy: s.cy - 1 };
+      if (canExit(top.cx, top.cy)) return top;
+      const bottom = { cx: s.cx + x, cy: s.cy + h };
+      if (canExit(bottom.cx, bottom.cy)) return bottom;
+    }
+
+    for (let y = -1; y <= h; y++) {
+      const left = { cx: s.cx - 1, cy: s.cy + y };
+      if (canExit(left.cx, left.cy)) return left;
+      const right = { cx: s.cx + w, cy: s.cy + y };
+      if (canExit(right.cx, right.cy)) return right;
+    }
+
+    return null;
+  }
+
+  private infantryBuildingExitLepton(s: MapStructure): LeptonPos {
+    if (s.type === 'TENT') {
+      return { lx: s.cx * LEPTON_SIZE + pixelToLepton(24), ly: s.cy * LEPTON_SIZE + pixelToLepton(47) };
+    }
+    if (s.type === 'KENN') {
+      return { lx: s.cx * LEPTON_SIZE + pixelToLepton(8), ly: s.cy * LEPTON_SIZE + pixelToLepton(16) };
+    }
+    if (s.type === 'BARR') {
+      return { lx: s.cx * LEPTON_SIZE + pixelToLepton(18), ly: s.cy * LEPTON_SIZE + pixelToLepton(47) };
+    }
+    return scenarioStructureCenterLeptons(s);
+  }
+
+  private placeInfantryPoppedFromBuilding(entity: Entity, s: MapStructure): boolean {
+    const exitCell = this.findInfantryBuildingExitCell(s, entity);
+    if (!exitCell) return false;
+
+    const start = this.infantryScenarioInitClosestSpot(this.infantryBuildingExitLepton(s));
+    entity.leptonX = start.lx;
+    entity.leptonY = start.ly;
+    entity.syncPosFromLeptons();
+    entity.prevPos = { x: entity.pos.x, y: entity.pos.y };
+    entity.scenarioInitUnlimbo = true;
+    entity.unlimboTick = this.tick;
+    entity.mission = this.idleMission(entity);
+    entity.missionQueue = Mission.MOVE;
+    entity.missionTimer = 0;
+    entity.moveTarget = cellTargetToLepton(exitCell.cx, exitCell.cy);
+    entity.moveTargetEntityRef = null;
+    entity.moveTargetEntityRefLX = 0;
+    entity.moveTargetEntityRefLY = 0;
+    this.clearDrivePath(entity);
+    entity.pathDelay = 0;
+    entity.isDriving = false;
+    entity.headToLX = 0;
+    entity.headToLY = 0;
+
+    const dir = directionToLeptons256(start.lx, start.ly, entity.moveTarget.lx, entity.moveTarget.ly);
+    entity.bodyFacing256 = dir;
+    entity.facing256 = dir;
+    entity.desiredFacing256 = dir;
+    entity.facing = dir256ToFacing8(dir);
+    entity.desiredFacing = entity.facing;
+    entity.bodyFacing32 = dir256ToFacing32(dir);
+
+    const spot = this.infantrySpotIndex(entity.leptonX, entity.leptonY);
+    entity.subCell = spot;
+    return true;
+  }
+
+  private applyInfantryPopOutReinforcement(result: TriggerActionResult): void {
+    if (result.spawnedTeamIdx === undefined || result.spawned.length === 0) return;
+    const teamType = this.teamTypes[result.spawnedTeamIdx];
+    if (!teamType || teamType.origin < 0) return;
+    if (!result.spawned.every(entity => entity.stats.isInfantry)) return;
+
+    const origin = this.waypoints.get(teamType.origin);
+    if (!origin) return;
+    const host = this.findInfantryPopOutBuilding(origin);
+    if (!host) return;
+
+    const placed = new Set<Entity>();
+    for (const entity of result.spawned) {
+      if (this.placeInfantryPoppedFromBuilding(entity, host)) {
+        placed.add(entity);
+      } else {
+        entity.alive = false;
+      }
+    }
+
+    result.spawned = result.spawned.filter(entity => placed.has(entity));
+    if (result.teamCreationOrder) {
+      result.teamCreationOrder = result.teamCreationOrder.filter(entity => placed.has(entity));
+    }
   }
 
   /** C++ BuildingClass::Exit_Object infantry branch (building.cpp:2054-2087). */

@@ -102,6 +102,58 @@ async function tsGen1Presence(adapter: unknown) {
   });
 }
 
+async function wasmGen2PopOutState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const row = (state.logicLayer ?? []).find((r: any[]) => r[0] === 56);
+    const team = (state.teams ?? []).find((t: any) => t.cls === 'gen2');
+    if (!row || !team) throw new Error('C++ SCU33EA gen2/GNRL state not found');
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      teamMission: team.cur,
+      type: row[1],
+      house: row[2],
+      cx: row[3],
+      cy: row[4],
+      mission: row[7],
+      missionTimer: row[8],
+      missionQueue: row[9],
+      isDriving: row[10] === true,
+      lx: row[12],
+      ly: row[13],
+      facing: row[28],
+    };
+  });
+}
+
+async function tsGen2PopOutState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const gnrl = game.entities.find((e: any) =>
+      e.alive !== false && e.type === 'GNRL' && e.house === 'GoodGuy' && e.logicIndexHint === 56);
+    const team = (window as any).__teamsList?.().find((t: any) => t.typeName === 'gen2');
+    if (!gnrl || !team) throw new Error('TS SCU33EA gen2/GNRL state not found');
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      teamMission: team.currentMission,
+      type: gnrl.type,
+      house: gnrl.house,
+      cx: gnrl.cell.cx,
+      cy: gnrl.cell.cy,
+      mission: gnrl.mission,
+      missionTimer: gnrl.missionTimer,
+      missionQueue: gnrl.missionQueue,
+      isDriving: gnrl.isDriving === true,
+      lx: gnrl.leptonX,
+      ly: gnrl.leptonY,
+      facing: gnrl.bodyFacing256,
+    };
+  });
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU33 team SPY capture handoff', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -151,6 +203,41 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU33 team SPY capture hand
       expect(ts.tick).toBe(cpp.tick);
       expect(ts.teamMission).toBe(cpp.teamMission);
       expect(ts.gnrlAlive).toBe(false);
+      expect(ts.rngState >>> 0).toBe(cpp.rngState >>> 0);
+    }, { wasmSeed: 0 });
+  }, 180_000);
+
+  it('pops gen2 infantry reinforcements from the PDOX instead of relocating them', async () => {
+    await withDualScenario('SCU33EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      const result = await stepBoth(handle, 304);
+      expect(result.ts.state.tick).toBe(result.wasm.state.tick);
+
+      const cpp = await wasmGen2PopOutState(handle.wasm);
+      const ts = await tsGen2PopOutState(handle.ts);
+
+      expect(cpp.tick).toBe(304);
+      expect(cpp.type).toBe('GNRL');
+      expect(cpp.house).toBe('GoodGuy');
+      expect(cpp.mission).toBe(5);
+      expect(cpp.missionQueue).toBe(-1);
+      expect(cpp.isDriving).toBe(false);
+      expect(cpp.teamMission).toBe(1);
+
+      expect(ts.tick).toBe(cpp.tick);
+      expect(ts.teamMission).toBe(cpp.teamMission);
+      expect(ts.type).toBe(cpp.type);
+      expect(ts.house).toBe(cpp.house);
+      expect(ts.cx).toBe(cpp.cx);
+      expect(ts.cy).toBe(cpp.cy);
+      expect(ts.lx).toBe(cpp.lx);
+      expect(ts.ly).toBe(cpp.ly);
+      expect(ts.mission).toBe('GUARD');
+      expect(ts.missionQueue).toBeNull();
+      expect(ts.missionTimer).toBe(cpp.missionTimer);
+      expect(ts.isDriving).toBe(cpp.isDriving);
+      expect(ts.facing).toBe(cpp.facing);
       expect(ts.rngState >>> 0).toBe(cpp.rngState >>> 0);
     }, { wasmSeed: 0 });
   }, 180_000);
