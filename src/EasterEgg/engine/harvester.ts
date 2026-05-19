@@ -304,7 +304,7 @@ export function findHarvesterOre(
 /** Harvester AI — seek ore, harvest, return to refinery, unload */
 export function updateHarvester(ctx: HarvesterContext, entity: Entity, missionTimerFired = true): void {
   // C++ unit.cpp:2770-2774: no allied refinery means abort harvest and return 1.
-  if (missionTimerFired && !hasAlliedRefinery(ctx, entity)) {
+  if (missionTimerFired && entity.mission === Mission.HARVEST && !hasAlliedRefinery(ctx, entity)) {
     clearHarvesterRefineryContact(ctx, entity);
     entity.harvesterState = 'idle';
     entity.isHarvesterMining = false;

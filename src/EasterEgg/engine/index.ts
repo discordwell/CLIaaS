@@ -6147,7 +6147,9 @@ export class Game {
         // non-suicide-team units scan with Target_Something_Nearby(THREAT_RANGE).
         // The scan only assigns TarCom; Firing_AI below decides whether the
         // unit can actually start firing.
-        const hasLegalTarCom = (entity.target?.alive ?? false) || (entity.targetStructure?.alive ?? false);
+        const hasLegalTarCom = (entity.target?.alive ?? false) ||
+          (entity.targetStructure?.alive ?? false) ||
+          !!entity.forceFirePos;
         if (missionTimerFired &&
             !hasLegalTarCom &&
             !this.isHouseHumanOrPlayerControl(entity.house) &&
@@ -17599,6 +17601,13 @@ export class Game {
     return leptonDist(fire.lx, fire.ly, targetCoord.lx, targetCoord.ly) <= Math.trunc(s.weapon.range * LEPTON_SIZE);
   }
 
+  private structureWeaponCanTarget(s: MapStructure, target: Entity): boolean {
+    if (!s.weapon) return false;
+    if (s.weapon.isAntiAir && (!target.isAirUnit || target.flightAltitude <= 0)) return false;
+    if (target.isAirUnit && target.flightAltitude > 0 && !s.weapon.isAntiAir) return false;
+    return true;
+  }
+
   /** C++ TechnoClass::AI TarCom maintenance.
    *  This runs every building AI tick after MissionClass::AI, even when the
    *  mission timer did not fire. It only clears TarCom; it does not change the
@@ -17775,6 +17784,17 @@ export class Game {
             s.rearmFacingUpdatePending = false;
           }
           s.missionTimer = Math.max(s.missionTimer ?? 0, s.attackCooldown);
+          return false;
+        }
+        if (s.type !== 'SAM' && assignedTarget &&
+            (!this.structureWeaponCanTarget(s, assignedTarget) ||
+              !this.structureTargetInTarcomRange(s, assignedTarget))) {
+          // C++ BuildingClass::Mission_Attack handles FIRE_CANT/FIRE_RANGE
+          // before the Tesla charge gate, clearing TarCom and commencing GUARD
+          // in the same mission tick.
+          s.targetEntityId = undefined;
+          s.mission = Mission.GUARD;
+          s.missionTimer = 1;
           return false;
         }
         if (this.isElectricStructureWeapon(s) && !s.isCharged) {
