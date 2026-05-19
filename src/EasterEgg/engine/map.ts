@@ -6,6 +6,8 @@
 import { MAP_CELLS, CELL_SIZE, type CellPos, SpeedClass, TERRAIN_SPEED, House } from './types';
 import { ScenarioRandom } from './random';
 
+type AnonymousSubCellHouses = [House | null, House | null, House | null, House | null, House | null];
+
 /** C++ MoveType enum (defines.h:828-837) — Can_Enter_Cell() return values for pathfinding.
  *  cpp-parity: values match C++ MOVE_OK..MOVE_NO exactly. */
 export enum MoveResult {
@@ -210,6 +212,7 @@ export class GameMap {
    *  leave a bit set after the owning object has moved on; keep those bits
    *  across TS's per-tick occupancy rebuild. */
   anonymousSubCellOccupancy = new Map<number, number>();
+  anonymousSubCellHouses = new Map<number, AnonymousSubCellHouses>();
 
   /** Vehicle/building flag per cell: if true, cell is fully blocked (all sub-cells occupied).
    *  C++ cell.h Flag.Occupy.Vehicle | Flag.Occupy.Monolith | Flag.Occupy.Building */
@@ -689,10 +692,18 @@ export class GameMap {
     }
   }
 
-  markAnonymousSubCell(cellIdx: number, subCell: number): void {
+  markAnonymousSubCell(cellIdx: number, subCell: number, house?: House): void {
     if (cellIdx < 0 || cellIdx >= MAP_CELLS * MAP_CELLS || subCell < 0 || subCell >= 5) return;
     const mask = (this.anonymousSubCellOccupancy.get(cellIdx) ?? 0) | (1 << subCell);
     this.anonymousSubCellOccupancy.set(cellIdx, mask);
+    if (house !== undefined) {
+      let houses = this.anonymousSubCellHouses.get(cellIdx);
+      if (!houses) {
+        houses = [null, null, null, null, null];
+        this.anonymousSubCellHouses.set(cellIdx, houses);
+      }
+      houses[subCell] = house;
+    }
     let slots = this.subCellOccupancy.get(cellIdx);
     if (!slots) {
       slots = [0, 0, 0, 0, 0];
@@ -707,6 +718,18 @@ export class GameMap {
     const next = mask & ~(1 << subCell);
     if (next) this.anonymousSubCellOccupancy.set(cellIdx, next);
     else this.anonymousSubCellOccupancy.delete(cellIdx);
+    const houses = this.anonymousSubCellHouses.get(cellIdx);
+    if (houses) {
+      houses[subCell] = null;
+      if (houses.every(house => house === null)) {
+        this.anonymousSubCellHouses.delete(cellIdx);
+      }
+    }
+  }
+
+  getAnonymousSubCellHouse(cellIdx: number, subCell: number): House | null {
+    if (cellIdx < 0 || cellIdx >= MAP_CELLS * MAP_CELLS || subCell < 0 || subCell >= 5) return null;
+    return this.anonymousSubCellHouses.get(cellIdx)?.[subCell] ?? null;
   }
 
   /** Overlay persistent DriveClass track reservations onto this tick's grid. */

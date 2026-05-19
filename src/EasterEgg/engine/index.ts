@@ -9362,9 +9362,18 @@ export class Game {
     const slots = this.map.subCellOccupancy.get(cy * MAP_CELLS + cx);
     if (slots) {
       let filled = 0;
-      for (const occupantId of slots) {
+      let sawEnemyAnonymousInfantry = false;
+      for (let slot = 0; slot < slots.length; slot++) {
+        const occupantId = slots[slot];
         if (occupantId === 0 || occupantId === entity.id) continue;
         filled++;
+        if (occupantId < 0) {
+          const anonymousHouse = this.map.getAnonymousSubCellHouse(cy * MAP_CELLS + cx, slot);
+          if (anonymousHouse !== null && !this.isAllied(entity.house, anonymousHouse)) {
+            sawEnemyAnonymousInfantry = true;
+          }
+          continue;
+        }
         const occupant = this.entityById.get(occupantId);
         if (!occupant || !this.entityOccupiesDriveCell(occupant)) continue;
         if (!this.entitiesAllied(entity, occupant)) {
@@ -9375,6 +9384,10 @@ export class Game {
             result = Math.max(result, MoveResult.DESTROYABLE);
           }
         }
+      }
+      if (sawEnemyAnonymousInfantry) {
+        if (!hasWeapon) return MoveResult.IMPASSABLE;
+        result = Math.max(result, MoveResult.DESTROYABLE);
       }
       if (filled >= 5) result = Math.max(result, MoveResult.OCCUPIED);
     } else if (mapMove > MoveResult.OK) {
@@ -10000,25 +10013,28 @@ export class Game {
    * therefore always targets an adjacent cell, never the infantry's current
    * cell. TS stores absolute cells, so after a Head_To_Coord hop completes the
    * next absolute cell can be the current cell until pathIndex is normalized.
-   * Skipping it prevents a fabricated Start_Driver-to-current-cell hop.
+   * This cursor repair must not consume drivePathFacings: C++ consumes Path[0]
+   * only when a Head_To_Coord hop completes and memmoves FootClass::Path[].
    */
   private skipInfantryPathCurrentCell(entity: Entity): boolean {
     if (!entity.stats.isInfantry || entity.isDriving) return false;
 
     let advanced = false;
-    let advancedCount = 0;
     while (entity.path.length > 0 &&
            entity.pathIndex < entity.path.length &&
            entity.path[entity.pathIndex]?.cx === entity.cell.cx &&
            entity.path[entity.pathIndex]?.cy === entity.cell.cy) {
       entity.pathIndex++;
       advanced = true;
-      advancedCount++;
     }
 
-    if (advancedCount > 0) this.consumeDrivePathFacings(entity, advancedCount);
     if (advanced && entity.pathIndex >= entity.path.length) {
-      this.clearDrivePath(entity);
+      if (entity.drivePathFacings.length > 0) {
+        entity.path = this.drivePathCellsFromFacings(entity.cell, entity.drivePathFacings);
+        entity.pathIndex = 0;
+      } else {
+        this.clearDrivePath(entity);
+      }
     }
     return advanced;
   }
@@ -13209,7 +13225,7 @@ export class Game {
     if (oldClaimedCellIdx >= 0 && oldClaimedSubCell >= 0 &&
         (oldClaimedCellIdx !== clearedCellIdx || oldClaimedSubCell !== clearedSubCell) &&
         (oldClaimedCellIdx !== cellIdx || oldClaimedSubCell !== spotIndex)) {
-      this.map.markAnonymousSubCell(oldClaimedCellIdx, oldClaimedSubCell);
+      this.map.markAnonymousSubCell(oldClaimedCellIdx, oldClaimedSubCell, entity.house);
     }
 
     if (this.map.occupyClaimedSubCell(cellIdx, entity.id, spotIndex)) {
