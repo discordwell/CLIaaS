@@ -17568,7 +17568,7 @@ export class Game {
       const hasAssignedTarget = !!(assignedTarget && assignedTarget.alive && !assignedTarget.inLimbo);
 
       if (mission === Mission.ATTACK) {
-        if (!hasAssignedTarget) {
+        if (s.type !== 'SAM' && !hasAssignedTarget) {
           // C++ building.cpp:3726-3730 — invalid/lost target sends building
           // back to GUARD and returns 1, with no Guard jitter this tick.
           s.targetEntityId = undefined;
@@ -17576,13 +17576,13 @@ export class Game {
           s.missionTimer = 1;
           return false;
         }
-        if (s.attackCooldown > 0) {
+        if (s.type !== 'SAM' && s.attackCooldown > 0) {
           // C++ TechnoClass::Can_Fire checks Arm before range, ammo, or the
           // BuildingClass electric-charge gate. Mission_Attack therefore
           // returns Arm while rearming; later TechnoClass::AI TarCom
           // maintenance may clear the target without waking Guard jitter.
           if (s.rearmFacingUpdatePending) {
-            _setStructureTurretDesired(s, assignedTarget);
+            _setStructureTurretDesired(s, assignedTarget!);
             s.rearmFacingUpdatePending = false;
           }
           s.missionTimer = Math.max(s.missionTimer ?? 0, s.attackCooldown);
@@ -17603,6 +17603,7 @@ export class Game {
       if (target) {
         s.targetEntityId = target.id;
         s.mission = Mission.ATTACK;
+        if (s.type === 'SAM') s.samStatus = 0;
         // C++ BuildingClass::Mission_Guard only Assign_Target() and Commence()
         // into MISSION_ATTACK. It does not aim turreted buildings here; the
         // first PrimaryFacing.Set_Desired(Direction(TarCom)) occurs in

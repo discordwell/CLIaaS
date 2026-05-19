@@ -144,6 +144,52 @@ async function tsGreeceE1State(adapter: unknown) {
   });
 }
 
+async function wasmSam246State(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const row = ((state.logicLayer ?? []) as any[]).find(r => r[0] === 246);
+    if (!row) throw new Error('C++ SCU34EA SAM logic row 246 missing');
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      type: row[1],
+      house: row[2],
+      cx: row[3],
+      cy: row[4],
+      mission: row[7],
+      missionTimer: row[8],
+      status: row[27],
+      targetKind: row[30],
+      targetValue: row[31],
+    };
+  });
+}
+
+async function tsSam80State(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const sam = game.structures.find((structure: any) =>
+      structure.type === 'SAM' &&
+      structure.house === 'USSR' &&
+      structure.cx === 80 &&
+      structure.cy === 39);
+    if (!sam) throw new Error('TS SCU34EA USSR SAM at (80,39) missing');
+    return {
+      tick: state.tick,
+      rngState: (window as any).__rngState?.(),
+      type: sam.type,
+      house: sam.house,
+      cx: sam.cx,
+      cy: sam.cy,
+      mission: sam.mission,
+      missionTimer: sam.missionTimer,
+      samStatus: sam.samStatus ?? 0,
+      targetEntityId: sam.targetEntityId ?? null,
+    };
+  });
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU34 fire-death corpse slots', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -215,6 +261,53 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU34 fire-death corpse slo
       const postTs = await tsAnimState(handle.ts);
       expect(postTs.tick).toBe(postCpp.tick);
       expect(postTs.rngState >>> 0).toBe(postCpp.rngState >>> 0);
+    });
+  }, 80_000);
+
+  it('keeps SAM Mission_Attack on one-tick cadence so Guard jitter lands at tick 659', async () => {
+    await withDualScenario('SCU34EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBothInChunks(handle, 658);
+      await adapterPage(handle.ts).evaluate(() => {
+        (window as any).__rngTagControl?.('enable');
+        (window as any).__rngTagControl?.('reset');
+      });
+
+      const step = await stepBoth(handle, 1);
+      const tsRng = await adapterPage(handle.ts).evaluate(() => (window as any).__rngTagControl?.('read'));
+      const cppSam = await wasmSam246State(handle.wasm);
+      const tsSam = await tsSam80State(handle.ts);
+
+      expect(step.wasm.state.tick).toBe(659);
+      expect(step.ts.state.tick).toBe(659);
+      expect(step.wasm.state.rngState >>> 0).toBe(tsRng.seed >>> 0);
+      expect(step.wasm.state.rngLog).toContainEqual([887120052, 70003, 12246]);
+      expect(tsRng.seedLog).toContainEqual([887120052, 12246, 12246]);
+
+      expect(cppSam).toMatchObject({
+        tick: 659,
+        type: 'SAM',
+        house: 'USSR',
+        cx: 80,
+        cy: 39,
+        mission: 5,
+        missionTimer: 13,
+        status: 0,
+        targetKind: -1,
+        targetValue: -1,
+      });
+      expect(tsSam).toMatchObject({
+        tick: 659,
+        type: 'SAM',
+        house: 'USSR',
+        cx: 80,
+        cy: 39,
+        mission: 'GUARD',
+        missionTimer: 13,
+        samStatus: 0,
+        targetEntityId: null,
+      });
     });
   }, 80_000);
 });

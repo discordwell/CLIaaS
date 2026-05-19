@@ -1538,6 +1538,9 @@ export interface MapStructure {
   /** C++ BuildingClass::Status for helipad/airstrip Mission_Repair.
    *  0=INITIAL, 1=DURING. The docked aircraft remains in dockedAircraft. */
   repairMissionStatus?: number;
+  /** C++ BuildingClass::Status for SAM Mission_Attack.
+   *  building.cpp SAMState: 0=SAM_READY, 1=SAM_FIRING. */
+  samStatus?: number;
   /** C++ TechnoClass::TarCom for weapon buildings. Mission_Guard assigns
    *  this target; Mission_Attack/Charging_AI use the assigned target rather
    *  than doing a fresh threat scan each tick. */

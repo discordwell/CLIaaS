@@ -5092,6 +5092,16 @@ function clearStructureAttackTargetAfterCanFireFailure(s: MapStructure): void {
   setStructureTurretDesiredToTargetNone(s);
 }
 
+const SAM_READY = 0;
+const SAM_FIRING = 1;
+
+function clearSamAttackTarget(s: MapStructure, returnToGuard: boolean): void {
+  s.targetEntityId = undefined;
+  s.samStatus = SAM_READY;
+  if (returnToGuard) s.mission = Mission.GUARD;
+  s.missionTimer = Math.max(s.missionTimer ?? 0, 1);
+}
+
 /** Per-building combat tick — extracted so it can be called per-building right after its
  *  mission timer tick, matching C++ BuildingClass::AI() which runs timer + Firing_AI
  *  sequentially for each building before advancing to the next.
@@ -5109,6 +5119,55 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
     if (TURRETED_STRUCTURES.has(s.type)) {
       if (s.turretDir === undefined) s.turretDir = TURRET_DEFAULT_FACING[s.type] ?? 4; // C++ bdata.cpp per-building default
       syncStructureTurretFacingFields(s);
+    }
+
+    if (s.type === 'SAM' && s.mission === Mission.ATTACK) {
+      const assignedTarget = getAssignedStructureTarget(ctx, s);
+      const targetAircraftLegal =
+        !!assignedTarget &&
+        structureWeaponCanTarget(s, assignedTarget);
+      const status = s.samStatus ?? SAM_READY;
+
+      if (status === SAM_READY) {
+        if (!targetAircraftLegal) {
+          // C++ building.cpp:3668-3673 — SAM_READY validates TarCom before
+          // considering Arm. A lost or landed aircraft queues GUARD and returns
+          // a one-frame delay; it does not sleep on the weapon rearm timer.
+          clearSamAttackTarget(s, true);
+          return;
+        }
+
+        if (TURRETED_STRUCTURES.has(s.type)) {
+          setStructureTurretDesired(s, assignedTarget!);
+          if (Math.abs(signedFacingDelta256(s.turretFacing256!, s.desiredTurretFacing256!)) !== 0) {
+            s.missionTimer = Math.max(s.missionTimer ?? 0, 1);
+            return;
+          }
+        }
+
+        s.samStatus = SAM_FIRING;
+        s.missionTimer = Math.max(s.missionTimer ?? 0, 1);
+        return;
+      }
+
+      if (!targetAircraftLegal) {
+        // C++ SAM_FIRING invalid-target path only drops back to SAM_READY.
+        // The following Mission_Attack tick is what queues GUARD.
+        clearSamAttackTarget(s, false);
+        return;
+      }
+
+      if (s.attackCooldown > 0) {
+        // SAM_FIRING calls Can_Fire every tick; FIRE_REARM leaves Status in
+        // SAM_FIRING and returns 1 instead of Mission_Attack sleeping on Arm.
+        s.missionTimer = Math.max(s.missionTimer ?? 0, 1);
+        return;
+      }
+
+      if (!structureTargetInTarcomRange(s, assignedTarget!)) {
+        clearSamAttackTarget(s, false);
+        return;
+      }
     }
 
     if (s.attackCooldown > 0) {
@@ -5192,6 +5251,7 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
       }
       if (TURRETED_STRUCTURES.has(s.type)) s.firingFlash = 4;
       s.rearmFacingUpdatePending = true;
+      if (s.type === 'SAM') s.samStatus = SAM_READY;
       // C++ bullet.cpp:991 — Explosion_Damage is the SOLE damage path for splash weapons.
       const wh = (s.weapon.warhead ?? 'HE') as WarheadType;
       const houseBias = ctx.getFirepowerBias(s.house);

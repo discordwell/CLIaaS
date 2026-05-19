@@ -13,7 +13,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Game } from '../engine/index';
 import { aiPerTick, createAIHouseState, type AIContext } from '../engine/ai';
-import { decrementStructureCdTimersEndOfLogic, type CombatContext, type InflightProjectile } from '../engine/combat';
+import { decrementStructureCdTimersEndOfLogic, updateSingleStructureCombat, type CombatContext, type InflightProjectile } from '../engine/combat';
 import { GameMap, Terrain } from '../engine/map';
 import {
   type MapStructure,
@@ -627,6 +627,71 @@ describe('runtime AI construction path', () => {
     expect(weap.weapDoorTimer).toBe(8);
     expect(harv.mission).toBe(Mission.GUARD);
     expect(harv.missionTimer).toBe(0);
+  });
+
+  it('SAM Mission_Attack rearm stays on one-tick cadence instead of sleeping on Arm', () => {
+    const game = new Game(createCanvas());
+    const sam = makeStructure('SAM', House.USSR, 80, 39);
+    sam.weapon = STRUCTURE_WEAPONS.SAM;
+    sam.mission = Mission.ATTACK;
+    sam.missionTimer = 0;
+    sam.attackCooldown = 10;
+    sam.samStatus = 1; // SAM_FIRING
+    game.structures.push(sam);
+
+    const heli = new Entity(UnitType.V_HELI, House.Greece, 82 * 24, 39 * 24);
+    heli.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    game.entities.push(heli);
+    game.entityById.set(heli.id, heli);
+    sam.targetEntityId = heli.id;
+
+    const ctx = (game as unknown as { readonly _combatCtx: CombatContext })._combatCtx;
+    const ranAttack = (game as unknown as {
+      dispatchStructureMissionTimer(s: MapStructure, combatCtx: CombatContext, guardNormalDelay: number, guardAADelay: number): boolean;
+    }).dispatchStructureMissionTimer(sam, ctx, 42, 14);
+
+    expect(ranAttack).toBe(true);
+    updateSingleStructureCombat(ctx, sam, false);
+    expect(sam.mission).toBe(Mission.ATTACK);
+    expect(sam.samStatus).toBe(1);
+    expect(sam.missionTimer).toBe(1);
+    expect(sam.attackCooldown).toBe(10);
+  });
+
+  it('SAM Mission_Attack validates a landed/lost target before Arm cooldown', () => {
+    const game = new Game(createCanvas());
+    const sam = makeStructure('SAM', House.USSR, 80, 39);
+    sam.weapon = STRUCTURE_WEAPONS.SAM;
+    sam.mission = Mission.ATTACK;
+    sam.missionTimer = 0;
+    sam.attackCooldown = 10;
+    sam.samStatus = 1; // SAM_FIRING first drops to SAM_READY.
+    game.structures.push(sam);
+
+    const landedHeli = new Entity(UnitType.V_HELI, House.Greece, 82 * 24, 39 * 24);
+    landedHeli.flightAltitude = 0;
+    game.entities.push(landedHeli);
+    game.entityById.set(landedHeli.id, landedHeli);
+    sam.targetEntityId = landedHeli.id;
+
+    const ctx = (game as unknown as { readonly _combatCtx: CombatContext })._combatCtx;
+    const dispatch = () => (game as unknown as {
+      dispatchStructureMissionTimer(s: MapStructure, combatCtx: CombatContext, guardNormalDelay: number, guardAADelay: number): boolean;
+    }).dispatchStructureMissionTimer(sam, ctx, 42, 14);
+
+    expect(dispatch()).toBe(true);
+    updateSingleStructureCombat(ctx, sam, false);
+    expect(sam.mission).toBe(Mission.ATTACK);
+    expect(sam.samStatus).toBe(0);
+    expect(sam.targetEntityId).toBeUndefined();
+    expect(sam.missionTimer).toBe(1);
+
+    decrementStructureCdTimersEndOfLogic(sam);
+    expect(dispatch()).toBe(true);
+    updateSingleStructureCombat(ctx, sam, false);
+    expect(sam.mission).toBe(Mission.GUARD);
+    expect(sam.samStatus).toBe(0);
+    expect(sam.missionTimer).toBe(1);
   });
 
   it('WEAP DoorClass AI advances each control stage after the C++ 8-tick rate', () => {
