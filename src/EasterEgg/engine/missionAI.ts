@@ -261,10 +261,17 @@ function fireCoordForWeaponAtLatchedFacing(
   const savedBodyFacing256 = entity.bodyFacing256;
   const savedBodyFacing32 = entity.bodyFacing32;
   const savedFacing = entity.facing;
+  const savedTurretFacing256 = entity.turretFacing256;
+  const savedTurretFacing32 = entity.turretFacing32;
+  const savedTurretFacing = entity.turretFacing;
   const savedSecondShot = entity.isSecondShot;
   try {
     entity.isSecondShot = secondShot;
-    if (entity.stats.isInfantry && facing256 >= 0) {
+    if (facing256 >= 0 && entity.hasTurret) {
+      entity.turretFacing256 = facing256 & 0xFF;
+      entity.turretFacing32 = dir256ToFacing32(entity.turretFacing256);
+      entity.turretFacing = dir256ToFacing8(entity.turretFacing256);
+    } else if (entity.stats.isInfantry && facing256 >= 0) {
       entity.bodyFacing256 = facing256 & 0xFF;
       entity.bodyFacing32 = dir256ToFacing32(entity.bodyFacing256);
       entity.facing = dir256ToFacing8(entity.bodyFacing256);
@@ -274,6 +281,9 @@ function fireCoordForWeaponAtLatchedFacing(
     entity.bodyFacing256 = savedBodyFacing256;
     entity.bodyFacing32 = savedBodyFacing32;
     entity.facing = savedFacing;
+    entity.turretFacing256 = savedTurretFacing256;
+    entity.turretFacing32 = savedTurretFacing32;
+    entity.turretFacing = savedTurretFacing;
     entity.isSecondShot = savedSecondShot;
   }
 }
@@ -314,6 +324,53 @@ function absFacingDiff256(desired256: number, current256: number): number {
 
 function projectileFacingDiff(diff: number, weapon: WeaponStats): number {
   return (weapon.projectileROT ?? 0) !== 0 ? diff >> 2 : diff;
+}
+
+function targetInRangeForFireGate(
+  entity: Entity,
+  target: Entity,
+  weapon: WeaponStats,
+  fireCoordFacing256: number,
+): boolean {
+  const targetCoord = target.targetCoordLeptons();
+  const fireCoord = fireCoordFacing256 >= 0
+    ? fireCoordForWeaponAtLatchedFacing(entity, weapon, fireCoordFacing256)
+    : entity.fireCoordForWeapon(weapon);
+  return leptonDist(fireCoord.lx, fireCoord.ly, targetCoord.lx, targetCoord.ly) <=
+    weapon.range * LEPTON_SIZE;
+}
+
+function targetDirection256(entity: Entity, target: Entity): number {
+  const targetCoord = target.targetCoordLeptons();
+  return directionToLeptons256(
+    entity.leptonX, entity.leptonY,
+    targetCoord.lx, targetCoord.ly,
+  );
+}
+
+function selectedWeaponForFireGate(
+  ctx: { getWarheadMult?: (warhead: WarheadType, armor: ArmorType) => number },
+  entity: Entity,
+  target: Entity,
+  fireCoordFacing256: number,
+): WeaponStats | null {
+  const w1 = entity.weapon;
+  const w2 = entity.weapon2;
+
+  if (!w2) return w1;
+  if (!w1) return w2;
+
+  const scoreWeapon = (weapon: WeaponStats): number => {
+    if (!entity.canWeaponTarget(target, weapon)) return 0;
+    let score = (ctx.getWarheadMult?.(weapon.warhead, target.stats.armor) ??
+      getWarheadMultiplier(weapon.warhead, target.stats.armor)) * 1000;
+    if (targetInRangeForFireGate(entity, target, weapon, fireCoordFacing256)) score *= 2;
+    return score;
+  };
+
+  const score1 = scoreWeapon(w1);
+  const score2 = scoreWeapon(w2);
+  return score2 > score1 ? w2 : w1;
 }
 
 /** C++ UnitClass/VesselClass::Can_Fire facing gates for non-object TARGETs.
@@ -1043,10 +1100,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       // state left by the previous tick's Rotation_AI, not whether rotation
       // happens to finish later in this tick. Preserve that pre-rotation flag.
       const preRotTurretWasRotating = entity.turretIsRotating;
-      const targetDir256 = directionToLeptons256(
-        entity.leptonX, entity.leptonY,
-        entity.target.leptonX, entity.target.leptonY,
-      );
+      const targetDir256 = targetDirection256(entity, entity.target);
       if (entity.isNavalUnit || !preRotTurretWasRotating) {
         entity.desiredTurretFacing256 = targetDir256;
         entity.desiredTurretFacing = dir256ToFacing8(targetDir256);
@@ -1110,10 +1164,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         //
         // Do not call tickRotation() from this Firing_AI path. Doing so rotates
         // and fires in one TS pass; C++ waits until the next DriveClass::AI pass.
-        const desired256 = directionToLeptons256(
-          entity.leptonX, entity.leptonY,
-          entity.target.leptonX, entity.target.leptonY,
-        );
+        const desired256 = targetDirection256(entity, entity.target);
         fireGateBodyFacing256 = entity.bodyFacing256 >= 0
           ? entity.bodyFacing256 & 0xFF
           : (entity.facing * 32) & 0xFF;
@@ -1156,8 +1207,14 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     // Dual-weapon selection (C++ TechnoClass::What_Weapon_Should_I_Use):
     // Select the best weapon by warhead score and range bonus. Rearm/range do
     // not change selection; Can_Fire gates actual shooting below.
-    const selectedWeapon = entity.selectWeapon(
-      entity.target, (wh, ar) => ctx.getWarheadMult(wh, ar),
+    // C++ land-unit order is Firing_AI before Rotation_AI. `tickTurretRotation`
+    // above has already advanced TS state for the later Rotation_AI phase, so
+    // Can_Fire/What_Weapon_Should_I_Use must range-check from the latched
+    // pre-rotation turret facing for non-vessel land units.
+    const fireCoordFacing256 =
+      entity.hasTurret && !entity.isNavalUnit ? fireGateTurretFacing256 : -1;
+    const selectedWeapon = selectedWeaponForFireGate(
+      ctx, entity, entity.target, fireCoordFacing256,
     );
 
     const activeWeapon = selectedWeapon;
@@ -1176,7 +1233,9 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       // lands them and clears IsFalling.
       if (entity.isFalling) return;
       if (entity.attackCooldown > 0) return;
-      if (!entity.inRangeWith(entity.target, activeWeapon)) return;
+      if (!targetInRangeForFireGate(
+        entity, entity.target, activeWeapon, fireCoordFacing256,
+      )) return;
 
       // C++ TechnoClass::Can_Fire (techno.cpp:2754): Ammo == 0 returns
       // FIRE_AMMO before InfantryClass::Firing_AI can start a firing action.
@@ -1244,10 +1303,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         }
         // (B) 256-step FIRE_FACING gate. Land units use pre-rotation facing;
         // vessels use post-rotation facing, matching their different C++ AI order.
-        const dir256 = directionToLeptons256(
-          entity.leptonX, entity.leptonY,
-          entity.target.leptonX, entity.target.leptonY,
-        );
+        const dir256 = targetDirection256(entity, entity.target);
         const turret256 = fireGateTurretFacing256 & 0xFF;
         // C++ facing.h:70 Difference: (int)(signed char)(desired - current).
         let diff = (dir256 - turret256) & 0xFF;
@@ -1266,10 +1322,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         // PrimaryFacing.Desired(Direction(TarCom)) but does not rotate or fire
         // until a later pass.
         const projROT = (activeWeapon.projectileROT ?? 0) as number;
-        const dir256 = directionToLeptons256(
-          entity.leptonX, entity.leptonY,
-          entity.target.leptonX, entity.target.leptonY,
-        );
+        const dir256 = targetDirection256(entity, entity.target);
         let diff = (dir256 - fireGateBodyFacing256) & 0xFF;
         if (diff > 127) diff -= 256;
         diff = Math.abs(diff);
@@ -1287,10 +1340,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         // Firing_AI began. UnitClass::Rotation_AI updates desired facing later,
         // but does not rotate PrimaryFacing until the next DriveClass::AI pass.
         const projROT = (activeWeapon.projectileROT ?? 0) as number;
-        const dir256 = directionToLeptons256(
-          entity.leptonX, entity.leptonY,
-          entity.target.leptonX, entity.target.leptonY,
-        );
+        const dir256 = targetDirection256(entity, entity.target);
         let diff = (dir256 - fireGateBodyFacing256) & 0xFF;
         if (diff > 127) diff -= 256;
         diff = Math.abs(diff);
@@ -1315,7 +1365,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
     }
 
     if (activeWeapon && (pendingInfantryFire || entity.attackCooldown <= 0)) {
-      let fireAtFacing256 = -1;
+      let fireAtFacing256 = fireCoordFacing256;
       // C++ InfantryClass::Firing_AI (infantry.cpp:3580-3670) pre-fire animation gate:
       //   Tick N:  !IsFiring && FIRE_OK → Do_Action(DO_FIRE_WEAPON), Set_Stage(0), IsFiring=true.
       //            Check Fetch_Stage()==FireLaunch: stage=0 → skip Fire_At (unless FireLaunch=0).

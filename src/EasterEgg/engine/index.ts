@@ -7670,7 +7670,7 @@ export class Game {
     // desired facing; the body rotates on the following DriveClass::AI pass.
     if (entity.alive && !entity.stats.isInfantry && !entity.isAirUnit && !entity.isNavalUnit) {
       const targetCoord = entity.target?.alive
-        ? { lx: entity.target.leptonX, ly: entity.target.leptonY }
+        ? entity.target.targetCoordLeptons()
         : entity.targetStructure?.alive
           ? scenarioStructureTargetLeptons(entity.targetStructure)
           : entity.forceFirePos
