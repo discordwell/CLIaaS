@@ -27,6 +27,8 @@ import {
   resetAircraftFrame,
 } from '../engine/aircraft';
 
+const RETREAT_FACE_MAP_EDGE = 1;
+
 beforeEach(() => {
   resetEntityIds();
   resetAircraftFrame();
@@ -168,6 +170,7 @@ describe('Flying retreat to map edge (aircraft.cpp:1341-1361)', () => {
     tran.mission = Mission.RETREAT;
     tran.isALoaner = true;
     tran.moveTarget = null;
+    tran.aircraftAttackStatus = RETREAT_FACE_MAP_EDGE;
 
     updateAircraft(ctx, tran);
     expect(tran.aircraftSpeedFraction).toBe(1.0);
@@ -188,6 +191,7 @@ describe('Flying retreat to map edge (aircraft.cpp:1341-1361)', () => {
     tran.moveTarget = null;
     tran.facing256 = 64;
     tran.desiredFacing256 = 64;
+    tran.aircraftAttackStatus = RETREAT_FACE_MAP_EDGE;
     const startX = tran.pos.x;
     const startY = tran.pos.y;
 
@@ -208,6 +212,7 @@ describe('Flying retreat to map edge (aircraft.cpp:1341-1361)', () => {
     tran.moveTarget = null;
     tran.facing256 = 0;
     tran.desiredFacing256 = 0;
+    tran.aircraftAttackStatus = RETREAT_FACE_MAP_EDGE;
     const startY = tran.pos.y;
 
     updateAircraft(ctx, tran);
@@ -226,12 +231,14 @@ describe('Map exit on retreat (aircraft.cpp:1356-1361)', () => {
   it('TRAN at map edge during RETREAT is removed (alive=false)', () => {
     const map = makeMap(1, 1, 62, 62);
     const ctx = makeAircraftContext({ map });
-    // Place at cell (1, 30) — AT the left boundary edge
-    const tran = entityAtCell(UnitType.V_TRAN, House.Spain, 1, 30);
+    // Place just outside the left boundary; deletion happens once the aircraft
+    // is off-map, not merely on the playable edge cell.
+    const tran = entityAtCell(UnitType.V_TRAN, House.Spain, 0, 30);
     tran.aircraftState = 'flying';
     tran.flightAltitude = Entity.FLIGHT_ALTITUDE;
     tran.mission = Mission.RETREAT;
     tran.isALoaner = true;
+    tran.aircraftAttackStatus = RETREAT_FACE_MAP_EDGE;
     // Pre-set moveTarget so it doesn't get computed fresh
     tran.moveTarget = { lx: pixelToLepton(0 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(30 * CELL_SIZE + CELL_SIZE / 2) };
 
@@ -243,11 +250,12 @@ describe('Map exit on retreat (aircraft.cpp:1356-1361)', () => {
   it('TRAN at right edge during RETREAT is removed', () => {
     const map = makeMap(1, 1, 62, 62); // right edge = boundsX + boundsW - 1 = 62
     const ctx = makeAircraftContext({ map });
-    const tran = entityAtCell(UnitType.V_TRAN, House.Spain, 62, 30);
+    const tran = entityAtCell(UnitType.V_TRAN, House.Spain, 63, 30);
     tran.aircraftState = 'flying';
     tran.flightAltitude = Entity.FLIGHT_ALTITUDE;
     tran.mission = Mission.RETREAT;
     tran.isALoaner = true;
+    tran.aircraftAttackStatus = RETREAT_FACE_MAP_EDGE;
     tran.moveTarget = { lx: pixelToLepton(63 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(30 * CELL_SIZE + CELL_SIZE / 2) };
 
     updateAircraft(ctx, tran);
@@ -257,11 +265,12 @@ describe('Map exit on retreat (aircraft.cpp:1356-1361)', () => {
   it('unitsLeftMap incremented on map exit', () => {
     const map = makeMap(1, 1, 62, 62);
     const ctx = makeAircraftContext({ map });
-    const tran = entityAtCell(UnitType.V_TRAN, House.Spain, 1, 30);
+    const tran = entityAtCell(UnitType.V_TRAN, House.Spain, 0, 30);
     tran.aircraftState = 'flying';
     tran.flightAltitude = Entity.FLIGHT_ALTITUDE;
     tran.mission = Mission.RETREAT;
     tran.isALoaner = true;
+    tran.aircraftAttackStatus = RETREAT_FACE_MAP_EDGE;
     tran.moveTarget = { lx: pixelToLepton(0 * CELL_SIZE + CELL_SIZE / 2), ly: pixelToLepton(30 * CELL_SIZE + CELL_SIZE / 2) };
 
     expect(ctx.unitsLeftMap).toBe(0);

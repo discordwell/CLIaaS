@@ -1850,6 +1850,15 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       if (entity.aircraftHeightLeptons >= Entity.FLIGHT_LEVEL_LEPTONS) {
         entity.aircraftState = 'flying';
         entity.aircraftSpeedFraction = 1.0;
+        if (!entity.isFixedWing &&
+            entity.mission === Mission.RETREAT &&
+            entity.aircraftAttackStatus <= RETREAT_TAKE_OFF) {
+          // C++ Mission_Retreat owns helicopter takeoff: the dispatch whose
+          // Process_Take_Off() reaches FLIGHT_LEVEL promotes Status to
+          // FACE_MAP_EDGE before the next timer fire.
+          entity.aircraftAttackStatus = RETREAT_FACE_MAP_EDGE;
+          entity.missionTimer = 0;
+        }
       }
       return true;
     }
