@@ -1713,6 +1713,7 @@ export class Game {
       logicIndexHintForNewObject: () => this.logicIndexHintForNewObject(),
       releaseLogicSlotForEntity: (e) => this.releaseCppLogicSlotForEntity(e),
       reserveAnimSlot: () => this.reserveCppAnimSlot(),
+      removeFromTeamForRetreat: (e) => this.removeFromTeamForRetreat(e),
     };
   }
 
@@ -8993,6 +8994,12 @@ export class Game {
       // a TS return-point marker and must not force AREA_GUARD on player units.
       if (hasTeam || entity.weapon == null) return Mission.GUARD;
       return houseIQ >= IQ_GUARD_AREA ? Mission.AREA_GUARD : Mission.GUARD;
+    }
+
+    // C++ AircraftClass::Enter_Idle_Mode, airborne helicopter branch: a
+    // weapon-equipped loaner that has spent all ammo leaves the map.
+    if (!entity.isFixedWing && entity.isALoaner && entity.ammo === 0 && entity.weapon) {
+      return Mission.RETREAT;
     }
 
     return entity.guardOrigin ? Mission.AREA_GUARD : Mission.GUARD;

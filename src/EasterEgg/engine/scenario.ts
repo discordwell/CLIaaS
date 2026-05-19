@@ -1449,6 +1449,36 @@ function findGroundReinforcementUnlimboCell(
   return cell;
 }
 
+function reinforcementAircraftNeedToTake(
+  entity: Entity,
+  existingEntities: Entity[] | undefined,
+  spawnedSoFar: readonly Entity[],
+  existingStructures: readonly MapStructure[] | undefined,
+): boolean {
+  // C++ reinf.cpp:_Need_To_Take only confiscates YAK/MIG reinforcements when
+  // the owning house has an unfilled airstrip slot. All other reinforcement
+  // aircraft are loaners and leave once their mission/ammo is exhausted.
+  if (entity.type !== UnitType.V_YAK && entity.type !== UnitType.V_MIG) return false;
+
+  let deficit = 0;
+  for (const s of existingStructures ?? []) {
+    if (s.alive && s.house === entity.house && s.type === 'AFLD') deficit++;
+  }
+  if (deficit <= 0) return false;
+
+  for (const other of [...(existingEntities ?? []), ...spawnedSoFar]) {
+    if (other === entity) continue;
+    if (!other.alive || other.inLimbo) continue;
+    if (other.house !== entity.house) continue;
+    if (other.type !== UnitType.V_YAK && other.type !== UnitType.V_MIG) continue;
+    if (other.isALoaner) continue;
+    deficit--;
+    if (deficit <= 0) return false;
+  }
+
+  return true;
+}
+
 /** A placed structure on the map (static building, not a unit) */
 export interface StructureWeapon {
   weaponName?: string; // C++ rules.ini weapon section name
@@ -3555,6 +3585,14 @@ export function executeTriggerAction(
               entity.scenarioInitUnlimbo = true;
             }
           }
+          // C++ reinf.cpp:212: reinforcement aircraft that the owning house
+          // does not need to take become IsALoaner. _Need_To_Take only returns
+          // true for YAK/MIG when an owned airstrip slot is unfilled; combat
+          // helicopters such as SCU34EA hel1 are therefore loaners.
+          if (stats.isAircraft &&
+              !reinforcementAircraftNeedToTake(entity, existingEntities, teamCreationOrder, existingStructures)) {
+            entity.isALoaner = true;
+          }
           // C++ reinf.cpp:251: IsALoaner on aircraft/vessel transports with UNLOAD mission
           // Transport doesn't count toward unit limits, auto-retreats after unloading
           if (entity.isTransport && hasUnloadMission &&
@@ -3587,6 +3625,12 @@ export function executeTriggerAction(
           teamCreationOrder.push(entity);
           result.spawned.push(entity);
         }
+      }
+      // C++ reinf.cpp:259-263: a standalone empty transport helicopter is a
+      // gift, not a loaner. Cargo transports and all non-TRAN reinforcement
+      // aircraft keep the loaner state from _Need_To_Take above.
+      if (transport && cargo.length === 0 && transport.stats.isAircraft && transport.type === UnitType.V_TRAN) {
+        transport.isALoaner = false;
       }
       result.teamCreationOrder = teamCreationOrder;
       // C++ reinf.cpp:_Create_Group builds the non-transport object list by

@@ -66,6 +66,9 @@ const ATTACK_FLY_TO_POSITION = 3;
 const ATTACK_FIRE_AT_TARGET = 4;
 const ATTACK_FIRE_AT_TARGET2 = 5;
 const ATTACK_RETURN_TO_BASE = 6;
+const RETREAT_TAKE_OFF = 0;
+const RETREAT_FACE_MAP_EDGE = 1;
+const RETREAT_KEEP_FLYING = 2;
 
 // ── C++ Rearm Constants (rules.ini / defines.h) ─────────────────────────────
 
@@ -136,6 +139,8 @@ export interface AircraftContext {
   releaseLogicSlotForEntity?: (entity: Entity) => void;
   /** Reserve one C++ AnimClass heap slot. */
   reserveAnimSlot?: () => boolean;
+  /** C++ TeamClass::Remove path used when loaner aircraft break off to retreat. */
+  removeFromTeamForRetreat?: (entity: Entity) => void;
 }
 
 // ── Pure Functions ─────────────────────────────────────────────────────────────
@@ -418,6 +423,9 @@ function countsAsCivEvac(ctx: AircraftContext, unitType: string): boolean {
   return false;
 }
 
+const AIRCRAFT_FAST_MISSION_DELAY = 14;
+const AIRCRAFT_GUARD_NORMAL_DELAY = 42;
+const AIRCRAFT_AREA_GUARD_NORMAL_DELAY = 70;
 const LOANER_RETREAT_DELAY = 88;
 const TRANSPORT_GUARD_DELAY = TICKS_PER_SECOND * 3;
 const ENTER_INITIAL = 0;
@@ -629,13 +637,28 @@ function commenceAircraft(ctx: AircraftContext, entity: Entity): void {
   }
 }
 
+function aircraftMissionNormalDelay(entity: Entity): number {
+  switch (entity.mission) {
+    case Mission.GUARD:
+      return AIRCRAFT_GUARD_NORMAL_DELAY;
+    case Mission.AREA_GUARD:
+      return AIRCRAFT_AREA_GUARD_NORMAL_DELAY;
+    case Mission.RETREAT:
+      return LOANER_RETREAT_DELAY;
+    default:
+      return AIRCRAFT_FAST_MISSION_DELAY;
+  }
+}
+
 function aircraftMissionAttackFinalDelay(entity: Entity): void {
   const savedTag = ScenarioRandom._sourceTag;
   if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = 40050;
   // Aircraft timers are maintained inside the aircraft state machine instead of
-  // the normal end-of-logic entity timer pass. Store the post-frame CDTimer value
-  // C++ exposes after Mission_Attack returns Normal_Delay + Random_Pick(0, 2).
-  entity.missionTimer = 13 + ScenarioRandom.nextInRange(0, 2);
+  // the normal end-of-logic entity timer pass. C++ AircraftClass::Mission_Attack
+  // returns MissionControl[Mission].Normal_Delay() after RETURN_TO_BASE may have
+  // called Enter_Idle_Mode and changed Mission; store the post-frame CDTimer
+  // value exposed by agent_get_state.
+  entity.missionTimer = aircraftMissionNormalDelay(entity) - 1 + ScenarioRandom.nextInRange(0, 2);
   if (ScenarioRandom._tagLogging) ScenarioRandom._sourceTag = savedTag;
 }
 
@@ -959,9 +982,12 @@ function updateHelicopterMissionAttack(ctx: AircraftContext, entity: Entity): bo
       }
       entity.moveTarget = null;
       entity.moveTargetEntityRef = null;
+      if (!entity.isFixedWing && entity.isALoaner && entity.ammo === 0 && entity.weapon) {
+        ctx.removeFromTeamForRetreat?.(entity);
+      }
       entity.mission = ctx.idleMission(entity);
       entity.missionQueue = null;
-      entity.aircraftState = 'returning';
+      entity.aircraftState = entity.mission === Mission.RETREAT ? 'flying' : 'returning';
       entity.aircraftAttackStatus = ATTACK_VALIDATE_AZ;
       aircraftMissionAttackFinalDelay(entity);
       flyCurrentFacing();
@@ -1323,21 +1349,19 @@ function aircraftFlyInFacing(
     x: targetLX * CELL_SIZE / LEPTON_SIZE,
     y: targetLY * CELL_SIZE / LEPTON_SIZE,
   };
-  const dx = targetWorld.x - entity.pos.x;
-  const dy = targetWorld.y - entity.pos.y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-
-  if (dist <= 0.5) {
-    entity.setPosition(targetWorld.x, targetWorld.y);
-    entity.speedAccum = 0;
-    return true; // arrived
-  }
 
   // C++ Process_Fly_To uses Distance(coord, target) — octagonal lepton distance.
   // All distance checks (flyToInterval, approach slowdown, stop threshold) must
   // use this metric. Euclidean pixel distance is ~15% shorter at diagonal angles,
   // causing approach slowdown to trigger too early and flight times to diverge.
   const distLeptons = leptonDist(entity.leptonX, entity.leptonY, targetLX, targetLY);
+  // C++ Process_Fly_To always applies the stop-radius speed clear; it is not
+  // gated by any course-update cadence. Leaving stale approach speed here lets
+  // helicopters drift while FIRE_AT_TARGET is just waiting on rearm.
+  if (distLeptons < 16) {
+    entity.aircraftSpeedFraction = 0;
+    return true;
+  }
 
   // Step 1: Set desired facing toward target and rotate.
   entity.rotTickedThisFrame = false;
@@ -1369,14 +1393,6 @@ function aircraftFlyInFacing(
       const rawSpeed = Math.floor(distLeptons / 3);
       const clampedSpeed = Math.max(0x20, Math.min(0xFF, rawSpeed));
       speedFraction = clampedSpeed / 0xFF;
-    }
-    // C++ Process_Fly_To: Set_Speed(0) and report distance=0 when the
-    // aircraft is inside the 0x10-lepton stopping radius. Movement_AI still
-    // runs after this in C++, but with SpeedAdd=0, so the aircraft lands from
-    // its actual close coordinate rather than snapping to NavCom.
-    if (distLeptons < 16) {
-      entity.aircraftSpeedFraction = 0;
-      return true;
     }
     entity.aircraftSpeedFraction = speedFraction;
   }
@@ -1438,8 +1454,7 @@ function aircraftFlyInFacing(
     entity.leptonY += stepLY;
     entity.syncPosFromLeptons();
 
-    const totalStep = Math.abs(stepLX) + Math.abs(stepLY);
-    return totalStep >= dist - 0.5;
+    return leptonDist(entity.leptonX, entity.leptonY, targetLX, targetLY) < 16;
   }
 }
 
@@ -1970,40 +1985,59 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         // Helicopters do not compute a NavCom/nearest-edge point here. FACE_MAP_EDGE
         // sets full speed and desired facing from House->Control.Edge, then
         // KEEP_FLYING just lets Movement_AI carry the aircraft off-map.
-        if (entity.missionTimer > 0) {
-          entity.missionTimer--;
-        } else if (!entity.isFixedWing) {
-          // C++ aircraft.cpp:1375-1377 — helicopter Mission_Retreat KEEP_FLYING
-          // returns MissionControl[RETREAT].Normal_Delay() + Random_Pick(0,2).
-          // Store the observed end-of-frame value: the C++ CDTimer has already
-          // consumed one tick by the time agent_get_state reports `mt`.
-          const prevTag = ScenarioRandom._sourceTag;
-          ScenarioRandom._sourceTag = 40030;
-          const jitter = ScenarioRandom.nextInRange(0, 2);
-          ScenarioRandom._sourceTag = prevTag;
-          entity.missionTimer = LOANER_RETREAT_DELAY - 1 + jitter;
+        if (entity.isFixedWing) {
+          if (entity.missionTimer > 0) {
+            entity.missionTimer--;
+          } else {
+            // Fixed-wing Mission_Retreat does not use Random_Pick. At flight
+            // level C++ returns TICKS_PER_SECOND*10; below it returns 3 while
+            // increasing Height. TS represents fixed-wing airborne state at
+            // flight level in pixels.
+            entity.missionTimer = TICKS_PER_SECOND * 10 - 1;
+          }
+          const ec = entity.cell;
+          if (!ctx.map.inBounds(ec.cx, ec.cy)) {
+            handleMapExit(ctx, entity);
+            return true;
+          }
+          if (entity.moveTarget) {
+            aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity));
+          } else {
+            aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+          }
         } else {
-          // Fixed-wing Mission_Retreat does not use Random_Pick. At flight
-          // level C++ returns TICKS_PER_SECOND*10; below it returns 3 while
-          // increasing Height. TS represents fixed-wing airborne state at
-          // flight level in pixels.
-          entity.missionTimer = TICKS_PER_SECOND * 10 - 1;
-        }
-        if (!entity.isFixedWing) {
-          entity.aircraftSpeedFraction = 1.0;
-          entity.desiredFacing256 = houseEdgeDirection256(ctx, entity.house);
-          entity.desiredFacing = Math.round(entity.desiredFacing256 / 32) & 7;
-        }
-        // Check if at map edge — exit
-        const ec = entity.cell;
-        if (ec.cx <= ctx.map.boundsX || ec.cx >= ctx.map.boundsX + ctx.map.boundsW - 1 ||
-            ec.cy <= ctx.map.boundsY || ec.cy >= ctx.map.boundsY + ctx.map.boundsH - 1) {
-          handleMapExit(ctx, entity);
-          return true;
-        }
-        if (entity.isFixedWing && entity.moveTarget) {
-          aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity));
-        } else {
+          if (entity.missionTimer > 0) {
+            entity.missionTimer--;
+            if (entity.aircraftAttackStatus < RETREAT_KEEP_FLYING) return true;
+          } else if (entity.aircraftAttackStatus <= RETREAT_TAKE_OFF) {
+            // C++ TAKE_OFF returns 1 even when already airborne; no retreat
+            // speed/facing is set until the next Mission_Retreat dispatch.
+            entity.aircraftAttackStatus = RETREAT_FACE_MAP_EDGE;
+            entity.missionTimer = 0;
+            return true;
+          } else {
+            if (entity.aircraftAttackStatus === RETREAT_FACE_MAP_EDGE) {
+              entity.aircraftSpeedFraction = 1.0;
+              entity.desiredFacing256 = houseEdgeDirection256(ctx, entity.house);
+              entity.desiredFacing = Math.round(entity.desiredFacing256 / 32) & 7;
+              entity.aircraftAttackStatus = RETREAT_KEEP_FLYING;
+            }
+            // C++ aircraft.cpp:1375-1377 — helicopter Mission_Retreat
+            // FACE_MAP_EDGE/KEEP_FLYING returns MissionControl[RETREAT].
+            // Normal_Delay() + Random_Pick(0,2). Store the observed post-frame
+            // value exposed by agent_get_state.
+            const prevTag = ScenarioRandom._sourceTag;
+            ScenarioRandom._sourceTag = 40030;
+            const jitter = ScenarioRandom.nextInRange(0, 2);
+            ScenarioRandom._sourceTag = prevTag;
+            entity.missionTimer = LOANER_RETREAT_DELAY - 1 + jitter;
+          }
+
+          const ec = entity.cell;
+          if (!ctx.map.inBounds(ec.cx, ec.cy)) {
+            handleMapExit(ctx, entity);
+            return true;
+          }
           aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
         }
       } else if (entity.mission === Mission.MOVE && entity.moveTarget) {
