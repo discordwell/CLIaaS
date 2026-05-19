@@ -467,7 +467,10 @@ const CPP_ANIM_MAX = 100;
 // infantry.cpp only creates these follow-up corpse anims after DO_GUN_DEATH,
 // DO_EXPLOSION_DEATH, DO_EXPLOSION2_DEATH, and DO_GRENADE_DEATH. DO_FIRE_DEATH
 // deletes the infantry without a corpse AnimClass.
-const CPP_CORPSE_ANIM_SLOT_TICKS = 30 * 6;
+// C++ CORPSE1/2/3 are single-frame AnimClass objects with normalized rate 30
+// in the agent heap. They occupy an Anim/Logic slot only until that rate expires;
+// the persistent TS corpse render data must not reserve the C++ slot longer.
+const CPP_CORPSE_ANIM_SLOT_TICKS = 30;
 type AIFactoryKind = 'building' | 'infantry' | 'unit' | 'vessel';
 
 export class Game {
@@ -1282,6 +1285,9 @@ export class Game {
 
   private isDamageSmokeEligible(entity: Entity): boolean {
     if (!entity.alive || entity.inLimbo || entity.isAirUnit || entity.stats.isInfantry) return false;
+    // C++ unit.cpp:1114-1121 under FIXIT_ANTS suppresses damage smoke for all
+    // ant units even though they are UnitClass objects rather than infantry.
+    if (entity.isAnt) return false;
     if (entity.stats.isVessel && (entity.type === UnitType.V_SS || entity.type === UnitType.V_MSUB)) return false;
     return isCppYellowOrWorse(entity.hp, entity.maxHp);
   }

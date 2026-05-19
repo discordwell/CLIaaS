@@ -3927,13 +3927,14 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
     ctx.inflightProjectiles = [...survivors, ...deferred];
 
     if (proj.logicIndexHint !== undefined) {
-      // Deleting an earlier Logic predecessor can decrement the current bullet's
+      // Deleting earlier Logic predecessors can decrement the current bullet's
       // effective slot before the bullet itself deletes. In Game runtime the
-      // release callback has already compacted hints, so skip only that final
-      // shifted slot; standalone tests without compaction keep the wider range.
+      // release callback has already compacted hints, so skip the compacted
+      // slots shifted behind the C++ cursor; standalone tests without compaction
+      // keep the wider unshifted range.
       const skipLogicHintAfter = Math.max(0, proj.logicIndexHint - earlierDeletes);
       const skipLogicHintThrough = ctx.immediateLogicSlotRelease
-        ? skipLogicHintAfter
+        ? proj.logicIndexHint - 1
         : proj.logicIndexHint + earlierDeletes;
       const shouldSkipShifted = ctx.immediateLogicSlotRelease
         ? earlierDeletes > 0
