@@ -297,17 +297,19 @@ export class Entity {
   // Tracks the heading-to reservation for sub-cell occupancy parity.
   claimedCellIdx = -1;
   claimedSubCell = -1;
-  // C++ infantry.cpp IsFiring — true during weapon fire animation.
-  // Stays true for firingAnimTicks after weapon fire; cleared when counter reaches 0.
+  // Legacy mirror for stale C++ infantry.cpp IsFiring states. The live C++ firing
+  // gate is represented by firePrepActive and is cleared by InfantryClass::Fire_At
+  // as soon as the projectile launches.
   isFiringAnim = false;
-  firingAnimTicks = 0; // countdown for fire animation duration
+  firingAnimTicks = 0;
   // C++ InfantryClass::Firing_AI (infantry.cpp:3580-3670) — FireLaunch animation-stage gate.
   //   !IsFiring && FIRE_OK → Do_Action(DO_FIRE_WEAPON), Set_Stage(0), IsFiring=true.
   //   IsFiring && Fetch_Stage()==FireLaunch → Fire_At (actual bullet launch).
   // E1 FireLaunch=2 (idata.cpp:404): 2 ticks between "decide to fire" and "launch".
   // Vehicles fire same-tick (unit.cpp:656-663 has no stage gate). firePrepActive
-  // mirrors C++ IsFiring DURING the pre-fire stage; the post-fire anim uses the
-  // existing isFiringAnim/firingAnimTicks fields.
+  // mirrors C++ IsFiring during the pre-fire stage. InfantryClass::Fire_At clears
+  // IsFiring at launch; the remaining DO_FIRE_WEAPON frames are only Doing state
+  // and must not block Commence or Movement_AI.
   firePrepActive = false;
   firePrepStage = 0;
   // C++ Firing_AI ignores Do_Action's return value: if DO_FIRE_PRONE/WEAPON is

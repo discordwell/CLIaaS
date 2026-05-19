@@ -872,6 +872,9 @@ describe('Hunt Mode Scanning — C++ foot.cpp:654-703', () => {
     expect(launchProjectile.mock.calls[0][1]).toBeNull();
     expect(launchProjectile.mock.calls[0][2]?.name).toBe('M1Carbine');
     expect(damageStructure).not.toHaveBeenCalled();
+    expect(rifle.firePrepActive).toBe(false);
+    expect(rifle.isFiringAnim).toBe(false);
+    expect(rifle.firingAnimTicks).toBe(0);
   });
 
   it('infantry structure attacks launch projectiles at BuildingClass Target_Coord', () => {

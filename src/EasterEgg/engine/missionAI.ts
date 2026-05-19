@@ -3782,15 +3782,12 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
       entity.attackCooldown = rearmTime;
       if (entity.weapon2) entity.attackCooldown2 = rearmTime;
       if (entity.hasTurret) entity.isInRecoilState = true; // M6
-      // C++ infantry.cpp:1190-1195: IsFiring stays true for the fire animation duration.
-      // Infantry DO_FIRE_WEAPON animation: typically 4-8 frames at rate ~2.
-      // Use 8 ticks as a conservative estimate matching most infantry fire animations.
+      // C++ InfantryClass::Fire_At clears IsFiring immediately before delegating
+      // to FootClass::Fire_At (infantry.cpp:2188-2197). The remaining
+      // DO_FIRE_WEAPON frames can be interrupted by Movement_AI in the same tick.
       if (entity.stats.isInfantry) {
-        entity.isFiringAnim = true;
-        // E1 DO_FIRE_WEAPON: 8 frames at Rate=1 = 8 ticks, +1 tick for Doing_AI
-        // transition to DO_STAND_READY (Rate=0) which clears IsFiring.
-        // idata.cpp E1DoControls: DO_FIRE_WEAPON = {64, 8, 8} (Count=8).
-        entity.firingAnimTicks = 9;
+        entity.isFiringAnim = false;
+        entity.firingAnimTicks = 0;
       }
       consumeAmmoAfterSuccessfulFire(entity);
       ctx.playSoundAt(ctx.weaponSound(activeWeapon.name), entity.pos.x, entity.pos.y);

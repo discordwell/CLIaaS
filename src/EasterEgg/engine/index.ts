@@ -464,6 +464,9 @@ function pathMaxType(entity: Entity, isPlayerUnit: boolean): number {
 const CPP_ANIM_MAX = 100;
 // C++ CORPSE1/2/3 are AnimClass objects with normalized rate 30 and six SHP
 // frames in the WASM harness; they occupy the fixed animation heap while decaying.
+// infantry.cpp only creates these follow-up corpse anims after DO_GUN_DEATH,
+// DO_EXPLOSION_DEATH, DO_EXPLOSION2_DEATH, and DO_GRENADE_DEATH. DO_FIRE_DEATH
+// deletes the infantry without a corpse AnimClass.
 const CPP_CORPSE_ANIM_SLOT_TICKS = 30 * 6;
 type AIFactoryKind = 'building' | 'infantry' | 'unit' | 'vessel';
 
@@ -1263,7 +1266,7 @@ export class Game {
 
   private corpseOccupiesCppAnimSlot(corpse: { type: UnitType; isInfantry: boolean; isAnt: boolean; deathVariant: number; cppAnimStartTick?: number }): boolean {
     if (!corpse.isInfantry || corpse.isAnt || corpse.type === UnitType.I_DOG) return false;
-    if (corpse.deathVariant < 1 || corpse.deathVariant > 4) return false;
+    if (corpse.deathVariant < 1 || corpse.deathVariant > 3) return false;
     if (corpse.cppAnimStartTick === undefined) return false;
     return this.tick - corpse.cppAnimStartTick < CPP_CORPSE_ANIM_SLOT_TICKS;
   }
@@ -12274,7 +12277,7 @@ export class Game {
         e.type !== UnitType.I_DOG &&
         e.fallHeightLeptons <= 0 &&
         e.deathVariant >= 1 &&
-        e.deathVariant <= 4;
+        e.deathVariant <= 3;
       if (createsCppCorpseAnim && this.reserveCppAnimSlot()) {
         if (this.corpses.length >= Game.MAX_CORPSES) {
           const dropped = this.corpses.shift();

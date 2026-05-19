@@ -553,6 +553,26 @@ describe('runtime AI construction path', () => {
     expect(access.logicIndexHintForNewObject()).toBe(1);
   });
 
+  it('combat logic-index hints do not count fire-death corpses as C++ AnimClass slots', () => {
+    // C++ infantry.cpp deletes DO_FIRE_DEATH infantry without creating
+    // CORPSE1/2/3, so a rendered burn corpse must not reserve Logic order.
+    const game = new Game(createCanvas());
+    game.corpses.push({
+      x: 100,
+      y: 100,
+      type: UnitType.I_E2,
+      facing: 0,
+      isInfantry: true,
+      isAnt: false,
+      alpha: 0.5,
+      deathVariant: 4,
+      cppAnimStartTick: 0,
+    });
+
+    const access = game as unknown as { logicIndexHintForNewObject(): number };
+    expect(access.logicIndexHintForNewObject()).toBe(0);
+  });
+
   it('combat logic-index hints count destroyed buildings until Drop_Debris limbos them', () => {
     const game = new Game(createCanvas());
     const access = game as unknown as { readonly _combatCtx: CombatContext };
