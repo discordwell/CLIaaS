@@ -10219,12 +10219,9 @@ export class Game {
   /** C++ infantry.cpp:3931-3958 post-Basic_Path acell validation. */
   private handleInfantryBlockedStartCell(entity: Entity): void {
     const nextCell = this.infantryNextPathCell(entity);
-    if (nextCell &&
-        this.infantryCanEnterCell(entity, nextCell.cx, nextCell.cy) === MoveResult.DESTROYABLE &&
-        this.overrideDestroyableBlocker(entity, nextCell.cx, nextCell.cy)) {
-      this.stopInfantryDriver(entity);
-      return;
-    }
+    const moveResult = nextCell
+      ? this.infantryCanEnterCell(entity, nextCell.cx, nextCell.cy)
+      : MoveResult.IMPASSABLE;
 
     const closeEnough = 704; // rules.ini [General] CloseEnough=2.75 * 256
     if (entity.moveTarget &&
@@ -10235,6 +10232,11 @@ export class Game {
       entity.moveTargetEntityRef = null;
       entity.moveTargetEntityRefLX = 0;
       entity.moveTargetEntityRefLY = 0;
+    } else if (nextCell &&
+        moveResult === MoveResult.DESTROYABLE &&
+        this.overrideDestroyableBlocker(entity, nextCell.cx, nextCell.cy)) {
+      this.stopInfantryDriver(entity);
+      return;
     }
     this.clearDrivePath(entity);
     this.stopInfantryDriver(entity);
