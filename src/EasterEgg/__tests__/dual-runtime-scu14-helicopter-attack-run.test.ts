@@ -105,6 +105,71 @@ async function tsAir1AttackRunState(adapter: unknown) {
   });
 }
 
+async function wasmHeliStateByAid(adapter: unknown, aid: number) {
+  return adapterPage(adapter).evaluate((targetAid: number) => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const heli = (state.logicLayer ?? []).find((row: any[]) => row[6] === targetAid);
+    if (!heli) throw new Error(`C++ SCU14EA HELI aid ${targetAid} missing`);
+
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      heli: {
+        logicIndex: heli[0],
+        type: heli[1],
+        house: heli[2],
+        mission: heli[7],
+        missionTimer: heli[8],
+        arm: heli[23],
+        status: heli[27],
+        lx: heli[12],
+        ly: heli[13],
+        primaryCurrent: heli[28],
+        primaryDesired: heli[29],
+        targetKind: heli[30],
+        targetIndex: heli[33],
+        height: heli[38],
+      },
+    };
+  }, aid);
+}
+
+async function tsHeliStateById(adapter: unknown, id: number) {
+  return adapterPage(adapter).evaluate((targetId: number) => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const heli = game.entities.find((entity: any) =>
+      entity.id === targetId &&
+      entity.type === 'HELI' &&
+      entity.house === 'Greece');
+    if (!heli) throw new Error(`TS SCU14EA HELI id ${targetId} missing`);
+
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      heli: {
+        id: heli.id,
+        logicIndex: heli.logicIndexHint,
+        type: heli.type,
+        house: heli.house,
+        mission: heli.mission,
+        missionTimer: heli.missionTimer,
+        attackCooldown: heli.attackCooldown,
+        isSecondShot: heli.isSecondShot,
+        status: heli.aircraftAttackStatus,
+        lx: heli.leptonX,
+        ly: heli.leptonY,
+        primaryCurrent: heli.facing256,
+        primaryDesired: heli.desiredFacing256,
+        secondaryCurrent: heli.turretFacing256,
+        secondaryDesired: heli.desiredTurretFacing256,
+        targetId: heli.target?.id ?? null,
+        height: heli.aircraftHeightLeptons,
+      },
+    };
+  }, id);
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 helicopter attack run', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -172,6 +237,59 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 helicopter attack run
         ly: cpp.heli.ly,
         primaryCurrent: cpp.heli.primaryCurrent,
         primaryDesired: cpp.heli.primaryDesired,
+      });
+    }, { wasmSeed: 0 });
+  }, 300_000);
+
+  it('keeps Longbow two-shooter rearm cadence aligned through the Hellfire pair', async () => {
+    await withDualScenario('SCU14EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBothInChunks(handle, 1139);
+      const firstCpp = await wasmHeliStateByAid(handle.wasm, 65544);
+      const firstTs = await tsHeliStateById(handle.ts, 207);
+
+      expect(firstTs.tick).toBe(firstCpp.tick);
+      expect(firstTs.rngState >>> 0).toBe(firstCpp.rngState >>> 0);
+      expect(firstCpp.heli).toMatchObject({
+        type: 'HELI',
+        house: 'Greece',
+        mission: 1,
+        status: 5,
+        arm: 2,
+      });
+      expect(firstTs.heli).toMatchObject({
+        type: firstCpp.heli.type,
+        house: firstCpp.heli.house,
+        mission: 'ATTACK',
+        missionTimer: firstCpp.heli.missionTimer,
+        status: firstCpp.heli.status,
+        attackCooldown: firstCpp.heli.arm,
+        isSecondShot: true,
+      });
+
+      await stepBothInChunks(handle, 17);
+      const secondCpp = await wasmHeliStateByAid(handle.wasm, 65544);
+      const secondTs = await tsHeliStateById(handle.ts, 207);
+
+      expect(secondTs.tick).toBe(secondCpp.tick);
+      expect(secondTs.rngState >>> 0).toBe(secondCpp.rngState >>> 0);
+      expect(secondCpp.heli).toMatchObject({
+        type: 'HELI',
+        house: 'Greece',
+        mission: 1,
+        status: 4,
+        missionTimer: 14,
+        arm: 59,
+      });
+      expect(secondTs.heli).toMatchObject({
+        type: secondCpp.heli.type,
+        house: secondCpp.heli.house,
+        mission: 'ATTACK',
+        missionTimer: secondCpp.heli.missionTimer,
+        status: secondCpp.heli.status,
+        attackCooldown: secondCpp.heli.arm,
+        isSecondShot: false,
       });
     }, { wasmSeed: 0 });
   }, 300_000);

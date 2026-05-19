@@ -732,6 +732,21 @@ function setHelicopterSecondaryFacingToCoordFromFireCoord(entity: Entity, coord:
   );
 }
 
+function aircraftFireRearmPostFrame(entity: Entity, weapon: WeaponStats, rofBias: number): number {
+  let rearm = Math.max(1, Math.round(weapon.rof * rofBias));
+  if (entity.isTwoShooter()) {
+    if (!entity.isSecondShot) {
+      rearm = 3;
+    }
+    entity.isSecondShot = !entity.isSecondShot;
+  } else {
+    entity.isSecondShot = true;
+  }
+  // C++ TechnoClass::Fire_At assigns Arm=Rearm_Delay(IsSecondShot), then the
+  // CDTimer frame tick exposes Arm-1 in the post-logic harness state.
+  return Math.max(0, rearm - 1);
+}
+
 function helicopterFireState(entity: Entity): HelicopterFireState {
   const weapon = entity.weapon;
   const target = aircraftTargetLeptons(entity);
@@ -776,7 +791,11 @@ function fireHelicopterWeapon(ctx: AircraftContext, entity: Entity): HelicopterF
 
   const targetCell = leptonToCell(target.lx, target.ly);
   ctx.incomingThreatScatterCell?.(targetCell.cx, targetCell.cy, entity);
-  entity.attackCooldown = Math.max(1, Math.round(weapon.rof * ctx.getROFBias(entity.house)));
+  entity.attackCooldown = aircraftFireRearmPostFrame(
+    entity,
+    weapon,
+    ctx.getROFBias(entity.house),
+  );
   if (entity.ammo > 0) entity.ammo--;
   return 'ok';
 }
