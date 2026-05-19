@@ -370,6 +370,10 @@ export const DIFFICULTIES: Difficulty[] = ['easy', 'normal', 'hard'];
 const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK', 'WOOD', 'CYCL']);
 const CRUSHABLE_WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'WOOD', 'CYCL']);
 const WOODEN_WALL_TYPES = new Set(['WOOD']);
+// C++ OverlayType enum: 21=WCRATE, 22=SCRATE, 24=WWCRATE.
+const OVERLAY_WOOD_CRATE = 21;
+const OVERLAY_STEEL_CRATE = 22;
+const OVERLAY_WATER_CRATE = 24;
 const ACTIVE_BSCAN_TYPES = new Set([
   'ATEK', 'IRON', 'WEAP', 'PDOX', 'PBOX', 'HBOX', 'DOME', 'GAP',
   'GUN', 'AGUN', 'FTUR', 'FACT', 'PROC', 'SILO', 'HPAD', 'SAM',
@@ -9309,6 +9313,9 @@ export class Game {
       }
     }
 
+    const crateMove = this.crateOverlayCanEnterResult(entity, cx, cy);
+    if (crateMove !== null) return crateMove;
+
     const wallType = this.map.getWallType(cx, cy);
     if (wallType) {
       // C++ InfantryClass::Can_Enter_Cell returns MOVE_DESTROYABLE for a
@@ -9424,6 +9431,9 @@ export class Game {
     if (!entity.stats.isInfantry && !entity.isAirUnit) {
       return this.canEnterTrackJumpCell(entity, goal.cx, goal.cy);
     }
+
+    const crateMove = this.crateOverlayCanEnterResult(entity, goal.cx, goal.cy);
+    if (crateMove !== null) return crateMove;
 
     const mapMove = this.map.canEnterCell(
       goal.cx,
@@ -10413,6 +10423,17 @@ export class Game {
       (meta.destroysWood === true && WOODEN_WALL_TYPES.has(wallType));
   }
 
+  private crateOverlayCanEnterResult(entity: Entity, cx: number, cy: number): MoveResult | null {
+    if (entity.isAirUnit || entity.isNavalUnit) return null;
+    const overlay = this.map.overlay[cy * MAP_CELLS + cx];
+    if (overlay !== OVERLAY_WOOD_CRATE &&
+        overlay !== OVERLAY_STEEL_CRATE &&
+        overlay !== OVERLAY_WATER_CRATE) {
+      return null;
+    }
+    return this.isHouseHumanOrPlayerControl(entity.house) ? null : MoveResult.IMPASSABLE;
+  }
+
   private wallOverlayCanEnterResult(entity: Entity, cx: number, cy: number): MoveResult | null {
     if (entity.isNavalUnit || entity.isAirUnit || entity.stats.isInfantry) return null;
     const wallType = this.map.getWallType(cx, cy);
@@ -10535,6 +10556,9 @@ export class Game {
       // block movement.
       return MoveResult.IMPASSABLE;
     }
+
+    const crateMove = this.crateOverlayCanEnterResult(entity, cx, cy);
+    if (crateMove !== null) return crateMove;
 
     let move = this.map.canEnterCell(
       cx,
