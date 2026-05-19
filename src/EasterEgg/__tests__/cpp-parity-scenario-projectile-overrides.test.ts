@@ -28,7 +28,34 @@ describe('C++ parity: scenario projectile overrides', () => {
     expect(weapon.warhead).toBe('Super');
     expect(weapon.projSpeed).toBe(100);
     expect(weapon.isInvisible).toBe(true);
+    expect(weapon.projectileArm).toBeUndefined();
     expect(weapon.isDropping).toBeUndefined();
+    expect(weapon.isParachuted).toBeUndefined();
     expect(weapon.isHigh).toBeUndefined();
+  });
+
+  it('applies scenario projectile-section fields after changing Projectile=', () => {
+    const rawSections = new Map<string, Map<string, string>>([
+      ['HELI', new Map([
+        ['Primary', 'Hellfire'],
+      ])],
+      ['Hellfire', new Map([
+        ['Projectile', 'LaserGuided'],
+        ['Speed', '22'],
+      ])],
+      ['LaserGuided', new Map([
+        ['Arm', '2'],
+      ])],
+    ]);
+
+    const { scenarioWeaponStats } = buildScenarioRuleOverrides(rawSections);
+    const weapon = scenarioWeaponStats.Hellfire;
+
+    expect(weapon.projSpeed).toBe(22);
+    expect(weapon.projectileROT).toBe(20);
+    expect(weapon.projectileArm).toBe(2);
+    expect(weapon.isHigh).toBe(true);
+    expect(weapon.isFueled).toBe(true);
+    expect(weapon.isAntiAir).toBe(true);
   });
 });

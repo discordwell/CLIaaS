@@ -86,9 +86,11 @@ function inheritedScenarioSpeed(rawSpeed: number): number {
 function clearProjectileDerivedWeaponFields(base: WeaponStats): void {
   delete base.projectileSpeed;
   delete base.projectileROT;
+  delete base.projectileArm;
   delete base.isArcing;
   delete base.isHigh;
   delete base.isDropping;
+  delete base.isParachuted;
   delete base.isInaccurate;
   delete base.isInvisible;
   delete base.isFueled;
@@ -97,9 +99,60 @@ function clearProjectileDerivedWeaponFields(base: WeaponStats): void {
   delete base.isSubSurface;
   delete base.isAntiSub;
   delete base.isFlameEquipped;
+  delete base.isGigundo;
+  delete base.isDegenerate;
 }
 
-function applyProjectileOverride(base: WeaponStats, projectileRaw: string | undefined): void {
+function rawSectionCaseInsensitive(
+  rawSections: Map<string, Map<string, string>>,
+  sectionName: string,
+): Map<string, string> | undefined {
+  const direct = rawSections.get(sectionName);
+  if (direct) return direct;
+  const normalized = sectionName.toLowerCase();
+  for (const [name, section] of rawSections) {
+    if (name.toLowerCase() === normalized) return section;
+  }
+  return undefined;
+}
+
+function applyProjectileSectionOverrides(
+  base: WeaponStats,
+  section: Map<string, string> | undefined,
+): void {
+  if (!section) return;
+  if (section.has('Arm')) base.projectileArm = Number.parseInt(section.get('Arm')!, 10);
+  if (section.has('ROT')) base.projectileROT = Number.parseInt(section.get('ROT')!, 10);
+
+  const boolFields: Array<[string, keyof WeaponStats]> = [
+    ['High', 'isHigh'],
+    ['Dropping', 'isDropping'],
+    ['Parachuted', 'isParachuted'],
+    ['Inaccurate', 'isInaccurate'],
+    ['Inviso', 'isInvisible'],
+    ['Ranged', 'isFueled'],
+    ['AA', 'isAntiAir'],
+    ['AG', 'isAntiGround'],
+    ['UnderWater', 'isSubSurface'],
+    ['ASW', 'isAntiSub'],
+    ['Gigundo', 'isGigundo'],
+    ['Degenerates', 'isDegenerate'],
+  ];
+
+  for (const [iniKey, statsKey] of boolFields) {
+    if (!section.has(iniKey)) continue;
+    const parsed = parseIniBool(section.get(iniKey));
+    if (parsed !== undefined) {
+      (base as unknown as Record<string, unknown>)[statsKey] = parsed;
+    }
+  }
+}
+
+function applyProjectileOverride(
+  base: WeaponStats,
+  projectileRaw: string | undefined,
+  rawSections: Map<string, Map<string, string>>,
+): void {
   if (!projectileRaw) return;
   const projectile = projectileRaw.trim().toLowerCase();
 
@@ -111,12 +164,15 @@ function applyProjectileOverride(base: WeaponStats, projectileRaw: string | unde
       base.isInvisible = true;
       break;
     case 'heatseeker':
+      base.projectileArm = 2;
       base.projectileROT = 5;
       base.isAntiAir = true;
       base.isHigh = true;
       base.isFueled = true;
+      base.isInaccurate = true;
       break;
     case 'aamissile':
+      base.projectileArm = 3;
       base.projectileROT = 20;
       base.isAntiAir = true;
       base.isAntiGround = false;
@@ -124,12 +180,14 @@ function applyProjectileOverride(base: WeaponStats, projectileRaw: string | unde
       base.isFueled = true;
       break;
     case 'laserguided':
+      base.projectileArm = 3;
       base.projectileROT = 20;
       base.isAntiAir = true;
       base.isHigh = true;
       base.isFueled = true;
       break;
     case 'frog':
+      base.projectileArm = 10;
       base.projectileROT = 5;
       base.isHigh = true;
       base.isFueled = true;
@@ -145,11 +203,18 @@ function applyProjectileOverride(base: WeaponStats, projectileRaw: string | unde
       base.isArcing = true;
       base.isHigh = true;
       base.isInaccurate = true;
+      base.isAntiSub = true;
       base.isAntiGround = false;
       break;
     case 'bomblet':
-    case 'parachute':
+      base.projectileArm = 24;
       base.isDropping = true;
+      base.isHigh = true;
+      break;
+    case 'parachute':
+      base.projectileArm = 24;
+      base.isDropping = true;
+      base.isParachuted = projectile === 'parachute';
       base.isHigh = true;
       break;
     case 'fireball':
@@ -167,6 +232,11 @@ function applyProjectileOverride(base: WeaponStats, projectileRaw: string | unde
     default:
       break;
   }
+
+  applyProjectileSectionOverrides(
+    base,
+    rawSectionCaseInsensitive(rawSections, projectileRaw.trim()),
+  );
 }
 
 export function buildScenarioRuleOverrides(
@@ -242,7 +312,7 @@ export function buildScenarioRuleOverrides(
     } else if (base.projSpeed !== undefined) {
       base.projSpeed = inheritedScenarioSpeed(base.projSpeed);
     }
-    if (section.has('Projectile')) applyProjectileOverride(base, section.get('Projectile'));
+    if (section.has('Projectile')) applyProjectileOverride(base, section.get('Projectile'), rawSections);
     if (section.has('Warhead')) base.warhead = section.get('Warhead')! as WarheadType;
     if (section.has('Burst')) base.burst = Number.parseInt(section.get('Burst')!, 10);
     if (section.has('Supress')) {
