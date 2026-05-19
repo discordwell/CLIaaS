@@ -8842,6 +8842,12 @@ export class Game {
 	        entity.mission === Mission.UNLOAD) return;
 	    const mc = MISSION_CONTROL[entity.mission];
 	    if (mc?.isParalyzed) return;
+	    // C++ drive.cpp: Scatter was revised to never redirect a drive-class
+	    // object that is already following a Head_To_Coord track. In practice
+	    // SCU38EA's moving 1TNK remains in motion with NavCom already cleared
+	    // when an E2 grenade calls CellClass::Incoming; C++ spends no scatter
+	    // RNG and leaves the active track alone.
+	    if (entity.isDriving) return;
 	    if (mc && !mc.isScatter && !forced) return;
 	    if (entity.bodyFacing256 >= 0 &&
 	        entity.desiredFacing256 >= 0 &&
