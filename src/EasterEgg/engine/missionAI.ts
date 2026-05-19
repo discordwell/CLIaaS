@@ -3580,17 +3580,27 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
     return;
   }
 
-	  if (dist <= rangeLeptons) {
-	    // C++ InfantryClass::Can_Fire returns FIRE_MOVING while Start_Driver is
-	    // active, even when the target is already inside weapon range. Structure
-	    // TarCom goes through the same Can_Fire path as unit TarCom.
-	    if (entity.stats.isInfantry && entity.isDriving) {
-	      entity.animState = AnimState.WALK;
-	      return;
-	    }
-	
-	    // Engineer capture/damage (C++ infantry.cpp:598-637 — any house's engineer, not just player)
-	    if (entity.type === UnitType.I_E6) {
+  if (dist <= rangeLeptons) {
+    // C++ InfantryClass::Can_Fire returns FIRE_MOVING while Start_Driver is
+    // active, even when the target is already inside weapon range. Structure
+    // TarCom goes through the same Can_Fire path as unit TarCom.
+    if (entity.stats.isInfantry && entity.isDriving) {
+      entity.animState = AnimState.WALK;
+      return;
+    }
+
+    // C++ UnitClass::Can_Fire returns FIRE_MOVING when IsNoFireWhileMoving and
+    // NavCom are legal. Structure TarCom uses the same Can_Fire path as object
+    // TarCom; do not let ARTY/V2-class units fire at buildings while they still
+    // have a move destination.
+    if (!entity.stats.isInfantry && entity.moveTarget) {
+      if ((entity.isNavalUnit && !entity.hasTurret) || entity.stats.noMovingFire) {
+        return;
+      }
+    }
+
+    // Engineer capture/damage (C++ infantry.cpp:598-637 — any house's engineer, not just player)
+    if (entity.type === UnitType.I_E6) {
       // EN1: Friendly repair — C++ always takes Renovate() branch for allies (infantry.cpp:606-611)
       // Renovate() on a full-health building is a harmless no-op. Engineer is consumed.
       if (ctx.isAllied(s.house, entity.house)) {
