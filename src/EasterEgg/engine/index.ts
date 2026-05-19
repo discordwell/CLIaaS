@@ -819,6 +819,7 @@ export class Game {
       effects: this.effects,
       logicAnims: this.logicAnims,
       logicAnimsAlreadyProcessed: this.logicAnimsProcessedThisTick,
+      immediateLogicSlotRelease: true,
       tick: this.tick,
       playerHouse: this.playerHouse,
       scenarioId: this.scenarioId,
@@ -900,7 +901,19 @@ export class Game {
       ctx.effects,
     );
     ctx.releaseTerrainLogicSlot = (terrain) => this.releaseTerrainLogicSlot(terrain);
-    ctx.deferLogicSlotRelease = (logicIndexHint) => this.deferCppLogicSlotRelease(logicIndexHint);
+    ctx.deferLogicSlotRelease = (logicIndexHint) => this.releaseCppLogicSlotHint(
+      'projectile',
+      logicIndexHint,
+      ctx.inflightProjectiles,
+      ctx.logicAnims,
+      ctx.effects,
+    );
+    ctx.attachDamageSmokeAnim = (entity) => this.maybeAttachDamageSmokeAnim(
+      entity,
+      ctx.inflightProjectiles,
+      ctx.logicAnims,
+      ctx.effects,
+    );
     return ctx;
   }
 
@@ -909,6 +922,18 @@ export class Game {
       this.traceCppLogicRelease('defer', logicIndexHint);
       this.pendingCppLogicSlotReleases.push(logicIndexHint);
     }
+  }
+
+  private releaseCppLogicSlotHint(
+    kind: string,
+    logicIndexHint: number | undefined,
+    inflightProjectiles = this.inflightProjectiles,
+    logicAnims = this.logicAnims,
+    effects = this.effects,
+  ): void {
+    if (logicIndexHint === undefined) return;
+    this.traceCppLogicRelease(kind, logicIndexHint);
+    this.shiftCppLogicHintsAfter(logicIndexHint, undefined, inflightProjectiles, logicAnims, effects);
   }
 
   private applyPendingCppLogicSlotReleases(): void {
@@ -1021,6 +1046,9 @@ export class Game {
       mission: entity.mission,
       cell: entity.cell ? [entity.cell.cx, entity.cell.cy] : undefined,
     });
+    if (!entity.alive) {
+      this.detachAttachedDamageSmokeForEntity(entity, logicAnims);
+    }
     entity.logicIndexHint = undefined;
     this.shiftCppLogicHintsAfter(deletedHint, entity, inflightProjectiles, logicAnims, effects);
   }
@@ -1191,12 +1219,6 @@ export class Game {
       if (entity.fallParachuteAnimActive && entity.fallParachuteAnimLogicIndexHint !== undefined) {
         maxExistingHint = Math.max(maxExistingHint, entity.fallParachuteAnimLogicIndexHint);
       }
-      if (entity.damageSmokeStartTick >= 0) {
-        count++;
-        if (entity.damageSmokeLogicIndexHint !== undefined) {
-          maxExistingHint = Math.max(maxExistingHint, entity.damageSmokeLogicIndexHint);
-        }
-      }
     }
     for (const corpse of this.corpses) {
       if (!this.corpseOccupiesCppAnimSlot(corpse)) continue;
@@ -1219,7 +1241,6 @@ export class Game {
           projectiles: inflightProjectiles.length,
           logicAnims: logicAnims.length,
           effects: effects.filter(effect => effect.cppLogicSlot === true).length,
-          damageSmokes: this.entities.filter(entity => entity.damageSmokeStartTick >= 0).length,
           corpses: this.activeCppCorpseAnimCount(),
           parachutes: activeFallingParachuteAnimCount(this.entities),
         }));
@@ -1234,7 +1255,6 @@ export class Game {
   ): number {
     let count = logicAnims.length;
     count += effects.filter(effect => effect.cppLogicSlot === true).length;
-    count += this.entities.filter(entity => entity.damageSmokeStartTick >= 0).length;
     count += this.activeCppCorpseAnimCount();
     count += activeFallingParachuteAnimCount(this.entities);
     return count;
@@ -1253,6 +1273,101 @@ export class Game {
 
   private reserveCppAnimSlot(): boolean {
     return this.cppAnimSlotCount() < CPP_ANIM_MAX;
+  }
+
+  private isDamageSmokeEligible(entity: Entity): boolean {
+    if (!entity.alive || entity.inLimbo || entity.isAirUnit || entity.stats.isInfantry) return false;
+    if (entity.stats.isVessel && (entity.type === UnitType.V_SS || entity.type === UnitType.V_MSUB)) return false;
+    return isCppYellowOrWorse(entity.hp, entity.maxHp);
+  }
+
+  private updateAttachedDamageSmokePosition(anim: LogicAnim): void {
+    if (anim.attachedEntityId === undefined) return;
+    const entity = this.entityById.get(anim.attachedEntityId);
+    if (!entity) return;
+    anim.x = entity.pos.x;
+    anim.y = entity.pos.y - 8;
+  }
+
+  private clearAttachedDamageSmokeForAnim(anim: LogicAnim): void {
+    if (anim.attachedEntityId === undefined) return;
+    const entity = this.entityById.get(anim.attachedEntityId);
+    if (!entity) return;
+    const hasOtherAttachedSmoke = this.logicAnims.some(other =>
+      other !== anim &&
+      other.attachedEntityId === anim.attachedEntityId &&
+      other.type === 'smoke_m' &&
+      !other.deleteOnNextProcess);
+    if (hasOtherAttachedSmoke) return;
+    entity.damageSmokeStartTick = -1;
+    entity.damageSmokeLogicIndexHint = undefined;
+    entity.damageSmokeCppLogicReleased = true;
+  }
+
+  private detachAttachedDamageSmokeForEntity(
+    entity: Entity,
+    logicAnims = this.logicAnims,
+  ): void {
+    for (const anim of logicAnims) {
+      if (anim.attachedEntityId !== entity.id || anim.type !== 'smoke_m') continue;
+      anim.attachedEntityId = undefined;
+      anim.deleteOnNextProcess = true;
+      anim.x = 0;
+      anim.y = 255 * CELL_SIZE;
+    }
+
+    entity.damageSmokeStartTick = -1;
+    entity.damageSmokeLogicIndexHint = undefined;
+    entity.damageSmokeCppLogicReleased = true;
+  }
+
+  private maybeAttachDamageSmokeAnim(
+    entity: Entity,
+    inflightProjectiles = this.inflightProjectiles,
+    logicAnims = this.logicAnims,
+    effects = this.effects,
+  ): void {
+    if (!this.isDamageSmokeEligible(entity)) return;
+
+    const existing = logicAnims.find(anim =>
+      anim.attachedEntityId === entity.id &&
+      anim.type === 'smoke_m' &&
+      !anim.deleteOnNextProcess);
+    if (existing) {
+      entity.damageSmokeStartTick = entity.damageSmokeStartTick >= 0
+        ? entity.damageSmokeStartTick
+        : this.tick;
+      entity.damageSmokeLogicIndexHint = existing.logicIndexHint;
+      this.updateAttachedDamageSmokePosition(existing);
+      return;
+    }
+
+    const logicIndexHint = this.logicIndexHintForNewObject(inflightProjectiles, logicAnims, effects);
+    const spawned = spawnLogicAnim(
+      logicAnims,
+      effects,
+      'smoke_m',
+      entity.pos.x,
+      entity.pos.y - 8,
+      1,
+      false,
+      false,
+      logicIndexHint,
+      () => this.logicIndexHintForNewObject(inflightProjectiles, logicAnims, effects),
+      () => this.reserveCppAnimSlot(),
+      false,
+      undefined,
+      0,
+      undefined,
+      this.tick,
+    );
+    if (!spawned) return;
+
+    const anim = logicAnims[logicAnims.length - 1];
+    anim.attachedEntityId = entity.id;
+    entity.damageSmokeStartTick = this.tick;
+    entity.damageSmokeLogicIndexHint = anim.logicIndexHint;
+    entity.damageSmokeCppLogicReleased = false;
   }
 
   private defaultScenarioTechLevel(): number {
@@ -2763,10 +2878,13 @@ export class Game {
           if (bestAnimIndex < 0 && !bestParachuteEntity) break;
 
           const anim = bestAnimIndex >= 0 ? this.logicAnims[bestAnimIndex] : undefined;
-          const effectiveLogicIdx = anim
+          let effectiveLogicIdx = anim
             ? (anim.logicIndexHint ?? logicIdx)
             : (bestParachuteEntity!.fallParachuteAnimLogicIndexHint ?? logicIdx);
           updateProjectilesThrough(effectiveLogicIdx - 1);
+          effectiveLogicIdx = anim
+            ? (anim.logicIndexHint ?? effectiveLogicIdx)
+            : (bestParachuteEntity!.fallParachuteAnimLogicIndexHint ?? effectiveLogicIdx);
           if (skipShiftedLogicObject(effectiveLogicIdx, anim?.createdLogicTick)) {
             if (anim) {
               anim.processedLogicTick = this.tick;
@@ -2781,6 +2899,7 @@ export class Game {
           }
           logicIdx = Math.max(logicIdx + 1, effectiveLogicIdx + 1);
           if (anim) {
+            this.updateAttachedDamageSmokePosition(anim);
             if (!processLogicAnim(
               anim,
               this.logicAnims,
@@ -2797,6 +2916,7 @@ export class Game {
               this.tick,
             )) {
               const deletedHint = anim.logicIndexHint;
+              this.clearAttachedDamageSmokeForAnim(anim);
               anim.logicIndexHint = undefined;
               this.logicAnims.splice(bestAnimIndex, 1);
               releaseProcessedLogicObject(deletedHint, 'anim');
@@ -2825,8 +2945,9 @@ export class Game {
         const entity = this.entities[i];
         if (!entity || entity.isAirUnit) continue;
         if (!entity.occupiesCppLogic()) continue;
-        const effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
+        let effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
         updateProjectilesThrough(effectiveLogicIdx - 1);
+        effectiveLogicIdx = entity.logicIndexHint ?? effectiveLogicIdx;
         if (skipShiftedLogicObject(effectiveLogicIdx)) {
           entity.lastLogicProcessedTick = this.tick;
           continue;
@@ -2862,9 +2983,10 @@ export class Game {
               entity._processedInBuildingPass = false; // reset for next tick
               continue;
             }
-            const effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
+            let effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
             if (effectiveLogicIdx > maxLogicIndexHint) break;
             processLogicAnimsThrough(effectiveLogicIdx - 1);
+            effectiveLogicIdx = entity.logicIndexHint ?? effectiveLogicIdx;
             if (skipShiftedLogicObject(effectiveLogicIdx)) {
               entity.lastLogicProcessedTick = this.tick;
               continue;
@@ -2885,9 +3007,10 @@ export class Game {
 
           if (!entity.occupiesCppLogic()) continue;
 
-          const effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
+          let effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
           if (effectiveLogicIdx > maxLogicIndexHint) break;
           processLogicAnimsThrough(effectiveLogicIdx - 1);
+          effectiveLogicIdx = entity.logicIndexHint ?? effectiveLogicIdx;
           if (skipShiftedLogicObject(effectiveLogicIdx)) {
             entity.lastLogicProcessedTick = this.tick;
             continue;
@@ -2907,9 +3030,10 @@ export class Game {
 
       for (let structureIndex = 0; structureIndex < this.structures.length; structureIndex++) {
         const s = this.structures[structureIndex];
-        const effectiveLogicIdx = s.logicIndexHint ?? logicIdx;
+        let effectiveLogicIdx = s.logicIndexHint ?? logicIdx;
         processRuntimeEntitiesThrough(effectiveLogicIdx - 1);
         updateProjectilesThrough(effectiveLogicIdx - 1);
+        effectiveLogicIdx = s.logicIndexHint ?? effectiveLogicIdx;
         if (skipShiftedLogicObject(effectiveLogicIdx)) continue;
 		        if (ScenarioRandom._tagLogging) {
 		          ScenarioRandom._sourceTag = 12000 + effectiveLogicIdx;
@@ -2996,8 +3120,9 @@ export class Game {
         if (s.hpadHelicopterId !== undefined) {
           const heli = this.entityById.get(s.hpadHelicopterId);
           if (heli && heli.alive && heli.isAirUnit) {
-            const effectiveLogicIdx = heli.logicIndexHint ?? logicIdx;
+            let effectiveLogicIdx = heli.logicIndexHint ?? logicIdx;
             updateProjectilesThrough(effectiveLogicIdx - 1);
+            effectiveLogicIdx = heli.logicIndexHint ?? effectiveLogicIdx;
             if (skipShiftedLogicObject(effectiveLogicIdx)) {
               heli.lastLogicProcessedTick = this.tick;
               continue;
@@ -3152,8 +3277,9 @@ export class Game {
           if (!entity || entity.isAirUnit || entity.inLimbo || !entity.alive) continue;
           if (entity.unlimboTick !== this.tick || entity.lastLogicProcessedTick === this.tick) continue;
 
-          const effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
+          let effectiveLogicIdx = entity.logicIndexHint ?? logicIdx;
           processLogicAnimsThrough(effectiveLogicIdx - 1);
+          effectiveLogicIdx = entity.logicIndexHint ?? effectiveLogicIdx;
           if (skipShiftedLogicObject(effectiveLogicIdx)) {
             entity.lastLogicProcessedTick = this.tick;
             continue;

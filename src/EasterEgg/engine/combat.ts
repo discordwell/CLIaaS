@@ -1208,6 +1208,10 @@ export interface CombatContext {
   releaseTerrainLogicSlot?: (terrain: MapTree) => void;
   /** Release a non-entity C++ Logic slot after its BulletClass/AnimClass deletes. */
   deferLogicSlotRelease?: (logicIndexHint: number | undefined) => void;
+  /** True when the release callback immediately compacts live Logic hints. */
+  immediateLogicSlotRelease?: boolean;
+  /** Submit the attached SMOKE_M AnimClass that Unit/Vessel Take_Damage creates below yellow health. */
+  attachDamageSmokeAnim?: (entity: Entity) => void;
   /** Lowest original Logic index before a shifted-behind-cursor range. */
   shiftedLogicSkipHintAfter?: number;
   /** Highest original Logic index shifted behind the active C++ cursor this tick. */
@@ -1603,6 +1607,8 @@ export function damageEntity(
     if (occupiedLogicBefore && !target.occupiesCppLogic()) {
       ctx.releaseLogicSlotForEntity?.(target);
     }
+  } else if (amount > 0) {
+    ctx.attachDamageSmokeAnim?.(target);
   }
   damageTrace({
     tick: ctx.tick,
@@ -3753,7 +3759,12 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
     ctx.inflightProjectiles = [...survivors, ...unprocessed, ...deferred];
 
     detonateProjectile(ctx, proj);
-    ctx.deferLogicSlotRelease?.(proj.logicIndexHint);
+    const liveAfter = countLiveProjectilePredecessors(ctx, predecessors);
+    const earlierDeletes = Math.max(0, liveBefore - liveAfter);
+    const projectileDeleteHint = ctx.immediateLogicSlotRelease && proj.logicIndexHint !== undefined
+      ? Math.max(0, proj.logicIndexHint - earlierDeletes)
+      : proj.logicIndexHint;
+    ctx.deferLogicSlotRelease?.(projectileDeleteHint);
 
     const spawnedProjectiles = ctx.inflightProjectiles.filter(p => !knownProjectiles.has(p));
     for (const spawned of spawnedProjectiles) {
@@ -3778,15 +3789,19 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
     }
     ctx.inflightProjectiles = [...survivors, ...deferred];
 
-    const liveAfter = countLiveProjectilePredecessors(ctx, predecessors);
-    const earlierDeletes = Math.max(0, liveBefore - liveAfter);
     if (proj.logicIndexHint !== undefined) {
-      // Deleting an earlier Logic predecessor can decrement following hints
-      // before this local projectile skip is applied. Cover both the original
-      // cursor neighborhood and the already-shifted representation.
+      // Deleting an earlier Logic predecessor can decrement the current bullet's
+      // effective slot before the bullet itself deletes. In Game runtime the
+      // release callback has already compacted hints, so skip only that final
+      // shifted slot; standalone tests without compaction keep the wider range.
       const skipLogicHintAfter = Math.max(0, proj.logicIndexHint - earlierDeletes);
-      const skipLogicHintThrough = proj.logicIndexHint + earlierDeletes;
-      if (skipLogicHintThrough > skipLogicHintAfter) {
+      const skipLogicHintThrough = ctx.immediateLogicSlotRelease
+        ? skipLogicHintAfter
+        : proj.logicIndexHint + earlierDeletes;
+      const shouldSkipShifted = ctx.immediateLogicSlotRelease
+        ? earlierDeletes > 0
+        : skipLogicHintThrough > skipLogicHintAfter;
+      if (shouldSkipShifted) {
         const range = { after: skipLogicHintAfter, through: skipLogicHintThrough };
         skipLogicHintRanges.push(range);
         (ctx.shiftedLogicSkipRanges ??= []).push(range);

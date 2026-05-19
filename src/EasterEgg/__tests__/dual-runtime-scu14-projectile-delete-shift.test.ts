@@ -180,6 +180,68 @@ async function tsDeleteShiftState(adapter: unknown) {
   });
 }
 
+async function wasmCombatAnimWindow(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const wanted = new Set(['SMOKE_M', 'VEH-HIT2', 'FRAG1', 'FBALL1', 'PIFF']);
+    return {
+      tick: state.tick,
+      anims: (state.anims ?? [])
+        .filter((anim: any) =>
+          anim.logicIndex >= 272 &&
+          anim.logicIndex <= 286 &&
+          wanted.has(anim.name))
+        .map((anim: any) => ({
+          h: anim.logicIndex,
+          type: String(anim.name).toLowerCase(),
+          cx: anim.cx,
+          cy: anim.cy,
+          stage: anim.stage,
+        }))
+        .sort((a: any, b: any) =>
+          a.h - b.h ||
+          a.type.localeCompare(b.type) ||
+          a.cx - b.cx ||
+          a.cy - b.cy ||
+          a.stage - b.stage),
+    };
+  }) as Promise<{
+    tick: number;
+    anims: Array<{ h: number; type: string; cx: number; cy: number; stage: number }>;
+  }>;
+}
+
+async function tsCombatAnimWindow(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const wanted = new Set(['smoke_m', 'veh-hit2', 'frag1', 'fball1', 'piff']);
+    return {
+      tick: (window as any).__agentState().tick,
+      anims: (game.logicAnims ?? [])
+        .filter((anim: any) =>
+          anim.logicIndexHint >= 272 &&
+          anim.logicIndexHint <= 286 &&
+          wanted.has(anim.type))
+        .map((anim: any) => ({
+          h: anim.logicIndexHint,
+          type: anim.type,
+          cx: Math.floor(anim.x / 24),
+          cy: Math.floor(anim.y / 24),
+          stage: anim.stage,
+        }))
+        .sort((a: any, b: any) =>
+          a.h - b.h ||
+          a.type.localeCompare(b.type) ||
+          a.cx - b.cx ||
+          a.cy - b.cy ||
+          a.stage - b.stage),
+    };
+  }) as Promise<{
+    tick: number;
+    anims: Array<{ h: number; type: string; cx: number; cy: number; stage: number }>;
+  }>;
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 projectile delete shift', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -264,6 +326,40 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 projectile delete shi
       expect(ts.rifle.isDriving).toBe(cpp.rifle.isDriving);
       expect(ts.rifle.lx).toBe(cpp.rifle.lx);
       expect(ts.rifle.ly).toBe(cpp.rifle.ly);
+    }, { wasmSeed: 0 });
+  }, 300_000);
+
+  it('keeps SCUD combat AnimClass slots aligned through damage smoke and small-arms piffs', async () => {
+    await withDualScenario('SCU14EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBothOneTickAtATime(handle, 215);
+      const cpp215 = await wasmCombatAnimWindow(handle.wasm);
+      const ts215 = await tsCombatAnimWindow(handle.ts);
+      expect(ts215.tick).toBe(cpp215.tick);
+      expect(ts215.anims).toEqual(cpp215.anims);
+      expect(ts215.anims).toContainEqual({
+        h: 286,
+        type: 'piff',
+        cx: 90,
+        cy: 79,
+        stage: 0,
+      });
+
+      await stepBothOneTickAtATime(handle, 4);
+      const cpp219 = await wasmCombatAnimWindow(handle.wasm);
+      const ts219 = await tsCombatAnimWindow(handle.ts);
+      expect(ts219.tick).toBe(219);
+      expect(ts219.tick).toBe(cpp219.tick);
+      expect(ts219.anims).toEqual(cpp219.anims);
+      expect(ts219.anims).toEqual(expect.arrayContaining([
+        { h: 272, type: 'smoke_m', cx: 92, cy: 76, stage: 67 },
+        { h: 273, type: 'smoke_m', cx: 92, cy: 77, stage: 61 },
+        { h: 274, type: 'smoke_m', cx: 94, cy: 76, stage: 45 },
+        { h: 276, type: 'veh-hit2', cx: 92, cy: 80, stage: 9 },
+        { h: 277, type: 'veh-hit2', cx: 94, cy: 80, stage: 9 },
+        { h: 278, type: 'veh-hit2', cx: 92, cy: 80, stage: 9 },
+      ]));
     }, { wasmSeed: 0 });
   }, 300_000);
 });

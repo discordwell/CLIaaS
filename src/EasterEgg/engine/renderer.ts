@@ -2470,14 +2470,9 @@ export class Renderer {
         ctx.fillRect(screen.x - spriteW / 2, screen.y - spriteH / 2, spriteW, spriteH);
       }
 
-      // Damage smoke — attached SMOKE_M anim at <=ConditionYellow (C++ unit.cpp:1113-1118, vessel.cpp:975-980).
-      // C++ anchors at Coord_Add(Coord, XYP_Coord(0, -8)) and guards with !IsAnimAttached so exactly
-      // one smoke anim is spawned per unit. We mirror IsAnimAttached via entity.damageSmokeStartTick:
-      // set on first entry into the threshold, cleared if the unit recovers above ConditionYellow.
-      if (entity.alive && !entity.stats.isInfantry && entity.hp <= entity.maxHp * CONDITION_YELLOW) {
-        if (entity.damageSmokeStartTick < 0) {
-          entity.damageSmokeStartTick = tick; // attach smoke anim (C++ IsAnimAttached = true)
-        }
+      // Damage smoke is created by simulation logic as an attached SMOKE_M
+      // AnimClass slot. Rendering only displays the existing attachment.
+      if (entity.damageSmokeStartTick >= 0) {
         const smokeSheet = assets.getSheet('smoke_m');
         if (smokeSheet) {
           // C++ adata.cpp:1045-1046 — SMOKE_M: 91 frames, loopStart=67, loops=6, delay=1.
@@ -2490,9 +2485,6 @@ export class Renderer {
           const frame = age < loopStart ? age : loopStart + ((age - loopStart) % loopLen);
           assets.drawFrame(ctx, 'smoke_m', frame, screen.x, screen.y - 8, { centerX: true, centerY: true });
         }
-      } else if (entity.damageSmokeStartTick >= 0) {
-        // Unit recovered above ConditionYellow — detach so next threshold-cross restarts the anim.
-        entity.damageSmokeStartTick = -1;
       }
 
       ctx.globalAlpha = 1;

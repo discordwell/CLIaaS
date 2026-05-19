@@ -21,6 +21,9 @@ export type LogicAnimType =
   | 'smoke_m'
   | 'smokey'
   | 'fball_fade'
+  | 'piff'
+  | 'piffpiff'
+  | 'flak'
   | 'fball1'
   | 'frag1'
   | 'veh-hit1'
@@ -38,6 +41,7 @@ export interface LogicAnim {
   delay: number;
   isBrandNew: boolean;
   logicIndexHint?: number;
+  attachedEntityId?: number;
   attachedStructureIndex?: number;
   attachedTreeKey?: number;
   damageAccumRaw?: number;
@@ -98,6 +102,11 @@ const LOGIC_ANIM_DEFS: Record<LogicAnimType, LogicAnimDef> = {
   // effects; their lifetime affects later AnimClass allocation failure.
   smokey: { sprite: 'smokey', biggest: 2, stages: 7, loops: 1, rate: 1, scorcher: false },
   fball_fade: { sprite: 'napalm1', biggest: 1, stages: 4, loops: 1, rate: 1, scorcher: false },
+  // C++ combat impact animations for small-arms and anti-air bursts. They are
+  // real AnimClass/Logic entries even though they have no crater/scorch side effects.
+  piff: { sprite: 'piff', biggest: 1, stages: 4, loops: 1, rate: 1, scorcher: false },
+  piffpiff: { sprite: 'piffpiff', biggest: 2, stages: 8, loops: 1, rate: 1, scorcher: false },
+  flak: { sprite: 'flak', biggest: 7, stages: 8, loops: 1, rate: 1, scorcher: false },
   // C++ adata.cpp crater-forming combat animations. AnimClass::Middle calls
   // CellClass::Reduce_Tiberium(6) and places SMUDGE_CRATER1.
   fball1: { sprite: 'fball1', biggest: 6, stages: 18, loops: 1, rate: 1, scorcher: false, crater: true },
@@ -123,6 +132,9 @@ export function logicAnimTypeForSprite(sprite: string | undefined): LogicAnimTyp
     case 'smoke_m': return 'smoke_m';
     case 'smokey': return 'smokey';
     case 'fball1': return 'fball1';
+    case 'piff': return 'piff';
+    case 'piffpiff': return 'piffpiff';
+    case 'flak': return 'flak';
     case 'frag1': return 'frag1';
     case 'veh-hit1': return 'veh-hit1';
     case 'veh-hit2': return 'veh-hit2';
