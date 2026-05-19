@@ -38,6 +38,7 @@ function makeGame(overrides: Partial<MockGame> = {}): MockGame {
     entityById: new Map(),
     structures: [],
     playerHouse: House.Spain,
+    houseCredits: new Map(),
     killCount: 3,
     lossCount: 1,
     productionQueue: new Map(),
@@ -141,6 +142,21 @@ describe('serializeState', () => {
     expect(s.units[0].ally).toBe(true);
     expect(s.enemies[0].id).toBe(20);
     expect(s.enemies[0].ally).toBe(false);
+  });
+
+  it('serializes allied non-player-house mobile units with friendly units', () => {
+    const game = makeGame({
+      isAllied: (a: House, b: House) =>
+        a === b || (a === House.Spain && b === House.England),
+    });
+    const alliedTransport = makeEntity(30, UnitType.V_LST, House.England, 98, 104);
+    addEntity(game, alliedTransport);
+
+    const s = serializeState(game as unknown as Parameters<typeof serializeState>[0]);
+    expect(alliedTransport.isPlayerUnit).toBe(false);
+    expect(s.units).toHaveLength(1);
+    expect(s.enemies).toHaveLength(0);
+    expect(s.units[0]).toMatchObject({ id: 30, t: 'LST', ally: true });
   });
 
   it('filters dead entities', () => {

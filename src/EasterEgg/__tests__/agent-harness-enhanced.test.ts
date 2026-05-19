@@ -40,6 +40,7 @@ function makeGame(overrides: Record<string, unknown> = {}) {
     entityById: new Map<number, Entity>(),
     structures: [] as MapStructure[],
     playerHouse: House.Spain,
+    houseCredits: new Map(),
     killCount: 3,
     lossCount: 1,
     productionQueue: new Map<string, { item: ProductionItem; progress: number; queueCount: number; costPaid: number }>(),

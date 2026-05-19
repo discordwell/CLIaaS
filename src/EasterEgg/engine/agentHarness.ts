@@ -257,7 +257,7 @@ export function serializeState(game: Game): AgentState {
   }).isAllied;
   const isAlliedHouse = (house: House) => (
     typeof isAlliedFn === 'function'
-      ? isAlliedFn.call(game, house, game.playerHouse)
+      ? isAlliedFn.call(game, game.playerHouse, house)
       : house === game.playerHouse
   );
   const alliedHouses = Object.values(House).filter((house) => {
@@ -266,7 +266,7 @@ export function serializeState(game: Game): AgentState {
 
   for (const e of game.entities) {
     if (!e.alive) continue;
-    if (e.isPlayerUnit) {
+    if (isAlliedHouse(e.house)) {
       units.push(serializeEntity(e, true));
     } else {
       enemies.push(serializeEntity(e, false));
