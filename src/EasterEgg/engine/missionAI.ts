@@ -2165,14 +2165,17 @@ function hasThreatAirMethod(entity: Entity): boolean {
 }
 
 function isCppFullMapThreatLayerCandidate(other: Entity): boolean {
-  if (other.inLimbo) return false;
+  if (!other.occupiesCppLogic()) return false;
+  // C++ removes ordinary dog deaths from the threat layer before most scans can
+  // observe them. Team patrol's raw scan opts back in through the range helper.
+  return other.alive || other.type !== UnitType.I_DOG;
+}
+
+function isCppCellOccupierThreatCandidate(other: Entity, includeDeadDogs = false): boolean {
+  if (!other.occupiesCppLogic()) return false;
   if (other.alive) return true;
-  // C++ leaves most infantry death animations active in Map.Layer[LAYER_GROUND].
-  // TechnoClass::Greatest_Threat can select them, then Assign_Target clears the
-  // zero-strength target without retrying. Dogs are removed earlier in the
-  // observed C++ occupier/layer path, matching the range-scan dead-dog guard.
-  if (!other.stats.isInfantry || other.type === UnitType.I_DOG) return false;
-  return !other.isInfantryDeathAnimationComplete();
+  if (other.type === UnitType.I_DOG) return includeDeadDogs;
+  return true;
 }
 
 function isCandidateVisibleToPlayer(ctx: GreatestThreatRangeContext, other: Entity, playerHouseIdx: number): boolean {
@@ -2620,22 +2623,15 @@ function cellBasedGuardScan(
     // select an object that is still in the Cell_Occupier chain with Strength=0;
     // only Assign_Target later clears that target (techno.cpp:2875-2889).
     //
-    // TS `alive=false` ordinary infantry can still approximate a C++ active
-    // zero-strength object during its death animation, so keep those candidates.
-    // Dogs are the exception observed in C++: dog deaths are removed/limboed
-    // from the occupier chain before they can poison later scans. SCG01EA t147:
-    // a dead DOG record at (63,52) must not block the JEEP from selecting the
-    // live E1 behind it, while SCG06EA t132 still needs a dead E1 blocker.
+    // TS `alive=false` objects can still approximate C++ active zero-strength
+    // technos while occupiesCppLogic() is true: infantry death animations and
+    // sunk vessels remain visible to threat scans. Ordinary removed vehicles do
+    // not. Dogs are the exception observed in C++: dog deaths are removed/limboed
+    // from the occupier chain before they can poison later scans, unless a raw
+    // team patrol scan explicitly opts in.
     if (other.inLimbo) continue;
     if (!isInCppCellOccupierThreatLayer(other)) continue;
-    // C++ infantry can remain in Cell_Occupier while playing death animation,
-    // which is why dead non-dog infantry must still be visible to the scan in
-    // a few parity cases. Destroyed vehicles/buildings are not valid occupiers
-    // for TechnoClass::Evaluate_Cell in the same way; keeping them here lets
-    // AREA_GUARD units target husks C++ has already removed (SCG07EA t177).
-    if (!other.alive && !other.stats.isInfantry) continue;
-    if (!other.alive && other.stats.isInfantry && other.isInfantryDeathAnimationComplete()) continue;
-    if (!other.alive && other.type === UnitType.I_DOG && !opts?.includeDeadDogs) continue;
+    if (!isCppCellOccupierThreatCandidate(other, opts?.includeDeadDogs)) continue;
     const allied = ctx.entitiesAllied(entity, other);
     if (isRepairWeapon) {
       // C++ techno.cpp:1836:
