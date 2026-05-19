@@ -650,10 +650,9 @@ export const DISPATCH_ORDER_REFACTOR = true;
  * The gate intentionally observes `entity.pathIndex` and `entity.path.length`
  * at loop boundaries rather than trying to detect cell-boundary crossings from
  * inside `updateMove` — matching the observable C++ behavior rather than the
- * internal state machine. Vessels with doors-open (LST loading/unloading)
- * short-circuit on the pre-Commence gate already present in `updateMove`
- * (index.ts:5788 — early-return on `entity.stats.isVessel && isTransport && doorOpen`),
- * so the second iteration is a no-op for them.
+ * internal state machine. Vessel doors only gate VesselClass's post-DriveClass
+ * Commence call; DriveClass::AI continues to consume track movement while an
+ * LST door is open.
  *
  * ## Shipping OFF
  *

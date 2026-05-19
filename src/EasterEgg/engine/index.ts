@@ -7623,14 +7623,6 @@ export class Game {
         regeneratedPathThisCycle = true;
       }
 
-      // Vessel Is_Door_Closed gate: vessel.cpp:659 gates the post-Commence
-      // behind `Is_Door_Closed()`. For non-LST vessels door is always
-      // closed; for LSTs `doorOpen` is toggled open during cargo load/unload.
-      // When open, do NOT run the second cycle (the pre-Commence gate in
-      // updateMove at ~5788 would short-circuit to IDLE anyway, but we
-      // keep the semantic gate explicit here).
-      if (entity.stats.isVessel && entity.doorOpen) break;
-
       // Sanity: if path length SHRANK unexpectedly this iteration (not just
       // pathIndex advancing), something outside the driver mutated state —
       // don't re-enter.
