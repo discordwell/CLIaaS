@@ -64,6 +64,20 @@ function findWasmLateGreekArty(state: RAGameState) {
   };
 }
 
+function findWasmVehicleFlagClearedGreekE1(state: RAGameState) {
+  const infantry = [...state.units, ...state.enemies]
+    .find(u => u.id === 852024 && u.t === 'E1' && u.house === 'Greece');
+  if (!infantry) throw new Error('C++ SCU14EA Greek E1 852024 missing');
+  return {
+    tick: state.tick,
+    mission: infantry.m,
+    missionTimer: infantry.mt,
+    nav: { lx: infantry.nlx, ly: infantry.nly },
+    path: [infantry.p0, infantry.p1, infantry.p2, infantry.p3, infantry.p4, infantry.p5]
+      .filter((facing): facing is number => typeof facing === 'number' && facing >= 0),
+  };
+}
+
 async function stepBothOneTickAtATime(
   handle: Parameters<typeof stepBoth>[0],
   ticks: number,
@@ -134,6 +148,35 @@ async function tsLateGreekArty(adapter: unknown) {
   }>;
 }
 
+async function tsVehicleFlagClearedGreekE1(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const infantry = (game.entities ?? []).find((entity: any) =>
+      entity.id === 225 &&
+      entity.type === 'E1' &&
+      entity.house === 'Greece');
+    if (!infantry) throw new Error('TS SCU14EA Greek E1 225 missing');
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      mission: infantry.mission,
+      missionTimer: infantry.missionTimer,
+      nav: infantry.moveTarget ? { lx: infantry.moveTarget.lx, ly: infantry.moveTarget.ly } : null,
+      path: (infantry.drivePathFacings ?? [])
+        .filter((facing: number) => facing >= 0)
+        .slice(0, 6),
+    };
+  }) as Promise<{
+    tick: number;
+    rngState: number;
+    mission: string;
+    missionTimer: number;
+    nav: { lx: number; ly: number } | null;
+    path: number[];
+  }>;
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 LST retreat with open door', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -180,7 +223,7 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 LST retreat with open
     }, { wasmSeed: 0 });
   }, 300_000);
 
-  it('removes map-exited LSTs and preserves late ARTY approach fallback', async () => {
+  it('removes map-exited LSTs and preserves late approach fallbacks', async () => {
     await withDualScenario('SCU14EA', async (handle) => {
       await handle.ts.syncRngSeed(handle.wasmState.rngState!);
 
@@ -201,8 +244,21 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 LST retreat with open
         path: cppArty.path,
       });
 
-      result = await stepBoth(handle, 1);
+      result = await stepBothOneTickAtATime(handle, 43);
       expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
+
+      const cppInfantry = findWasmVehicleFlagClearedGreekE1(result.wasm.state);
+      const tsInfantry = await tsVehicleFlagClearedGreekE1(handle.ts);
+      expect(cppInfantry.nav).toEqual({ lx: 22408, ly: 21384 });
+      expect(cppInfantry.path).toEqual([4, 4, 4, 3, 4]);
+      expect(tsInfantry).toEqual({
+        tick: cppInfantry.tick,
+        rngState: result.wasm.state.rngState! >>> 0,
+        mission: 'HUNT',
+        missionTimer: cppInfantry.missionTimer,
+        nav: cppInfantry.nav,
+        path: cppInfantry.path,
+      });
     }, { wasmSeed: 0, preserveSourceFog: true });
   }, 360_000);
 });

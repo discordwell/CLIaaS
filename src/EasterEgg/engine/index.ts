@@ -10276,6 +10276,23 @@ export class Game {
     owner.trackReservationCells = owner.trackReservationCells.filter(idx => idx !== cellIdx);
   }
 
+  private markVehicleFlagClearedOccupiers(cellIdx: number, exceptEntityId = -1): void {
+    if (cellIdx < 0 || cellIdx >= MAP_CELLS * MAP_CELLS || this.map.vehicleOccupancy.has(cellIdx)) {
+      return;
+    }
+    const cx = cellIdx % MAP_CELLS;
+    const cy = Math.floor(cellIdx / MAP_CELLS);
+    for (const occupant of this.entities) {
+      if (occupant.id === exceptEntityId) continue;
+      if (occupant.inLimbo || occupant.stats.isInfantry) continue;
+      if (!occupant.alive && !occupant.stats.isVessel) continue;
+      if (occupant.isAirUnit && occupant.flightAltitude > 0) continue;
+      if (occupant.cell.cx === cx && occupant.cell.cy === cy) {
+        occupant.driveTrackFlagClearedCellIdx = cellIdx;
+      }
+    }
+  }
+
   private forgetDriveTrackReservationClobbers(
     clobbered: { cellIdx: number; ownerId: number } | Array<{ cellIdx: number; ownerId: number }> | null,
   ): void {
@@ -10283,13 +10300,7 @@ export class Game {
     const entries = Array.isArray(clobbered) ? clobbered : [clobbered];
     for (const entry of entries) {
       this.forgetDriveTrackReservationCell(entry.ownerId, entry.cellIdx);
-      const occupantId = this.map.occupancy[entry.cellIdx] ?? 0;
-      if (occupantId > 0 && occupantId !== entry.ownerId) {
-        const occupant = this.entityById.get(occupantId);
-        if (occupant?.alive && !occupant.inLimbo && !occupant.stats.isInfantry) {
-          occupant.driveTrackFlagClearedCellIdx = entry.cellIdx;
-        }
-      }
+      this.markVehicleFlagClearedOccupiers(entry.cellIdx, entry.ownerId);
     }
   }
 
@@ -10297,20 +10308,14 @@ export class Game {
     this.forgetDriveTrackReservationClobbers(this.map.setVehicleOccupancy(cx, cy, entityId));
   }
 
-	  private moveVehicleOccupancy(oldCx: number, oldCy: number, newCx: number, newCy: number, entityId: number): void {
-	    const entity = this.entityById.get(entityId);
-	    if (entity) entity.driveTrackFlagClearedCellIdx = -1;
-	    const oldCellIdx = oldCy * MAP_CELLS + oldCx;
-	    const clobbered = this.map.moveVehicleOccupancy(oldCx, oldCy, newCx, newCy, entityId);
+  private moveVehicleOccupancy(oldCx: number, oldCy: number, newCx: number, newCy: number, entityId: number): void {
+    const entity = this.entityById.get(entityId);
+    if (entity) entity.driveTrackFlagClearedCellIdx = -1;
+    const oldCellIdx = oldCy * MAP_CELLS + oldCx;
+    const clobbered = this.map.moveVehicleOccupancy(oldCx, oldCy, newCx, newCy, entityId);
     if (entity) this.markEntityCellOccupierDown(entity);
-	    if (oldCx >= 0 && oldCx < MAP_CELLS && oldCy >= 0 && oldCy < MAP_CELLS) {
-      const occupantId = this.map.occupancy[oldCellIdx] ?? 0;
-      if (occupantId > 0 && occupantId !== entityId && !this.map.vehicleOccupancy.has(oldCellIdx)) {
-        const occupant = this.entityById.get(occupantId);
-        if (occupant?.alive && !occupant.inLimbo && !occupant.stats.isInfantry) {
-          occupant.driveTrackFlagClearedCellIdx = oldCellIdx;
-        }
-      }
+    if (oldCx >= 0 && oldCx < MAP_CELLS && oldCy >= 0 && oldCy < MAP_CELLS) {
+      this.markVehicleFlagClearedOccupiers(oldCellIdx, entityId);
     }
     this.forgetDriveTrackReservationClobbers(clobbered);
   }
@@ -10319,13 +10324,7 @@ export class Game {
     const ownerId = this.map.clearVehicleTrackReservation(cellIdx, entity.id);
     if (ownerId > 0) {
       this.forgetDriveTrackReservationCell(ownerId, cellIdx);
-      const occupantId = this.map.occupancy[cellIdx] ?? 0;
-      if (occupantId > 0 && occupantId !== ownerId) {
-        const occupant = this.entityById.get(occupantId);
-        if (occupant?.alive && !occupant.inLimbo && !occupant.stats.isInfantry) {
-          occupant.driveTrackFlagClearedCellIdx = cellIdx;
-        }
-      }
+      this.markVehicleFlagClearedOccupiers(cellIdx, ownerId);
     }
   }
 
