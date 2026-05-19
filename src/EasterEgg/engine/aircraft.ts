@@ -832,6 +832,10 @@ function updateHelicopterMissionAttack(ctx: AircraftContext, entity: Entity): bo
         flyCurrentFacing();
         return true;
       }
+      // C++ Process_Take_Off() still runs when the helicopter is already at
+      // FLIGHT_LEVEL, and its FLIGHT_LEVEL case calls Set_Speed(0xFF) before
+      // returning true. A prior close approach may have left Speed at zero.
+      entity.aircraftSpeedFraction = 1.0;
       entity.aircraftAttackStatus = ATTACK_FLY_TO_POSITION;
       if (entity.moveTarget) {
         const dir = directionToLeptons256(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly);

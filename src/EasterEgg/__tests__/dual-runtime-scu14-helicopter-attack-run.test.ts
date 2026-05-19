@@ -144,4 +144,35 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 helicopter attack run
       });
     }, { wasmSeed: 0 });
   }, 300_000);
+
+  it('restarts the air1 Longbow at full flight speed for the next attack run', async () => {
+    await withDualScenario('SCU14EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBothInChunks(handle, 1123);
+      const cpp = await wasmAir1AttackRunState(handle.wasm);
+      const ts = await tsAir1AttackRunState(handle.ts);
+
+      expect(ts.tick).toBe(cpp.tick);
+      expect(ts.rngState >>> 0).toBe(cpp.rngState >>> 0);
+      expect(cpp.heli).toMatchObject({
+        type: 'HELI',
+        house: 'Greece',
+        mission: 1,
+        status: 1,
+        missionTimer: 13,
+      });
+      expect(ts.heli).toMatchObject({
+        type: cpp.heli.type,
+        house: cpp.heli.house,
+        mission: 'ATTACK',
+        missionTimer: cpp.heli.missionTimer,
+        status: cpp.heli.status,
+        lx: cpp.heli.lx,
+        ly: cpp.heli.ly,
+        primaryCurrent: cpp.heli.primaryCurrent,
+        primaryDesired: cpp.heli.primaryDesired,
+      });
+    }, { wasmSeed: 0 });
+  }, 300_000);
 });
