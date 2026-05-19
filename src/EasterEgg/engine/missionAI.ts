@@ -1490,12 +1490,11 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       const fireCoord = fireCoordForWeaponAtLatchedFacing(entity, activeWeapon, fireAtFacing256, fireAtSecondShot);
       const fireDirection256 = cppFireDirection256(entity, fireAtFacing256);
       if (fireAtFacing256 >= 0) entity.firePrepFacing256 = -1;
-      // C++ techno.cpp:3106-3108 — bullet.IsInaccurate=true when firer Is_Foot() && IsDriving.
-      // C++ IsDriving is set by Start_Driver for all FootClass units; TS only sets it for
-      // infantry (entity.ts:1155) while vehicles use track-based movement that doesn't
-      // flip the flag. To catch both cases, combine: isDriving OR visible movement.
-      const isMovingPlatform = !!entity.isDriving ||
-        entity.prevPos.x !== entity.pos.x || entity.prevPos.y !== entity.pos.y;
+      // C++ techno.cpp:3236-3237 — bullet.IsInaccurate=true only when the
+      // FootClass shooter still has IsDriving set at Fire_At time. A unit that
+      // moved earlier in the same AI pass but stopped before firing is not
+      // considered an inaccurate moving platform.
+      const isMovingPlatform = !!entity.isDriving;
       const isAPvsSoft = (activeWeapon.warhead === 'AP' || !!activeWeapon.isFueled) && entity.target.stats.isInfantry;
       const doScatter = isMovingPlatform || isAPvsSoft;
       const scatter = cxxProjectileImpactAfterScatter(activeWeapon, fireCoord, targetCoord, targetPixels, doScatter, fireDirection256);
@@ -3749,12 +3748,10 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
       let directHit = true;
       let projectileFacing256: number | undefined;
       if (projectileWeapon) {
-        // C++ TechnoClass::Fire_At marks bullets from moving FootClass objects
-        // inaccurate regardless of whether TarCom is a unit, building, or cell.
-        // The structure-target path used to skip this, so moving cruisers fired
-        // exact 8Inch shells while C++ scattered them during BulletClass::Unlimbo.
-        const isMovingPlatform = !!entity.isDriving ||
-          entity.prevPos.x !== entity.pos.x || entity.prevPos.y !== entity.pos.y;
+        // C++ techno.cpp:3236-3237 marks structure shots inaccurate only when
+        // the FootClass shooter still has IsDriving set at Fire_At time. Same-
+        // tick movement that already ended before firing must not scatter.
+        const isMovingPlatform = !!entity.isDriving;
         const scatter = cxxProjectileImpactAfterScatter(
           activeWeapon,
           fireCoord,
@@ -3975,8 +3972,7 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
   );
   const fireDirection256 = cppFireDirection256(entity, fireAtFacing256);
   if (fireAtFacing256 >= 0) entity.firePrepFacing256 = -1;
-  const isMovingPlatform = !!entity.isDriving ||
-    entity.prevPos.x !== entity.pos.x || entity.prevPos.y !== entity.pos.y;
+  const isMovingPlatform = !!entity.isDriving;
   const doScatter = isMovingPlatform || activeWeapon.warhead === 'AP' || !!activeWeapon.isFueled;
   const scatter = cxxProjectileImpactAfterScatter(
     activeWeapon,

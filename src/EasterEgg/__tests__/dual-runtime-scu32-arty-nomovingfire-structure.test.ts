@@ -119,6 +119,87 @@ async function tsArtyState(adapter: unknown, logicIndex: number) {
   }, logicIndex);
 }
 
+async function wasmEasternArtyState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const state = JSON.parse((window as any).Module.ccall('agent_get_state', 'string', [], []));
+    const all = [
+      ...(state.units ?? []),
+      ...(state.enemies ?? []),
+      ...(state.vessels ?? []),
+      ...(state.infantry ?? []),
+    ];
+    const unit = all.find((entry: any) =>
+      entry.t === 'ARTY' &&
+      entry.house === 'Greece' &&
+      entry.cx >= 61 &&
+      entry.cx <= 63 &&
+      entry.cy === 99);
+    if (!unit) throw new Error('C++ eastern Greece ARTY missing');
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      unit: {
+        id: unit.id,
+        type: unit.t,
+        house: unit.house,
+        mission: unit.m,
+        missionTimer: unit.mt,
+        isDriving: unit.drv === true,
+        cx: unit.cx,
+        cy: unit.cy,
+        leptonX: unit.lx,
+        leptonY: unit.ly,
+        arm: unit.arm,
+        navCell: unit.ncx !== undefined ? { cx: unit.ncx, cy: unit.ncy } : null,
+        targetLeptons: unit.tlx !== undefined ? { lx: unit.tlx, ly: unit.tly } : null,
+        desiredFacing256: unit.pfd,
+      },
+      shells: ((state.bullets ?? []) as any[]).filter(bullet => bullet.pb === unit.id).length,
+    };
+  });
+}
+
+async function tsEasternArtyState(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const unit = ((game?.entities ?? []) as any[]).find(entity =>
+      entity.type === 'ARTY' &&
+      entity.house === 'Greece' &&
+      entity.cell?.cx >= 61 &&
+      entity.cell?.cx <= 63 &&
+      entity.cell?.cy === 99);
+    if (!unit) throw new Error('TS eastern Greece ARTY missing');
+    const shells = ((game?.inflightProjectiles ?? []) as any[]).filter(projectile =>
+      projectile.weapon?.name === '155mm' && projectile.attackerId === unit.id);
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      unit: {
+        id: unit.id,
+        type: unit.type,
+        house: unit.house,
+        mission: unit.mission,
+        missionTimer: unit.missionTimer,
+        isDriving: unit.isDriving === true,
+        cx: unit.cell.cx,
+        cy: unit.cell.cy,
+        leptonX: unit.leptonX,
+        leptonY: unit.leptonY,
+        attackCooldown: unit.attackCooldown,
+        moveTarget: unit.moveTarget
+          ? { cx: Math.floor(unit.moveTarget.lx / 256), cy: Math.floor(unit.moveTarget.ly / 256) }
+          : null,
+        targetStructure: unit.targetStructure
+          ? { type: unit.targetStructure.type, cx: unit.targetStructure.cx, cy: unit.targetStructure.cy }
+          : null,
+        desiredFacing256: unit.desiredFacing256,
+      },
+      shells: shells.length,
+    };
+  });
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU32 ARTY NoMovingFire vs structures', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -161,4 +242,37 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU32 ARTY NoMovingFire vs 
       expect(ts.shells).toBe(0);
     }, { wasmSeed: 0, preserveSourceFog: true });
   }, 240_000);
+
+  it('does not scatter a structure shot after the ARTY stops before Fire_At', async () => {
+    await withDualScenario('SCU32EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      await stepBothInCppSizedChunks(handle, 1037);
+      const cppBefore = await wasmEasternArtyState(handle.wasm);
+      const tsBefore = await tsEasternArtyState(handle.ts);
+      expect(tsBefore.tick).toBe(cppBefore.tick);
+      expect(tsBefore.rngState >>> 0).toBe(cppBefore.rngState >>> 0);
+      expect(cppBefore.unit.isDriving).toBe(true);
+      expect(tsBefore.unit.isDriving).toBe(true);
+      expect(cppBefore.shells).toBe(0);
+      expect(tsBefore.shells).toBe(0);
+
+      const step = await stepBoth(handle, 1);
+      expect(step.ts.state.tick).toBe(step.wasm.state.tick);
+      expect(step.ts.state.rngState! >>> 0).toBe(step.wasm.state.rngState! >>> 0);
+
+      const cpp = await wasmEasternArtyState(handle.wasm);
+      const ts = await tsEasternArtyState(handle.ts);
+      expect(ts.tick).toBe(cpp.tick);
+      expect(cpp.tick).toBe(1038);
+      expect(ts.rngState >>> 0).toBe(cpp.rngState >>> 0);
+      expect(cpp.unit.isDriving).toBe(false);
+      expect(ts.unit.isDriving).toBe(false);
+      expect(cpp.unit.arm).toBe(64);
+      expect(ts.unit.attackCooldown).toBe(64);
+      expect(ts.unit.targetStructure).toEqual({ type: 'TSLA', cx: 56, cy: 97 });
+      expect(cpp.shells).toBe(1);
+      expect(ts.shells).toBe(1);
+    }, { wasmSeed: 0, preserveSourceFog: true });
+  }, 300_000);
 });
