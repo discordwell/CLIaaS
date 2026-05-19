@@ -896,6 +896,12 @@ export class Entity {
 
   // Transport passengers
   passengers: Entity[] = [];       // loaded cargo: infantry + vehicles (hidden from entity list)
+  /** Cargo present when this transport entered its destruction path.
+   *  Entity.takeDamage is class-agnostic, but C++ UnitClass/VesselClass/
+   *  AircraftClass handle destroyed cargo differently in their Take_Damage
+   *  overrides. The combat death handler consumes this snapshot to apply the
+   *  class-specific aftermath after the base damage result is known. */
+  destroyedPassengerSnapshot?: Entity[];
   transportRef: Entity | null = null; // transport carrying or radio-tethered to this unit
   // C++ RadioClass IsTethered while an unloaded passenger is still in radio
   // contact with its transport. UnitClass/InfantryClass::Per_Cell_Process sends
@@ -1514,7 +1520,12 @@ export class Entity {
       } else {
         this.deathVariant = ScenarioRandom.float() < 0.4 ? 1 : 0; // fallback: random
       }
-      // Kill all passengers when transport is destroyed
+      if (this.passengers.length > 0) {
+        this.destroyedPassengerSnapshot = this.passengers.slice();
+      }
+      // Base damage result keeps direct takeDamage callers conservative. The
+      // Combat handleUnitDeath path revives/ejects UnitClass infantry cargo
+      // where C++ does so after Mark(MARK_UP).
       for (const p of this.passengers) {
         p.alive = false;
         p.mission = Mission.DIE;

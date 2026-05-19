@@ -1532,6 +1532,115 @@ function scatterVehicleCrew(ctx: CombatContext, crew: Entity): void {
   }
 }
 
+function recordDeletedCargo(ctx: CombatContext, cargo: Entity): void {
+  ctx.recordUnitLost?.(cargo.house);
+  const faction = HOUSE_FACTION[cargo.house] ?? 'allied';
+  if (faction === 'soviet') {
+    ctx.sovietUnitsLost++;
+  } else if (faction !== 'both') {
+    ctx.alliedUnitsLost++;
+  }
+}
+
+function ejectDestroyedGroundUnitCargo(ctx: CombatContext, victim: Entity): void {
+  const cargo = victim.destroyedPassengerSnapshot ?? victim.passengers;
+  if (cargo.length === 0) {
+    victim.destroyedPassengerSnapshot = undefined;
+    return;
+  }
+
+  // C++ UnitClass::Take_Damage is the ground-vehicle override. AircraftClass
+  // and VesselClass destroy cargo through their own Take_Damage paths instead.
+  if (victim.stats.isInfantry || victim.isAirUnit || victim.stats.isVessel) {
+    victim.destroyedPassengerSnapshot = undefined;
+    return;
+  }
+
+  for (const passenger of cargo) {
+    passenger.transportRef = null;
+    passenger.isTethered = false;
+
+    if (!passenger.stats.isInfantry) {
+      recordDeletedCargo(ctx, passenger);
+      continue;
+    }
+
+    if (passenger.claimedCellIdx >= 0 && passenger.claimedSubCell >= 0) {
+      ctx.map.vacateClaimedSubCell(passenger.claimedCellIdx, passenger.id, passenger.claimedSubCell);
+    }
+    ctx.map.vacateSubCell(passenger.cell.cx, passenger.cell.cy, passenger.id);
+    passenger.claimedCellIdx = -1;
+    passenger.claimedSubCell = -1;
+
+    const spot = closestInfantryUnlimboSpot(
+      ctx as unknown as AircraftContext,
+      passenger,
+      victim.leptonX,
+      victim.leptonY,
+    );
+    if (!spot) {
+      recordDeletedCargo(ctx, passenger);
+      continue;
+    }
+
+    passenger.leptonX = spot.lx;
+    passenger.leptonY = spot.ly;
+    passenger.syncPosFromLeptons();
+    passenger.subCell = spot.subCell;
+    if (ctx.map.occupyClaimedSubCell(spot.cellIdx, passenger.id, spot.subCell)) {
+      passenger.claimedCellIdx = spot.cellIdx;
+      passenger.claimedSubCell = spot.subCell;
+    } else {
+      passenger.claimedCellIdx = -1;
+      passenger.claimedSubCell = -1;
+    }
+
+    // TechnoClass::Unlimbo(coord, DIR_N): face north, Enter_Idle_Mode(true),
+    // Commence(). Scatter(0,true) then queues MOVE, so the same-tick GUARD
+    // dispatch can run before Commence promotes MOVE at the end of AI.
+    passenger.facing = 0;
+    passenger.desiredFacing = 0;
+    passenger.facing256 = -1;
+    passenger.desiredFacing256 = 0;
+    passenger.bodyFacing256 = 0;
+    passenger.bodyFacing32 = 0;
+    passenger.alive = true;
+    passenger.inLimbo = false;
+    passenger.unlimboTick = ctx.tick;
+    passenger.deathTick = 0;
+    passenger.logicIndexHint = ctx.logicIndexHintForNewObject?.();
+    passenger.target = null;
+    passenger.targetStructure = null;
+    passenger.forceFirePos = null;
+    passenger.moveTarget = null;
+    passenger.moveTargetEntityRef = null;
+    clearFootPath(passenger);
+    passenger.pathDelay = 0;
+    passenger.headToLX = 0;
+    passenger.headToLY = 0;
+    passenger.isDriving = false;
+    passenger.mission = ctx.idleMission?.(passenger) ?? Mission.GUARD;
+    passenger.missionQueue = null;
+    passenger.missionQueueSetTick = -1;
+    passenger.missionTimer = 0;
+    passenger.missionTimerSetTick = -1;
+    passenger.animState = AnimState.IDLE;
+    passenger.animFrame = 0;
+    passenger.animTick = 0;
+
+    if (!ctx.entities.includes(passenger)) {
+      ctx.entities.push(passenger);
+    }
+    ctx.entityById.set(passenger.id, passenger);
+    ctx.markDiscoveredIfPlayerVisible?.(passenger);
+
+    scatterVehicleCrew(ctx, passenger);
+  }
+
+  victim.passengers = [];
+  victim.destroyedPassengerSnapshot = undefined;
+}
+
 /** C++ map.cpp:1837-1861 — Kill all entities on destroyed bridge cells.
  *  When a bridge is fully destroyed, all occupants on those cells die instantly
  *  with full-strength HE damage: obj->Take_Damage(obj->Strength, 0, WARHEAD_HE, NULL, true) */
@@ -1594,7 +1703,9 @@ export function damageEntity(
   const occupiedLogicBefore = target.occupiesCppLogic();
   const hpBefore = target.hp;
   const whProps = getWarheadProps(warhead, ctx.scenarioWarheadProps);
-  const passengerHouses = target.passengers.map(p => p.house);
+  const passengerHouses = (!target.stats.isInfantry && !target.isAirUnit && !target.stats.isVessel)
+    ? []
+    : target.passengers.map(p => p.house);
   const killed = target.takeDamage(amount, warhead, attacker, whProps, {
     skipProneBias: options.skipProneBias,
     skipArmorBias: options.skipEntityArmorBias,
@@ -2623,6 +2734,7 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
   }
 
   releaseDestroyedUnitOccupancy(ctx, victim);
+  ejectDestroyedGroundUnitCargo(ctx, victim);
 
   // C++ unit.cpp:1046-1069 — Vehicle crew spawning on destruction
   // Conditions: IsCrew=true, Max_Passengers==0 (not a transport), 50% probability
