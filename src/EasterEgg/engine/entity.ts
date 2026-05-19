@@ -2125,10 +2125,21 @@ export class Entity {
     // C++ Start_Driver: entity is now in motion
     if (this.stats.isInfantry) this.isDriving = true;
 
-    // C++ uses integer lepton coordinates for direction computation (Desired_Facing8).
-    this.desiredFacing = directionToLeptons(this.leptonX, this.leptonY, targetLeptonX, targetLeptonY);
-    if (!this.stats.isInfantry) this.desiredFacing256 = (this.desiredFacing * 32) & 0xff;
-    const facingAligned = this.tickRotation();
+    const activeInfantryHeadTo =
+      this.stats.isInfantry &&
+      this.isDriving &&
+      this.headToLX > 0 &&
+      this.headToLY > 0 &&
+      this.headToLX === targetLeptonX &&
+      this.headToLY === targetLeptonY;
+
+    let facingAligned = true;
+    if (!activeInfantryHeadTo) {
+      // C++ uses integer lepton coordinates for direction computation (Desired_Facing8).
+      this.desiredFacing = directionToLeptons(this.leptonX, this.leptonY, targetLeptonX, targetLeptonY);
+      if (!this.stats.isInfantry) this.desiredFacing256 = (this.desiredFacing * 32) & 0xff;
+      facingAligned = this.tickRotation();
+    }
 
     // Vehicles: stop-rotate-move (don't slide sideways while turning)
     // Aircraft always move forward — never stop to rotate in flight
@@ -2138,6 +2149,8 @@ export class Entity {
     }
 
     // --- Infantry path: C++ infantry.cpp:4020-4056 ---
+    // PrimaryFacing was set once by InfantryClass::Start_Driver. Movement ticks
+    // do not re-face infantry while Coord_Move advances toward Head_To_Coord.
     // C++: Coord_Move(Coord, Direction(Head_To_Coord()), maxspeed * fixed(movespeed, 256))
     // Direction() is Desired_Facing256 — full 256-step precision toward the target.
     // This is NOT the 8-dir visual facing; it's the precise direction for movement math.
