@@ -1874,7 +1874,11 @@ export class Team {
       if (!this.isItPlaying(unit)) continue;
 
       const hasTarCom = (unit.target?.alive ?? false) || (unit.targetStructure?.alive ?? false);
-      const hasNavCom = !!unit.moveTarget;
+      const hasNavCom = !!unit.moveTarget ||
+        (unit.stats.isAircraft &&
+          unit.isFixedWing &&
+          unit.mission === Mission.ENTER &&
+          unit.aircraftDockingStructure >= 0);
       if (hasTarCom || hasNavCom) continue;
 
       if (this.zone && leptonDist(unit.leptonX, unit.leptonY, this.zoneLeptonX, this.zoneLeptonY) > STRAY_DISTANCE * 2) {

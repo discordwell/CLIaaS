@@ -1054,8 +1054,9 @@ export class Entity {
    *  INITIAL=0, TAKEOFF=1, ALTITUDE=2, STACK=3, DOWNWIND=4, CROSSWIND=5,
    *  TRAVEL=6, LANDING=7. */
   aircraftEnterStatus = 0;
-  /** C++ AircraftClass::Mission_Move Status for helicopter movement:
-   *  VALIDATE_LZ=0, TAKE_OFF=1, FLY_TO_LZ=2, LAND=3. */
+  /** C++ AircraftClass::Mission_Move Status. Fixed-wing uses
+   *  TAKE_OFF=0, FLY_TOWARD_TARGET=1; helicopters use VALIDATE_LZ=0,
+   *  TAKE_OFF=1, FLY_TO_LZ=2, LAND=3. */
   aircraftMoveStatus = 0;
   /** C++ NavCom radio contact target for fixed-wing Mission_Enter. Separate from
    *  landedAtStructure, which is only the pad the aircraft has actually touched. */

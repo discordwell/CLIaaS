@@ -348,6 +348,7 @@ function fixedWingMissionHuntFinalDelay(entity: Entity): void {
 function enterFixedWingDockingMission(ctx: AircraftContext, entity: Entity): void {
   if (entity.isALoaner) {
     entity.mission = Mission.RETREAT;
+    entity.missionTimer = 0;
     entity.aircraftState = 'flying';
     entity.aircraftDockingStructure = -1;
     entity.moveTarget = null;
@@ -358,12 +359,14 @@ function enterFixedWingDockingMission(ctx: AircraftContext, entity: Entity): voi
   const padIdx = findLandingPad(ctx, entity);
   if (padIdx >= 0) {
     entity.mission = Mission.ENTER;
+    entity.missionTimer = 0;
     entity.aircraftState = 'returning';
     entity.aircraftEnterStatus = 0;
     entity.aircraftDockingStructure = padIdx;
     ctx.structures[padIdx].dockedAircraft = entity.id;
   } else {
     entity.mission = Mission.RETREAT;
+    entity.missionTimer = 0;
     entity.aircraftState = 'flying';
     entity.aircraftDockingStructure = -1;
   }
@@ -423,6 +426,8 @@ const ENTER_DOWNWIND = 4;
 const ENTER_CROSSWIND = 5;
 const ENTER_TRAVEL = 6;
 const ENTER_LANDING = 7;
+const FIXED_MOVE_TAKE_OFF = 0;
+const FIXED_MOVE_FLY_TO_TARGET = 1;
 const MOVE_VALIDATE_LZ = 0;
 const MOVE_TAKE_OFF = 1;
 const MOVE_FLY_TO_LZ = 2;
@@ -1211,6 +1216,74 @@ function updateFixedWingMissionEnter(ctx: AircraftContext, entity: Entity): bool
   return true;
 }
 
+function updateFixedWingMissionMove(ctx: AircraftContext, entity: Entity): boolean {
+  entity.animState = AnimState.WALK;
+
+  if (!entity.moveTarget) {
+    entity.aircraftState = 'returning';
+    aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+    return true;
+  }
+
+  if (entity.missionTimer > 0) {
+    entity.missionTimer--;
+    aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+    return true;
+  }
+
+  if (entity.aircraftMoveStatus === FIXED_MOVE_TAKE_OFF) {
+    ensureAircraftHeight(entity);
+    if (entity.aircraftHeightLeptons < Entity.FLIGHT_LEVEL_LEPTONS) {
+      entity.aircraftState = 'takeoff';
+      entity.missionTimer = 0;
+      return true;
+    }
+    entity.aircraftMoveStatus = FIXED_MOVE_FLY_TO_TARGET;
+    entity.aircraftSpeedFraction = 1.0;
+    entity.missionTimer = 0;
+    aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+    return true;
+  }
+
+  const target = entity.moveTarget;
+  const desired = directionToLeptons256(entity.leptonX, entity.leptonY, target.lx, target.ly);
+  entity.desiredFacing256 = desired;
+  entity.desiredFacing = dir256ToFacing8(desired);
+  entity.aircraftSpeedFraction = 1.0;
+
+  const distance = leptonDist(entity.leptonX, entity.leptonY, target.lx, target.ly);
+  if (distance < 0x00C0) {
+    const arrCell = worldToCell(leptonToPixel(target.lx), leptonToPixel(target.ly));
+    if (!ctx.map.inBounds(arrCell.cx, arrCell.cy)) {
+      handleMapExit(ctx, entity);
+      return true;
+    }
+
+    if (entity.moveQueue.length > 0) {
+      entity.moveTarget = entity.moveQueue.shift()!;
+      entity.missionTimer = 0;
+    } else if (!entity.isALoaner) {
+      enterFixedWingDockingMission(ctx, entity);
+    } else if (!entity.teamRef) {
+      entity.moveTarget = null;
+      entity.mission = ctx.idleMission(entity);
+      entity.missionQueue = null;
+      entity.missionTimer = 0;
+    } else {
+      entity.missionTimer = 0;
+    }
+
+    aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+    return true;
+  }
+
+  // C++ fixed-wing Mission_Move returns 5 while en route; the frame timer has
+  // already consumed one tick in the post-step state exposed by the harness.
+  entity.missionTimer = 4;
+  aircraftFlyCurrentFacing(entity, ctx.movementSpeed(entity));
+  return true;
+}
+
 /** C++ aircraft movement: rotate toward target, then move in CURRENT facing.
  *  Unlike entity.moveToward() which moves in desiredFacing, this replicates C++
  *  Rotation_AI() + Physics(Coord, PrimaryFacing) — the aircraft follows a curved
@@ -1985,20 +2058,8 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
 	            }
 	            return true;
 	          }
-        } else if (aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity))) {
-          // Arrived — check if destination was out of bounds (aircraft map exit)
-          const arrCell = worldToCell(leptonToPixel(entity.moveTarget.lx), leptonToPixel(entity.moveTarget.ly));
-          if (!ctx.map.inBounds(arrCell.cx, arrCell.cy)) {
-            handleMapExit(ctx, entity);
-            return true;
-          }
-          entity.moveTarget = null;
-          if (entity.moveQueue.length > 0) {
-            entity.moveTarget = entity.moveQueue.shift()!;
-          } else {
-            entity.mission = ctx.idleMission(entity);
-            entity.aircraftState = 'returning';
-          }
+        } else {
+          return updateFixedWingMissionMove(ctx, entity);
         }
       } else if (entity.mission === Mission.NONE) {
         // C++ MissionClass::AI default branch calls Mission_Sleep() for
