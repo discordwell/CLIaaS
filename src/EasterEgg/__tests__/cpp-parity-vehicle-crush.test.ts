@@ -116,6 +116,28 @@ describe('Basic vehicle crush (unit.cpp:4384-4450 Overrun_Square)', () => {
     expect(infantry.alive).toBe(false);
   });
 
+  it('crusher deletes prone infantry instead of applying damage bias', () => {
+    // C++ unit.cpp:4422-4435 deletes the object directly; InfantryClass
+    // ProneDamageBias from Take_Damage is not involved.
+    const mrj = entityAtCell(UnitType.V_MRJ, House.USSR, 12, 55);
+    const infantry = entityAtCell(UnitType.I_E1, House.Greece, 12, 55);
+    mrj.leptonX = 12 * 256 + 128;
+    mrj.leptonY = 55 * 256 + 128;
+    mrj.syncPosFromLeptons();
+    infantry.leptonX = 12 * 256 + 192;
+    infantry.leptonY = 55 * 256 + 64;
+    infantry.syncPosFromLeptons();
+    infantry.hp = 47;
+    infantry.isProne = true;
+    const ctx = makeCombatCtx([mrj, infantry]);
+
+    checkVehicleCrush(ctx, mrj);
+
+    expect(infantry.alive).toBe(false);
+    expect(infantry.inLimbo).toBe(true);
+    expect(infantry.hp).toBe(0);
+  });
+
   it('non-crusher vehicle does NOT crush infantry', () => {
     // C++ unit.cpp:4390 — if (Class->IsCrusher) gate
     // V2RL actually has crusher=true in TS; use a vehicle that doesn't have it

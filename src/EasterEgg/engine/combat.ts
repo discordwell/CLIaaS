@@ -1959,6 +1959,66 @@ function updateInfantryDeathOccupancy(ctx: CombatContext, victim: Entity): void 
   victim.headToLY = 0;
 }
 
+function detachDestroyedEntity(ctx: CombatContext, victim: Entity): void {
+  if (victim.teamRef) {
+    victim.teamRef.remove(victim, ctx);
+  }
+  if (victim.isAirUnit) {
+    for (const structure of ctx.structures) {
+      if (structure.dockedAircraft === victim.id) {
+        structure.dockedAircraft = undefined;
+      }
+    }
+    victim.landedAtStructure = -1;
+    victim.aircraftDockingStructure = -1;
+  }
+  victim.target = null;
+  victim.targetStructure = null;
+  victim.moveTarget = null;
+  victim.moveTargetEntityRef = null;
+  clearFootPath(victim);
+  victim.firePrepActive = false;
+  victim.firePrepStage = 0;
+  victim.firePrepUsesDoingStage = false;
+  for (const entity of ctx.entities) {
+    if (entity.id === victim.id) continue;
+    if (entity.target === victim) {
+      entity.target = null;
+      entity.firePrepActive = false;
+      entity.firePrepStage = 0;
+      entity.firePrepUsesDoingStage = false;
+      restoreSuspendedMissionAfterDetach(ctx, entity, victim);
+      if (entity.stats.isInfantry) {
+        clearInfantryAssignTargetPathHead(entity);
+        entity.isFiringAnim = false;
+        entity.firingAnimTicks = 0;
+      }
+    }
+    if (entity.moveTargetEntityRef === victim) {
+      entity.moveTarget = null;
+      entity.moveTargetEntityRef = null;
+      clearFootPath(entity);
+      restoreSuspendedMissionAfterDetach(ctx, entity, victim);
+    }
+  }
+  for (const structure of ctx.structures) {
+    if (structure.targetEntityId === victim.id) {
+      structure.targetEntityId = undefined;
+    }
+  }
+  for (const team of getActiveTeams()) {
+    team.detachTargetEntity(victim);
+  }
+  for (const proj of ctx.inflightProjectiles) {
+    if (proj.attackerId === victim.id && proj.dogRiderId !== victim.id) {
+      proj.attackerId = -1;
+    }
+    if (proj.targetId === victim.id) {
+      proj.targetId = -1;
+    }
+  }
+}
+
 /**
  * AI scatter — infantry scatter per C++ infantry.cpp:1852-1929 (InfantryClass::Scatter).
  *
@@ -2609,82 +2669,7 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
   // C++ ObjectClass::Detach_All -> Detach_This_From_All(As_Target()) clears
   // every TarCom pointing at the destroyed object before death explosions and
   // post-death logic continue (object.cpp:1466-1483, techno.cpp:3872-3896).
-  // For FootClass descendants, Detach_All first removes the object from its
-  // team (foot.cpp:1844-1853). Dead team members must stop participating in
-  // TeamClass::AI immediately; otherwise attack teams can keep issuing orders
-  // to a zero-strength infantry object through the death-animation window.
-  if (victim.teamRef) {
-    victim.teamRef.remove(victim, ctx);
-  }
-  if (victim.isAirUnit) {
-    for (const structure of ctx.structures) {
-      if (structure.dockedAircraft === victim.id) {
-        structure.dockedAircraft = undefined;
-      }
-    }
-    victim.landedAtStructure = -1;
-    victim.aircraftDockingStructure = -1;
-  }
-  // InfantryClass::Detach also drops IsFiring when TarCom is detached. Without
-  // this, TS keeps stale object references to destroyed vehicles and later code
-  // treats those references as live orders until the next mission timer happens
-  // to validate them.
-  victim.target = null;
-  victim.targetStructure = null;
-  victim.moveTarget = null;
-  victim.moveTargetEntityRef = null;
-  clearFootPath(victim);
-  victim.firePrepActive = false;
-  victim.firePrepStage = 0;
-  victim.firePrepUsesDoingStage = false;
-  for (const entity of ctx.entities) {
-    if (entity.id === victim.id) continue;
-    if (entity.target === victim) {
-      entity.target = null;
-      entity.firePrepActive = false;
-      entity.firePrepStage = 0;
-      entity.firePrepUsesDoingStage = false;
-      restoreSuspendedMissionAfterDetach(ctx, entity, victim);
-      if (entity.stats.isInfantry) {
-        // C++ ObjectClass::Detach_All reaches InfantryClass::Assign_Target
-        // through TechnoClass::Detach; assigning TARGET_NONE clears Path[0]
-        // without stopping the active Head_To_Coord hop.
-        clearInfantryAssignTargetPathHead(entity);
-        entity.isFiringAnim = false;
-        entity.firingAnimTicks = 0;
-      }
-    }
-    if (entity.moveTargetEntityRef === victim) {
-      entity.moveTarget = null;
-      entity.moveTargetEntityRef = null;
-      clearFootPath(entity);
-      restoreSuspendedMissionAfterDetach(ctx, entity, victim);
-    }
-  }
-  for (const structure of ctx.structures) {
-    if (structure.targetEntityId === victim.id) {
-      // C++ TechnoClass::Detach only clears TarCom here. Mission_Attack later
-      // notices TARGET_NONE, falls back to GUARD, and only then does a normal
-      // guard scan pick the next target.
-      structure.targetEntityId = undefined;
-    }
-  }
-  for (const team of getActiveTeams()) {
-    team.detachTargetEntity(victim);
-  }
-  for (const proj of ctx.inflightProjectiles) {
-    // C++ BulletClass::Detach clears Payback when the firing object detaches
-    // (except dog riders, which TS tracks separately with dogRiderId). It also
-    // clears TarCom when the bullet target is detached during full Detach_All.
-    // Keeping the dead attacker as Payback makes splash damage pass a bogus
-    // source into Take_Damage, changing infantry scatter direction.
-    if (proj.attackerId === victim.id && proj.dogRiderId !== victim.id) {
-      proj.attackerId = -1;
-    }
-    if (proj.targetId === victim.id) {
-      proj.targetId = -1;
-    }
-  }
+  detachDestroyedEntity(ctx, victim);
 
   // Per-side casualty tracking for score screen bar graphs (C++ score.cpp:548-560)
   const faction = HOUSE_FACTION[victim.house] ?? 'allied';
@@ -3049,7 +3034,26 @@ export function checkVehicleCrush(ctx: CombatContext, vehicle: Entity): void {
     // coord.cpp:124 Distance is the integer octagonal metric, not Euclidean distance.
     if (leptonDist(vehicle.leptonX, vehicle.leptonY, other.leptonX, other.leptonY) >= (LEPTON_SIZE >> 1)) continue;
     {
-      damageEntity(ctx, other, other.hp + 10, 'Super'); // instant kill, always die2
+      const occupiedLogicBefore = other.occupiesCppLogic();
+      // C++ unit.cpp:4422-4435 does not call Take_Damage here. It records the
+      // kill, Mark(MARK_UP)s the object, Limbo()s it, and deletes it. Therefore
+      // prone/armor/house damage biases and invulnerability must not save it.
+      other.hp = 0;
+      other.alive = false;
+      other.inLimbo = true;
+      other.mission = Mission.DIE;
+      other.animState = AnimState.DIE;
+      other.animFrame = 0;
+      other.animTick = 0;
+      other.deathTick = 0;
+      other.deathVariant = 0;
+      updateInfantryDeathOccupancy(ctx, other);
+      releaseDestroyedUnitOccupancy(ctx, other);
+      detachDestroyedEntity(ctx, other);
+      ctx.recordUnitLost?.(other.house);
+      if (occupiedLogicBefore && !other.occupiesCppLogic()) {
+        ctx.releaseLogicSlotForEntity?.(other);
+      }
       vehicle.creditKill();
       crushed = true;
       ctx.effects.push({
