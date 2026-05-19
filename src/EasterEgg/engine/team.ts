@@ -23,7 +23,14 @@
 
 import { Entity, CloakState, threatScore as computeThreatScore, type TeamMissionEntry } from './entity';
 import { House, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, type CellPos, type LeptonPos, CELL_SIZE, LEPTON_SIZE, MAP_CELLS, UNIT_STATS, UnitType, SpeedClass, pixelToLepton, leptonToPixel, cellTargetToLepton, coordTargetRoundTripLepton, cellIndexToPos, PRODUCTION_ITEMS } from './types';
-import { type MapStructure, STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_MAX_HP, structureCenterLeptons as cppStructureCenterLeptons } from './scenario';
+import {
+  type MapStructure,
+  STRUCTURE_WEAPONS,
+  STRUCTURE_SIZE,
+  STRUCTURE_MAX_HP,
+  structureCenterLeptons as cppStructureCenterLeptons,
+  structureTargetLeptons as cppStructureTargetLeptons,
+} from './scenario';
 import { ScenarioRandom } from './random';
 import { MoveResult, type GameMap } from './map';
 import { findPath, nearbyLocation } from './pathfinding';
@@ -120,6 +127,8 @@ export interface TeamAIContext {
   isRevealedToHouse?: (cx: number, cy: number, houseIdx: number) => boolean;
   /** C++ TechnoClass::Evaluate_Object value calculation, including AI house bias. */
   threatScore?: (scanner: Entity, target: Entity, distCells: number) => number;
+  /** C++ TechnoClass::Evaluate_Object structure scoring, including house/base bias. */
+  structureThreatScore?: (scanner: Entity, structure: MapStructure, distCells: number, quarry?: number) => number;
   /** C++ ScenarioClass::Set_Global_To(true) used by TMISSION_SET_GLOBAL. */
   setGlobal?: (globalIndex: number) => void;
   /** Game tick counter — used by TMission_Patrol for periodic threat scan
@@ -1553,7 +1562,7 @@ export class Team {
     if (mask === 0) return null;
 
     const zone = (!scanner.isNavalUnit && !scanner.isAirUnit)
-      ? movementZoneCells(ctx.map, scanner.cell, false)
+      ? movementZoneCells(ctx.map, scanner.cell, false, ctx.structures)
       : null;
     const useZone = !!zone && !!zone[scanner.cell.cy * MAP_CELLS + scanner.cell.cx];
 
@@ -1603,13 +1612,16 @@ export class Team {
         }
 
         const distCells = leptonDist(scanner.leptonX, scanner.leptonY, center.lx, center.ly) / LEPTON_SIZE;
-        const value = this.structureThreatScore(structure, quarry, distCells);
+        const value = ctx.structureThreatScore
+          ? ctx.structureThreatScore(scanner, structure, distCells, quarry)
+          : this.structureThreatScore(structure, quarry, distCells);
         if (value > bestValue) {
+          const targetCoord = cppStructureTargetLeptons(structure);
           bestValue = value;
           best = {
             pos: {
-              x: Math.trunc(center.lx * CELL_SIZE / LEPTON_SIZE),
-              y: Math.trunc(center.ly * CELL_SIZE / LEPTON_SIZE),
+              x: Math.trunc(targetCoord.lx * CELL_SIZE / LEPTON_SIZE),
+              y: Math.trunc(targetCoord.ly * CELL_SIZE / LEPTON_SIZE),
             },
             structure,
           };

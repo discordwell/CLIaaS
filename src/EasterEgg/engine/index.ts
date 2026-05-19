@@ -2776,6 +2776,8 @@ export class Game {
       },
       isRevealedToHouse: (cx, cy, houseIdx) => this.isRevealedToHouse(cx, cy, houseIdx),
       threatScore: (scanner, target, distCells) => this.threatScore(scanner, target, distCells),
+      structureThreatScore: (scanner, structure, distCells, quarry) =>
+        this.structureThreatScore(scanner, structure, distCells, quarry),
       setGlobal: (globalIndex) => {
         if (globalIndex >= 0 && globalIndex <= 29 && !this.globals.has(globalIndex)) {
           this.globals.add(globalIndex);
@@ -12872,11 +12874,19 @@ export class Game {
     return computeThreatScore(scanner, target, dist, designatedEnemy, nearFriendlyCount, isTargetOutOfZone, nervousBias, includeTransportContents);
   }
 
-  private structureThreatScore(scanner: Entity, structure: MapStructure, dist: number): number {
+  private structureThreatScore(scanner: Entity, structure: MapStructure, dist: number, quarry?: number): number {
     const prodItem = this.scenarioProductionItems.find(p => p.type === structure.type && p.isStructure)
       ?? this.scenarioProductionItems.find(p => p.type === structure.type);
     let value = Math.trunc((STRUCTURE_POINTS[structure.type] ?? prodItem?.points ??
       Math.max(1, Math.trunc((structure.maxHp || 1) / 10))) * 2);
+
+    // C++ TechnoClass::Evaluate_Object applies THREAT_POWER before the generic
+    // house/base/distance modifiers. TeamClass::TMission_Attack passes its
+    // QuarryType through to Greatest_Threat as threat-method flags.
+    if (quarry === 10) { // QUARRY_POWER / THREAT_POWER
+      const power = structure.power ?? (structure.type === 'POWR' ? 100 : structure.type === 'APWR' ? 200 : 0);
+      value = power > 0 ? value + power * 1000 : 0;
+    }
 
     // C++ TechnoClass::Evaluate_Object applies the same house-based modifiers
     // to BuildingClass candidates as to mobile Technos.
