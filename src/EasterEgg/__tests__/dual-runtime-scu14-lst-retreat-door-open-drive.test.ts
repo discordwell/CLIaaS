@@ -45,6 +45,25 @@ function findTsEasternGreekLST(state: AgentState): AgentUnit | undefined {
     .find(u => u.t === 'LST' && u.h === 'Greece' && u.cx >= 90);
 }
 
+function findWasmLateGreekArty(state: RAGameState) {
+  const arty = [...state.units, ...state.enemies]
+    .find(u =>
+      u.t === 'ARTY' &&
+      u.house === 'Greece' &&
+      u.lx === 23680 &&
+      u.ly === 20608 &&
+      u.hp === 75);
+  if (!arty) throw new Error('C++ SCU14EA late Greek ARTY missing');
+  return {
+    tick: state.tick,
+    mission: arty.m,
+    missionTimer: arty.mt,
+    nav: { lx: arty.nlx, ly: arty.nly },
+    path: [arty.p0, arty.p1, arty.p2, arty.p3, arty.p4, arty.p5]
+      .filter((facing): facing is number => typeof facing === 'number' && facing >= 0),
+  };
+}
+
 async function stepBothOneTickAtATime(
   handle: Parameters<typeof stepBoth>[0],
   ticks: number,
@@ -82,6 +101,37 @@ async function tsMapExitedLSTLogicSlots(adapter: unknown) {
     cx: number;
     cy: number;
   }>>;
+}
+
+async function tsLateGreekArty(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const arty = (game.entities ?? []).find((entity: any) =>
+      entity.type === 'ARTY' &&
+      entity.house === 'Greece' &&
+      entity.leptonX === 23680 &&
+      entity.leptonY === 20608 &&
+      entity.hp === 75);
+    if (!arty) throw new Error('TS SCU14EA late Greek ARTY missing');
+    return {
+      tick: state.tick,
+      rngState: state.rngState,
+      mission: arty.mission,
+      missionTimer: arty.missionTimer,
+      nav: arty.moveTarget ? { lx: arty.moveTarget.lx, ly: arty.moveTarget.ly } : null,
+      path: (arty.drivePathFacings ?? [])
+        .filter((facing: number) => facing >= 0)
+        .slice(0, 6),
+    };
+  }) as Promise<{
+    tick: number;
+    rngState: number;
+    mission: string;
+    missionTimer: number;
+    nav: { lx: number; ly: number } | null;
+    path: number[];
+  }>;
 }
 
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 LST retreat with open door', () => {
@@ -130,13 +180,26 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCU14 LST retreat with open
     }, { wasmSeed: 0 });
   }, 300_000);
 
-  it('removes map-exited LSTs from Logic before late infantry guard timers', async () => {
+  it('removes map-exited LSTs and preserves late ARTY approach fallback', async () => {
     await withDualScenario('SCU14EA', async (handle) => {
       await handle.ts.syncRngSeed(handle.wasmState.rngState!);
 
       let result = await stepBothOneTickAtATime(handle, 1586);
       expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);
       expect(await tsMapExitedLSTLogicSlots(handle.ts)).toEqual([]);
+
+      const cppArty = findWasmLateGreekArty(result.wasm.state);
+      const tsArty = await tsLateGreekArty(handle.ts);
+      expect(cppArty.nav).toEqual({ lx: 21640, ly: 21896 });
+      expect(cppArty.path).toEqual([5, 6, 5, 5, 5]);
+      expect(tsArty).toEqual({
+        tick: cppArty.tick,
+        rngState: result.wasm.state.rngState! >>> 0,
+        mission: 'ATTACK',
+        missionTimer: cppArty.missionTimer,
+        nav: cppArty.nav,
+        path: cppArty.path,
+      });
 
       result = await stepBoth(handle, 1);
       expect(result.ts.state.rngState >>> 0).toBe(result.wasm.state.rngState! >>> 0);

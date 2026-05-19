@@ -12627,14 +12627,13 @@ export class Game {
 	    const cellIdx = cy * MAP_CELLS + cx;
 	    if (movementZone && movementZone[cellIdx] === 0) return false;
 
-	    // C++ CellClass::Is_Clear_To_Move rejects a BuildingClass occupier while
-	    // still allowing movement-zone wall handling below. TS stores structure
-	    // footprints separately from ordinary unit occupancy, so check them here.
+	    // C++ CellClass::Is_Clear_To_Move consults CellClass::Flag.Composite, not
+	    // the physical Cell_Occupier chain. TS mirrors those occupy bits through
+	    // subCellOccupancy/vehicleOccupancy below, while structure footprints live
+	    // separately from ordinary unit occupancy.
 	    if (this.structures.some(s => this.structureOccupiesCell(s, cx, cy))) return false;
 
-	    if (this.map.occupancy[cellIdx] !== 0) return false;
-
-	    return this.nearbyLocationClearToMove(entity, cx, cy, true);
+	    return this.nearbyLocationClearToMove(entity, cx, cy);
 	  }
 	
 	  private approachTarget(entity: Entity): void {
