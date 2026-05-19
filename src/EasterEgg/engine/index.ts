@@ -10602,9 +10602,14 @@ export class Game {
     let sawCrushableOnly = false;
     let physicalMove = MoveResult.OK;
     let deferredInfantryFlagMove: MoveResult | null = null;
+    const cellIdx = cy * MAP_CELLS + cx;
     const reservationOwner = this.map.getVehicleTrackReservation(cx, cy);
     const occupantId = this.map.getOccupancy(cx, cy);
-    if (occupantId > 0 && occupantId !== entity.id) {
+    const bareTrackReservation =
+      reservationOwner > 0 &&
+      occupantId === reservationOwner &&
+      !this.map.vehicleOccupancy.has(cellIdx);
+    if (!bareTrackReservation && occupantId > 0 && occupantId !== entity.id) {
       const occupant = this.entityById.get(occupantId);
       if (occupant && this.entityOccupiesDriveCell(occupant)) {
         const physicalOccupier = occupant.cell.cx === cx && occupant.cell.cy === cy;

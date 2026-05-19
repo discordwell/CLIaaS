@@ -89,6 +89,57 @@ async function tsPatrolAntPath(adapter: unknown) {
   });
 }
 
+async function wasmPatrolAntReservationPath(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const module = (window as any).Module;
+    const state = JSON.parse(module.ccall('agent_get_state', 'string', [], []));
+    const row = (state.logicLayer ?? []).find((entry: any[]) => entry[0] === 298);
+    if (!row) throw new Error('C++ SCA04EA patrol ANT3 logic row not found');
+    const ant = [
+      ...(state.units ?? []),
+      ...(state.enemies ?? []),
+      ...(state.vessels ?? []),
+    ].find((unit: any) => unit.id === row[6]);
+    if (!ant) throw new Error('C++ SCA04EA patrol ANT3 unit not found');
+    const reservationCell = JSON.parse(module.ccall(
+      'agent_get_cell_info',
+      'string',
+      ['number', 'number', 'number'],
+      [64, 69, ant.id],
+    ));
+    return {
+      tick: state.tick,
+      cell: { cx: ant.cx, cy: ant.cy },
+      path: [ant.p0, ant.p1, ant.p2, ant.p3, ant.p4, ant.p5, ant.p6, ant.p7, ant.p8, ant.p9, ant.p10, ant.p11]
+        .filter((face: number) => face >= 0),
+      pathThreshold: ant.pth,
+      desiredFacing: ant.pfd,
+      reservationCell,
+    };
+  });
+}
+
+async function tsPatrolAntReservationPath(adapter: unknown) {
+  return adapterPage(adapter).evaluate(() => {
+    const game = (window as any).__agentGame;
+    const state = (window as any).__agentState();
+    const ant = game.entities.find((entity: any) => entity.logicIndexHint === 298);
+    if (!ant) throw new Error('TS SCA04EA patrol ANT3 not found');
+    const cellIdx = 69 * 128 + 64;
+    return {
+      tick: state.tick,
+      cell: { cx: ant.cell.cx, cy: ant.cell.cy },
+      path: ant.path.slice(ant.pathIndex, ant.pathIndex + 8).map((cell: any) => ({ cx: cell.cx, cy: cell.cy })),
+      facings: ant.drivePathFacings.slice(0, 8),
+      pathThreshold: ant.pathThreshold,
+      desiredFacing: ant.desiredFacing256,
+      reservationOwner: game.map.vehicleTrackReservations.get(cellIdx) ?? 0,
+      physicalVehicleOccupancy: game.map.vehicleOccupancy.has(cellIdx),
+      reservationMove: game.canEnterTrackJumpCell(ant, 64, 69),
+    };
+  });
+}
+
 describe.skipIf(!serverUp)('Dual runtime C++ parity: SCA04 AI crate pathing', () => {
   beforeAll(async () => {
     serverHandle = await ensureParityServer();
@@ -116,6 +167,28 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCA04 AI crate pathing', ()
       expect(ts.desiredFacing).toBe(cpp.desiredFacing);
       expect(ts.facings).toEqual(cpp.path);
       expect(ts.path).not.toContainEqual({ cx: 65, cy: 75 });
+    }, { wasmSeed: 0 });
+  }, 180_000);
+
+  it('keeps bare DriveClass reservations as MOVE_MOVING_BLOCK path cells', async () => {
+    await withDualScenario('SCA04EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+      await stepBothAligned(handle, 1123);
+
+      const cpp = await wasmPatrolAntReservationPath(handle.wasm);
+      const ts = await tsPatrolAntReservationPath(handle.ts);
+
+      expect(ts.tick).toBe(cpp.tick);
+      expect(ts.cell).toEqual(cpp.cell);
+      expect(cpp.reservationCell.canEnter).toBe(MoveResult.OCCUPIED);
+      expect(ts.reservationOwner).toBeGreaterThan(0);
+      expect(ts.physicalVehicleOccupancy).toBe(false);
+      expect(ts.reservationMove).toBe(cpp.reservationCell.canEnter);
+
+      expect(ts.pathThreshold).toBe(cpp.pathThreshold);
+      expect(ts.desiredFacing).toBe(cpp.desiredFacing);
+      expect(ts.facings).toEqual(cpp.path);
+      expect(ts.path[0]).toEqual({ cx: 64, cy: 69 });
     }, { wasmSeed: 0 });
   }, 180_000);
 });
