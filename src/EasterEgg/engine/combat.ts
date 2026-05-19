@@ -3808,6 +3808,7 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
   const survivors: InflightProjectile[] = [...alreadyProcessed];
   const predecessors = snapshotProjectilePredecessors(ctx);
   let shiftedBehindCursor = 0;
+  let projectileDeletesThisPass = 0;
   const skipLogicHintRanges: LogicSkipRange[] = [];
   const spawnedThisPass = new Set<InflightProjectile>();
 
@@ -3886,6 +3887,7 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
         survivors.push(proj);
       } else {
         ctx.deferLogicSlotRelease?.(proj.logicIndexHint);
+        projectileDeletesThisPass++;
       }
       continue;
     }
@@ -3898,10 +3900,14 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
     detonateProjectile(ctx, proj);
     const liveAfter = countLiveProjectilePredecessors(ctx, predecessors);
     const earlierDeletes = Math.max(0, liveBefore - liveAfter);
+    const cursorEarlierDeletes = ctx.immediateLogicSlotRelease
+      ? Math.max(0, earlierDeletes - projectileDeletesThisPass)
+      : earlierDeletes;
     const projectileDeleteHint = ctx.immediateLogicSlotRelease && proj.logicIndexHint !== undefined
-      ? Math.max(0, proj.logicIndexHint - earlierDeletes)
+      ? Math.max(0, proj.logicIndexHint - cursorEarlierDeletes)
       : proj.logicIndexHint;
     ctx.deferLogicSlotRelease?.(projectileDeleteHint);
+    projectileDeletesThisPass++;
 
     const spawnedProjectiles = ctx.inflightProjectiles.filter(p => !knownProjectiles.has(p));
     for (const spawned of spawnedProjectiles) {
@@ -3928,16 +3934,17 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
 
     if (proj.logicIndexHint !== undefined) {
       // Deleting earlier Logic predecessors can decrement the current bullet's
-      // effective slot before the bullet itself deletes. In Game runtime the
-      // release callback has already compacted hints, so skip the compacted
-      // slots shifted behind the C++ cursor; standalone tests without compaction
-      // keep the wider unshifted range.
-      const skipLogicHintAfter = Math.max(0, proj.logicIndexHint - earlierDeletes);
+      // effective slot before the bullet itself deletes. Prior projectile
+      // self-deletes in this same flush have already compacted queued hints, so
+      // only the uncompensated predecessor deletions create a behind-cursor skip.
+      // Standalone tests without immediate compaction keep the wider unshifted
+      // range because their hints are not mutated by the release callback.
+      const skipLogicHintAfter = Math.max(0, proj.logicIndexHint - cursorEarlierDeletes);
       const skipLogicHintThrough = ctx.immediateLogicSlotRelease
         ? proj.logicIndexHint - 1
         : proj.logicIndexHint + earlierDeletes;
       const shouldSkipShifted = ctx.immediateLogicSlotRelease
-        ? earlierDeletes > 0
+        ? cursorEarlierDeletes > 0
         : skipLogicHintThrough > skipLogicHintAfter;
       if (shouldSkipShifted) {
         const range = { after: skipLogicHintAfter, through: skipLogicHintThrough };
@@ -3954,6 +3961,8 @@ export function updateInflightProjectiles(ctx: CombatContext, maxLogicIndexHint 
         weapon: proj.weapon.name,
         hint: proj.logicIndexHint,
         earlierDeletes,
+        cursorEarlierDeletes,
+        priorProjectileDeletes: projectileDeletesThisPass - 1,
         skipLogicHintAfter,
         skipLogicHintThrough,
       });
