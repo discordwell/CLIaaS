@@ -15298,7 +15298,7 @@ export class Game {
           forcedActive: true,
         });
         for (const e of teamMembersForTeam) {
-          team.add(e);
+          team.add(e, this._teamRemovalCtx);
         }
         registerTeam(team);
       }

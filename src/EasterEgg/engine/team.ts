@@ -435,7 +435,7 @@ export class Team {
    *   (team.cpp:913-914: obj->Member = Member; Member = obj)
    * - Sets entity.teamRef back-pointer
    */
-  add(entity: Entity): boolean {
+  add(entity: Entity, ctx?: TeamAIContext): boolean {
     if (!entity.alive) return false;
     if (this._members.includes(entity)) return false;
 
@@ -475,7 +475,7 @@ export class Team {
     this.justAltered = true;
 
     if (this.zone === null && entity.alive) {
-      this.calcCenter();
+      this.calcCenter(ctx);
     }
 
     return true;
@@ -578,7 +578,7 @@ export class Team {
    * order exactly. The TS recruit caller passes a `center` argument so the
    * caller can resolve the team type's origin waypoint to a position.
    */
-  recruit(entities: Entity[], center?: WorldPos): void {
+  recruit(entities: Entity[], center?: WorldPos, ctx?: TeamAIContext): void {
     // C++ team.cpp:961-1029 Can_Add: returns true if the entity can join the team
     // on a matching typeindex with room. For infantry/aircraft Recruit scans the
     // whole RTTI list and Can_Add can land on any open slot in that list. For
@@ -659,7 +659,7 @@ export class Team {
             // C++ team.cpp:1269-1283: Add(best) inside the for loop, each
             // time best is updated. The previous best stays in the team
             // (Add() is a no-op for existing members).
-            this.add(e);
+            this.add(e, ctx);
           }
         }
         continue;
@@ -680,7 +680,7 @@ export class Team {
       }
 
       if (bestEntity) {
-        this.add(bestEntity);
+        this.add(bestEntity, ctx);
       }
     }
   }
@@ -915,7 +915,7 @@ export class Team {
     // Once a team is moving, C++ does not top off ordinary losses unless the
     // team has first crossed the under-strength path above and stopped moving.
     if (!this.isMoving && !this.isFullStrength && ctx?.entities) {
-      this.recruit(ctx.entities);
+      this.recruit(ctx.entities, undefined, ctx);
     }
 
     // ── Dissolve if empty and has been active (C++ team.cpp:679-697) ──

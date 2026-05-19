@@ -21,6 +21,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { House, Mission, MISSION_CONTROL, UnitType, CELL_SIZE } from '../engine/types';
+import { MoveResult } from '../engine/map';
 import {
   Team, resetTeamIds, clearAllTeams, registerTeam,
 } from '../engine/team';
@@ -34,6 +35,14 @@ beforeEach(() => {
 function makeUnit(type: UnitType, house: House, x: number, y: number, mission: Mission = Mission.GUARD): Entity {
   const e = new Entity(type, house, x, y);
   e.mission = mission;
+  return e;
+}
+
+function makeUnitAtLeptons(type: UnitType, house: House, lx: number, ly: number): Entity {
+  const e = makeUnit(type, house, 0, 0);
+  e.leptonX = lx;
+  e.leptonY = ly;
+  e.syncPosFromLeptons();
   return e;
 }
 
@@ -186,6 +195,43 @@ describe('Team.recruit mission filter (C++ Is_Recruitable_Mission)', () => {
       expect(team.members).toContain(closeE1);
       expect(team.members).toContain(farDog);
       expect(team.members.length).toBe(2);
+    });
+
+    it('initial Add during recruitment runs Calc_Center with Can_Enter_Cell fallback', () => {
+      // SCU05EA `check` team: the first recruit is E3 at cell(40,43). C++
+      // TeamClass::Add immediately calls Calc_Center, and because the averaged
+      // cell is enterable, the inverted `!Can_Enter_Cell` check stores the
+      // member's CELL target (40*256+0x88, 43*256+0x88), not the raw coordinate
+      // target (lepton+0x08). That center changes the next nearest recruit.
+      const e3_41_45 = makeUnitAtLeptons(UnitType.I_E3, House.Greece, 10688, 11712);
+      const e3_41_44 = makeUnitAtLeptons(UnitType.I_E3, House.Greece, 10560, 11328);
+      const e3_40_45 = makeUnitAtLeptons(UnitType.I_E3, House.Greece, 10432, 11712);
+      const e3_40_43 = makeUnitAtLeptons(UnitType.I_E3, House.Greece, 10304, 11072);
+      const e1_39_45 = makeUnitAtLeptons(UnitType.I_E1, House.Greece, 10112, 11648);
+      const e1_39_44 = makeUnitAtLeptons(UnitType.I_E1, House.Greece, 10048, 11328);
+      const candidates = [e3_41_45, e3_41_44, e3_40_45, e3_40_43, e1_39_45, e1_39_44];
+      const team = new Team({
+        house: House.Greece,
+        desiredMembers: [
+          { type: UnitType.I_E1, count: 2 },
+          { type: UnitType.I_E3, count: 4 },
+        ],
+        missionList: [],
+        origin: null,
+      });
+      const ctx = { canEnterCellResult: () => MoveResult.OK };
+
+      team.recruit(candidates, undefined, ctx);
+      expect(team.members).toContain(e3_40_43);
+      expect(team.members).toContain(e3_41_44);
+      expect(team.zoneLeptonX).toBe(10376);
+      expect(team.zoneLeptonY).toBe(11144);
+
+      team.recruit(candidates, undefined, ctx);
+      expect(team.members).toContain(e1_39_44);
+      expect(team.members).toContain(e3_40_45);
+      expect(team.members).not.toContain(e1_39_45);
+      expect(team.members.length).toBe(4);
     });
   });
 });
