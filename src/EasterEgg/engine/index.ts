@@ -60,6 +60,7 @@ import {
   type TriggerGameState, type TriggerActionResult,
   checkTriggerEvent, executeTriggerAction, houseIdToHouse, houseToId, consumeSemiPersistentAttachment,
 	  STRUCTURE_WEAPONS, STRUCTURE_SIZE, STRUCTURE_ARMOR, STRUCTURE_MAX_HP, getBibCells, getStructureOccupyCells,
+	  STRUCTURE_AMMO,
 	  calculateHouseEdgeSpawnCell,
 	  captureStructureFootprintTerrain,
 	  STRUCTURE_IMAGES,
@@ -16387,6 +16388,7 @@ export class Game {
 
   private spawnAIProducedStructure(type: string, house: House, cx: number, cy: number): MapStructure {
     const maxHp = STRUCTURE_MAX_HP[type] ?? 256;
+    const maxAmmo = STRUCTURE_AMMO[type] ?? -1;
     const structure: MapStructure = {
       type,
       image: STRUCTURE_IMAGES[type] ?? type.toLowerCase(),
@@ -16400,8 +16402,8 @@ export class Game {
       rubble: false,
       weapon: STRUCTURE_WEAPONS[type],
       attackCooldown: 0,
-      ammo: -1,
-      maxAmmo: -1,
+      ammo: maxAmmo,
+      maxAmmo,
       mission: Mission.CONSTRUCTION,
       missionTimer: 0,
       logicIndexHint: this.logicIndexHintForNewObject(),
@@ -17460,9 +17462,10 @@ export class Game {
         docked.missionQueue = null;
       }
       s.repairMissionStatus = 0;
-      s.mission = Mission.REPAIR;
-      s.missionQueue = Mission.GUARD;
-      s.isReadyToCommence = true;
+      s.mission = Mission.GUARD;
+      s.missionQueue = null;
+      s.isReadyToCommence = false;
+      s.readyToCommenceTick = undefined;
       s.missionTimer = 3;
       return false;
     }

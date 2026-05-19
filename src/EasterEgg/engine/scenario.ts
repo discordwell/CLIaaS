@@ -1596,6 +1596,11 @@ export const STRUCTURE_WEAPONS: Record<string, StructureWeapon> = {
   QUEE:  { weaponName: 'TeslaZap', damage: 60, range: 5, rof: 30, splash: 1, warhead: 'Super', projSpeed: 40 }, // Queen Ant
 };
 
+/** Per-building MaxAmmo from rules.ini. C++ BuildingClass initializes Ammo to Class->MaxAmmo. */
+export const STRUCTURE_AMMO: Record<string, number> = {
+  TSLA: 3, // rules.ini [TSLA] Ammo=3 — rapid electric burst before recharging
+};
+
 /** Per-building armor types from rules.ini (C++ bdata.cpp constructors parse Armor= at startup).
  *  No building uses 'concrete' armor — the distribution is wood (19), light (3), heavy (8).
  *  Default fallback is 'wood' for unknown building types. */
@@ -2367,6 +2372,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     const pos = cellIndexToPos(s.cell);
     const image = STRUCTURE_IMAGES[s.type] ?? s.type.toLowerCase();
     const maxHp = STRUCTURE_MAX_HP[s.type] ?? 256;
+    const maxAmmo = STRUCTURE_AMMO[s.type] ?? -1;
     const trigName = s.trigger && s.trigger !== 'None' ? s.trigger : undefined;
     structures.push({
       type: s.type,
@@ -2383,8 +2389,8 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
       rubble: false,
       weapon: STRUCTURE_WEAPONS[s.type],
       attackCooldown: 0,
-      ammo: -1,
-      maxAmmo: -1,
+      ammo: maxAmmo,
+      maxAmmo,
       isAllowedToSell: !!s.sellable,
       footprintTerrain: captureStructureFootprintTerrain(map, s.type, pos.cx, pos.cy),
       // C++ BuildingClass::Read_INI passes the 5th structure field to

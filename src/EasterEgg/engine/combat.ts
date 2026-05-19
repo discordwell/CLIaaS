@@ -5240,8 +5240,10 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
         ctx.playSoundAt('teslazap', sx, sy);
         if (s.type === 'TSLA') {
           // C++ TechnoClass::Fire_At electric branch: firing a building
-          // TeslaZap clears IsCharged and stops the charge animation.
-          s.isCharged = false;
+          // TeslaZap resets the charge animation every shot, but only clears
+          // IsCharged when the final ammo burst is fired (Ammo <= 1 before the
+          // post-fire decrement; here that is s.ammo <= 0).
+          if (s.ammo <= 0) s.isCharged = false;
           s.isCharging = false;
           s.chargeStage = 0;
           s.chargeRateCounter = 0;

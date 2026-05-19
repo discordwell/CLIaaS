@@ -16,7 +16,7 @@ import {
   PRONE_DAMAGE_BIAS, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX,
   MAX_PROJECTILE_FRAMES, DEFAULT_PROJECTILE_FRAMES,
 } from '../engine/types';
-import { STRUCTURE_MAX_HP, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from '../engine/scenario';
+import { STRUCTURE_AMMO, STRUCTURE_MAX_HP, STRUCTURE_WEAPONS, STRUCTURE_SIZE } from '../engine/scenario';
 import { CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION, RECOIL_OFFSETS } from '../engine/entity';
 
 // ============================================================
@@ -1276,6 +1276,10 @@ describe('STRUCTURE_WEAPONS parity', () => {
     expect(w.warhead).toBe('Super');
     expect(w.splash).toBe(1);
     expect(w.projSpeed).toBe(100);
+  });
+
+  it('TSLA — Ammo=3 burst capacity from rules.ini', () => {
+    expect(STRUCTURE_AMMO.TSLA).toBe(3);
   });
 
   it('SAM — damage=50, range=7.5, rof=20, warhead=AP, projSpeed=50, isAntiAir', () => {
