@@ -201,8 +201,15 @@ export class GameMap {
   occupancy: Int32Array;
 
   /** Sub-cell occupancy: maps cell index → array of 5 entity IDs (0=empty) per sub-cell.
+   *  A value of -1 is an anonymous C++ occupy bit with no current TS owner.
    *  Sub-cells: 0=CENTER, 1=NW, 2=NE, 3=SW, 4=SE (C++ cell.h Flag.Occupy) */
   subCellOccupancy = new Map<number, [number, number, number, number, number]>();
+
+  /** Persistent anonymous InfantryClass::Set_Occupy_Bit flags.
+   *  C++ stores infantry occupation as raw bits, not owners. Some call paths
+   *  leave a bit set after the owning object has moved on; keep those bits
+   *  across TS's per-tick occupancy rebuild. */
+  anonymousSubCellOccupancy = new Map<number, number>();
 
   /** Vehicle/building flag per cell: if true, cell is fully blocked (all sub-cells occupied).
    *  C++ cell.h Flag.Occupy.Vehicle | Flag.Occupy.Monolith | Flag.Occupy.Building */
@@ -655,7 +662,7 @@ export class GameMap {
     const slots = this.subCellOccupancy.get(cellIdx);
     if (slots) {
       for (let i = 0; i < 5; i++) {
-        if (slots[i] !== 0) {
+        if (slots[i] > 0) {
           this.occupancy[cellIdx] = slots[i];
           return;
         }
@@ -670,6 +677,36 @@ export class GameMap {
   clearSubCellOccupancy(): void {
     this.subCellOccupancy.clear();
     this.vehicleOccupancy.clear();
+    for (const [idx, mask] of this.anonymousSubCellOccupancy) {
+      let slots = this.subCellOccupancy.get(idx);
+      if (!slots) {
+        slots = [0, 0, 0, 0, 0];
+        this.subCellOccupancy.set(idx, slots);
+      }
+      for (let i = 0; i < 5; i++) {
+        if (mask & (1 << i)) slots[i] = -1;
+      }
+    }
+  }
+
+  markAnonymousSubCell(cellIdx: number, subCell: number): void {
+    if (cellIdx < 0 || cellIdx >= MAP_CELLS * MAP_CELLS || subCell < 0 || subCell >= 5) return;
+    const mask = (this.anonymousSubCellOccupancy.get(cellIdx) ?? 0) | (1 << subCell);
+    this.anonymousSubCellOccupancy.set(cellIdx, mask);
+    let slots = this.subCellOccupancy.get(cellIdx);
+    if (!slots) {
+      slots = [0, 0, 0, 0, 0];
+      this.subCellOccupancy.set(cellIdx, slots);
+    }
+    if (slots[subCell] === 0) slots[subCell] = -1;
+  }
+
+  clearAnonymousSubCell(cellIdx: number, subCell: number): void {
+    if (cellIdx < 0 || cellIdx >= MAP_CELLS * MAP_CELLS || subCell < 0 || subCell >= 5) return;
+    const mask = this.anonymousSubCellOccupancy.get(cellIdx) ?? 0;
+    const next = mask & ~(1 << subCell);
+    if (next) this.anonymousSubCellOccupancy.set(cellIdx, next);
+    else this.anonymousSubCellOccupancy.delete(cellIdx);
   }
 
   /** Overlay persistent DriveClass track reservations onto this tick's grid. */
@@ -806,6 +843,7 @@ export class GameMap {
     // C++ where infantry keep their sub-cell from Unlimbo unless displaced.
     if (preferred >= 0 && preferred < 5 && slots[preferred] === 0) {
       slots[preferred] = entityId;
+      this.clearAnonymousSubCell(idx, preferred);
       if (this.occupancy[idx] === 0) this.occupancy[idx] = entityId;
       return preferred;
     }
@@ -814,6 +852,7 @@ export class GameMap {
     for (const s of order) {
       if (slots[s] === 0) {
         slots[s] = entityId;
+        this.clearAnonymousSubCell(idx, s);
         if (this.occupancy[idx] === 0) this.occupancy[idx] = entityId;
         return s;
       }
@@ -837,6 +876,7 @@ export class GameMap {
 
     if (slots[subCell] !== 0 && slots[subCell] !== entityId) return false;
     slots[subCell] = entityId;
+    this.clearAnonymousSubCell(cellIdx, subCell);
     if (this.occupancy[cellIdx] === 0) this.occupancy[cellIdx] = entityId;
     return true;
   }
@@ -849,6 +889,7 @@ export class GameMap {
     const slots = this.subCellOccupancy.get(cellIdx);
     if (slots && slots[subCell] !== 0) {
       slots[subCell] = 0;
+      this.clearAnonymousSubCell(cellIdx, subCell);
       this.refreshSubCellOccupancy(cellIdx);
     }
   }

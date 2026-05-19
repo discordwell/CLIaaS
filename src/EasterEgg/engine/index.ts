@@ -13186,14 +13186,32 @@ export class Game {
       return;
     }
 
-    if (entity.claimedCellIdx >= 0 && entity.claimedSubCell >= 0) {
-      this.clearInfantryOccupyBit(entity.claimedCellIdx, entity.claimedSubCell);
-    }
-
     const cx = Math.max(0, Math.min(MAP_CELLS - 1, Math.floor(entity.leptonX / LEPTON_SIZE)));
     const cy = Math.max(0, Math.min(MAP_CELLS - 1, Math.floor(entity.leptonY / LEPTON_SIZE)));
     const cellIdx = cy * MAP_CELLS + cx;
     const spotIndex = this.infantrySpotIndex(entity.leptonX, entity.leptonY);
+
+    const oldClaimedCellIdx = entity.claimedCellIdx;
+    const oldClaimedSubCell = entity.claimedSubCell;
+    let clearedCellIdx = -1;
+    let clearedSubCell = -1;
+    if (entity.headToLX > 0 && entity.headToLY > 0) {
+      // C++ InfantryClass::Stop_Driver clears Head_To_Coord(), not a cached
+      // owner claim. When a prior code path left another infantry occupy bit
+      // set, that bit remains as an anonymous CellClass flag.
+      clearedCellIdx =
+        Math.floor(entity.headToLY / LEPTON_SIZE) * MAP_CELLS +
+        Math.floor(entity.headToLX / LEPTON_SIZE);
+      clearedSubCell = this.infantrySpotIndex(entity.headToLX, entity.headToLY);
+      this.clearInfantryOccupyBit(clearedCellIdx, clearedSubCell);
+    }
+
+    if (oldClaimedCellIdx >= 0 && oldClaimedSubCell >= 0 &&
+        (oldClaimedCellIdx !== clearedCellIdx || oldClaimedSubCell !== clearedSubCell) &&
+        (oldClaimedCellIdx !== cellIdx || oldClaimedSubCell !== spotIndex)) {
+      this.map.markAnonymousSubCell(oldClaimedCellIdx, oldClaimedSubCell);
+    }
+
     if (this.map.occupyClaimedSubCell(cellIdx, entity.id, spotIndex)) {
       entity.claimedCellIdx = cellIdx;
       entity.claimedSubCell = spotIndex;

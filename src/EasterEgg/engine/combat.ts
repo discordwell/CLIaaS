@@ -4162,6 +4162,7 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
               ctx.map.subCellOccupancy.set(spot.cellIdx, slots);
             }
             slots[spot.subCell] = dog.id;
+            ctx.map.clearAnonymousSubCell?.(spot.cellIdx, spot.subCell);
             if (ctx.map.occupancy[spot.cellIdx] === 0) ctx.map.occupancy[spot.cellIdx] = dog.id;
             dog.inLimbo = false;
             if (dog.dogRiderLimboStartTick >= 0) {
