@@ -349,7 +349,10 @@ function fixedWingMissionHuntFinalDelay(entity: Entity): void {
   ScenarioRandom._sourceTag = 40010;
   const jitter = ScenarioRandom.nextInRange(0, 2);
   ScenarioRandom._sourceTag = prevTag;
-  entity.missionTimer = 13 + jitter;
+  // C++ Mission_Hunt returns MissionControl[Mission].Normal_Delay() after the
+  // handler body. REGROUP can assign and commence RETREAT before that return,
+  // so loaner fixed-wings must use the new mission's long retreat delay here.
+  entity.missionTimer = aircraftMissionNormalDelay(entity) - 1 + jitter;
 }
 
 function enterFixedWingDockingMission(ctx: AircraftContext, entity: Entity): void {

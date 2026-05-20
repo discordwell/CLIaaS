@@ -1454,6 +1454,7 @@ function reinforcementAircraftNeedToTake(
   existingEntities: Entity[] | undefined,
   spawnedSoFar: readonly Entity[],
   existingStructures: readonly MapStructure[] | undefined,
+  playerHouse?: House,
 ): boolean {
   // C++ reinf.cpp:_Need_To_Take only confiscates YAK/MIG reinforcements when
   // the owning house has an unfilled airstrip slot. All other reinforcement
@@ -1466,10 +1467,13 @@ function reinforcementAircraftNeedToTake(
   }
   if (deficit <= 0) return false;
 
+  const airstripOccupantHouse = playerHouse ?? entity.house;
   for (const other of [...(existingEntities ?? []), ...spawnedSoFar]) {
     if (other === entity) continue;
     if (!other.alive || other.inLimbo) continue;
-    if (other.house !== entity.house) continue;
+    // C++ TechnoClass::IsOwnedByPlayer is strict PlayerPtr == House. It does
+    // not count same-house AI aircraft against the new aircraft's airstrip.
+    if (other.house !== airstripOccupantHouse) continue;
     if (other.type !== UnitType.V_YAK && other.type !== UnitType.V_MIG) continue;
     if (other.isALoaner) continue;
     deficit--;
@@ -3590,7 +3594,13 @@ export function executeTriggerAction(
           // true for YAK/MIG when an owned airstrip slot is unfilled; combat
           // helicopters such as SCU34EA hel1 are therefore loaners.
           if (stats.isAircraft &&
-              !reinforcementAircraftNeedToTake(entity, existingEntities, teamCreationOrder, existingStructures)) {
+              !reinforcementAircraftNeedToTake(
+                entity,
+                existingEntities,
+                teamCreationOrder,
+                existingStructures,
+                playerHouseId !== undefined && playerHouseId >= 0 ? houseIdToHouse(playerHouseId) : undefined,
+              )) {
             entity.isALoaner = true;
           }
           // C++ reinf.cpp:251: IsALoaner on aircraft/vessel transports with UNLOAD mission
