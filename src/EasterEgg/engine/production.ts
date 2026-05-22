@@ -149,6 +149,10 @@ export function getAvailableItems(ctx: ProductionContext): ProductionItem[] {
   // No production until player discovers their base
   if (!ctx.baseDiscovered) return [];
   return ctx.scenarioProductionItems.filter(item => {
+    // BuildingTypeClass production requires an active construction yard/factory.
+    // Tech prerequisites such as PROC/ATEK unlock specific buildings, but they
+    // do not themselves create the building production factory.
+    if (item.isStructure && !ctx.hasBuilding('FACT')) return false;
     // Must have primary prerequisite building
     if (!ctx.hasBuilding(item.prerequisite)) return false;
     // Faction filter: player only sees items matching their faction or 'both'

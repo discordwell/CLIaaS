@@ -13,6 +13,7 @@ import { type InputState } from './input';
 import { type MapStructure, STRUCTURE_SIZE, getBibCells } from './scenario';
 import { SHADOW_TABLE, cellShadowIndex } from './shadow';
 import { NonCriticalRandom } from './random';
+import { RA_MESSAGE_DELAY_TICKS } from './tutorialText';
 
 /** Interpolate between two values on a 0-31 ring (shortest path).
  *  Used for smooth 60fps visual rotation between 15fps game ticks. */
@@ -138,7 +139,27 @@ const BIB_SIZES: Record<string, [number, number]> = {
 };
 
 // Wall types that use auto-connection sprites
-const WALL_SPRITE_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK']);
+const WALL_SPRITE_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK', 'CYCL', 'WOOD']);
+const WALL_OVERLAY_SHEETS: Record<string, string> = {
+  SBAG: 'sbag',
+  CYCL: 'cycl',
+  BRIK: 'brik',
+  BARB: 'barb',
+  WOOD: 'wood',
+  FENC: 'fenc',
+};
+
+function overlayWallType(overlayId: number): string {
+  switch (overlayId) {
+    case 0: return 'SBAG';
+    case 1: return 'CYCL';
+    case 2: return 'BRIK';
+    case 3: return 'BARB';
+    case 4: return 'WOOD';
+    case 23: return 'FENC';
+    default: return '';
+  }
+}
 
 /** Compute NESW connection bitmask for wall auto-connection.
  *  Checks 4 cardinal neighbors for same-type wall → 4-bit mask (N=1, E=2, S=4, W=8). */
@@ -1380,9 +1401,8 @@ export class Renderer {
             break;
           }
           case Terrain.WALL: {
-            // Building footprint bib cells — use tileset CLEAR1 tile to match surrounding terrain.
-            // Structure sprites draw on top in the structure pass.
-            if (map.getWallType(cx, cy)) break; // wall-type structures render in structure pass
+            // Wall overlays sit on top of normal ground; the SHP is drawn later
+            // in renderOverlays/renderStructures.
             if (this.theatre === 'INTERIOR') {
               const bright = 40 + (h % 6);
               ctx.fillStyle = `rgb(${bright},${bright - 2},${bright - 4})`;
@@ -1410,6 +1430,10 @@ export class Renderer {
     for (const dt of deferredTrees) {
       assets.drawFrame(ctx, dt.name, 0, dt.x, dt.y);
     }
+  }
+
+  private renderVisibility(map: GameMap, cx: number, cy: number): number {
+    return map.getDisplayVisibility(cx, cy);
   }
 
   // ─── Terrain Decals (scorch marks, craters) ────────────
@@ -1505,13 +1529,19 @@ export class Renderer {
             ctx.fillRect(gx - 1, gy + 1, 4, 1);
             ctx.fillRect(gx + 1, gy - 1, 1, 4);
           }
-        } else if (ovl >= 0x15 && ovl <= 0x1F) {
-          // Walls — dark gray blocks
-          ctx.fillStyle = this.palColor(PAL_ROCK_START + 6);
-          ctx.fillRect(screen.x + 1, screen.y + 1, CELL_SIZE - 2, CELL_SIZE - 2);
-          ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-          ctx.lineWidth = 1;
-          ctx.strokeRect(screen.x + 1.5, screen.y + 1.5, CELL_SIZE - 3, CELL_SIZE - 3);
+        } else {
+          const wallType = map.getWallType(cx, cy) || overlayWallType(ovl);
+          const wallSheet = WALL_OVERLAY_SHEETS[wallType];
+          if (wallSheet) {
+            // C++ OverlayClass::Draw_It uses the wall SHP frame whose low
+            // nibble is Wall_Update's NESW same-type connection mask.
+            const mask = map.getWallConnectionIcon(cx, cy, wallType);
+            const damageLevel = map.getWallDamageLevel(cx, cy);
+            const damageBand = wallType === 'BRIK' || wallType === 'CYCL'
+              ? Math.min(damageLevel, 2)
+              : (damageLevel > 0 ? 1 : 0);
+            assets.drawFrame(ctx, wallSheet, damageBand * 16 + mask, screen.x, screen.y);
+          }
         }
       }
     }
@@ -1524,7 +1554,7 @@ export class Renderer {
     for (const crate of this.crates) {
       const cx = Math.floor(crate.x / CELL_SIZE);
       const cy = Math.floor(crate.y / CELL_SIZE);
-      if (map.getVisibility(cx, cy) !== 2) continue; // only show in visible area
+      if (this.renderVisibility(map, cx, cy) !== 2) continue; // only show in fully visible area
       const screen = camera.worldToScreen(crate.x, crate.y);
       if (screen.x < -20 || screen.x > this.width || screen.y < -20 || screen.y > this.height) continue;
       // Draw a wooden crate icon (theatre-aware colors)
@@ -1578,10 +1608,11 @@ export class Renderer {
       // Render rubble for destroyed structures
       if (!s.alive) {
         if (!s.rubble) continue;
-        const vis = map.getVisibility(s.cx, s.cy);
+        const vis = this.renderVisibility(map, s.cx, s.cy);
         if (vis === 0) continue;
-        const screenX = s.cx * CELL_SIZE - camera.x;
-        const screenY = s.cy * CELL_SIZE - camera.y;
+        const screen = camera.worldToScreen(s.cx * CELL_SIZE, s.cy * CELL_SIZE);
+        const screenX = screen.x;
+        const screenY = screen.y;
         if (vis === 1) ctx.globalAlpha = 0.5;
         // Draw rubble: scattered dark rectangles
         ctx.fillStyle = 'rgba(60,50,40,0.7)';
@@ -1603,11 +1634,12 @@ export class Renderer {
         if (vis === 1) ctx.globalAlpha = 1;
         continue;
       }
-      const vis = map.getVisibility(s.cx, s.cy);
+      const vis = this.renderVisibility(map, s.cx, s.cy);
       if (vis === 0) continue; // fully shrouded
 
-      const screenX = s.cx * CELL_SIZE - camera.x;
-      const screenY = s.cy * CELL_SIZE - camera.y;
+      const screen = camera.worldToScreen(s.cx * CELL_SIZE, s.cy * CELL_SIZE);
+      const screenX = screen.x;
+      const screenY = screen.y;
 
       // Construction/sell animation: clip building sprite progressively
       const isConstructing = s.buildProgress !== undefined && s.buildProgress < 1;
@@ -2029,7 +2061,7 @@ export class Renderer {
     for (const c of this.corpses) {
       const ecx = Math.floor(c.x / CELL_SIZE);
       const ecy = Math.floor(c.y / CELL_SIZE);
-      if (map.getVisibility(ecx, ecy) === 0) continue; // shrouded
+      if (this.renderVisibility(map, ecx, ecy) === 0) continue; // shrouded
       const screen = camera.worldToScreen(c.x, c.y);
       if (screen.x < -20 || screen.x > this.width + 20 || screen.y < -20 || screen.y > this.height + 20) continue;
 
@@ -2132,7 +2164,7 @@ export class Renderer {
 
       // Don't render entities in unmapped cells (C++ cell.cpp:1275 — Draw_It
       // only called when cellptr->IsMapped is true; single-cell check, no neighbors)
-      if (map.getVisibility(ecx, ecy) === 0) continue;
+      if (this.renderVisibility(map, ecx, ecy) === 0) continue;
       // C++ (cell.cpp:1275): objects drawn in any IsMapped cell — fog only dims terrain,
       // not units. Enemy units remain visible in explored-but-not-in-sight cells.
 
@@ -3058,8 +3090,9 @@ export class Renderer {
 
   // ─── Fog of War ──────────────────────────────────────────
 
-  /** Lazily build a shadow overlay canvas: all SHADOW.SHP frames repainted as
-   *  semi-transparent black (matching C++ SHAPE_GHOST translucency rendering). */
+  /** Lazily build a shadow overlay canvas preserving SHADOW.SHP edge tones.
+   *  C++ draws these frames with SHAPE_GHOST/ShadowTrans; flattening them to a
+   *  single black alpha mask loses the soft bright/dark shroud edge artwork. */
   private ensureShadowOverlay(assets: AssetManager): HTMLCanvasElement | null {
     if (this.shadowOverlay) return this.shadowOverlay;
     const sheet = assets.getSheet('shadow');
@@ -3072,22 +3105,7 @@ export class Renderer {
     canvas.width = w;
     canvas.height = h;
     const octx = canvas.getContext('2d')!;
-
-    // Draw original sprite sheet
     octx.drawImage(src, 0, 0);
-    // Read pixels and convert: keep alpha mask, set RGB to black
-    const imgData = octx.getImageData(0, 0, w, h);
-    const d = imgData.data;
-    for (let i = 0; i < d.length; i += 4) {
-      if (d[i + 3] > 0) {
-        // Non-transparent pixel → semi-transparent black (C++ shadow translucency ~65%)
-        d[i] = 0;
-        d[i + 1] = 0;
-        d[i + 2] = 0;
-        d[i + 3] = 166; // ~65% opacity matching C++ ShadowTrans
-      }
-    }
-    octx.putImageData(imgData, 0, 0);
     this.shadowOverlay = canvas;
     return canvas;
   }
@@ -3103,14 +3121,14 @@ export class Renderer {
 
     const overlay = this.ensureShadowOverlay(assets);
     const sheet = assets.getSheet('shadow');
-    const getVis = (x: number, y: number) => map.getVisibility(x, y);
+    const getVis = (x: number, y: number) => this.renderVisibility(map, x, y);
     const fw = sheet?.meta.frameWidth ?? CELL_SIZE;
     const fh = sheet?.meta.frameHeight ?? CELL_SIZE;
     ctx.fillStyle = '#000';
 
     for (let cy = startCY; cy <= endCY; cy++) {
       for (let cx = startCX; cx <= endCX; cx++) {
-        const vis = map.getVisibility(cx, cy);
+        const vis = this.renderVisibility(map, cx, cy);
         if (vis === 2) continue; // IsVisible — no shadow
 
         const screen = camera.worldToScreen(cx * CELL_SIZE, cy * CELL_SIZE);
@@ -3127,7 +3145,7 @@ export class Renderer {
           const shadow = SHADOW_TABLE[idx];
 
           if (shadow >= 0 && overlay && sheet) {
-            // Draw shadow sprite frame as semi-transparent black overlay
+            // Draw the preserved SHADOW.SHP frame.
             const col = shadow % sheet.meta.columns;
             const row = Math.floor(shadow / sheet.meta.columns);
             ctx.drawImage(overlay, col * fw, row * fh, fw, fh, sx, sy, CELL_SIZE, CELL_SIZE);
@@ -3216,7 +3234,7 @@ export class Renderer {
     // Terrain (with fog awareness)
     for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy += 2) {
       for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx += 2) {
-        const vis = map.getVisibility(cx, cy);
+        const vis = this.renderVisibility(map, cx, cy);
         if (vis === 0) continue; // Don't show shrouded areas
 
         const terrain = map.getTerrain(cx, cy);
@@ -3249,7 +3267,7 @@ export class Renderer {
     // R18: Minimap shroud/fog overlay — darken explored-but-unseen areas (C++ parity)
     for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy += 2) {
       for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx += 2) {
-        const vis = map.getVisibility(cx, cy);
+        const vis = this.renderVisibility(map, cx, cy);
         if (vis >= 2) continue; // fully visible — no overlay
         const px = mmX + (cx - ox) * scale;
         const py = mmY + (cy - oy) * scale;
@@ -3263,7 +3281,7 @@ export class Renderer {
     // Structure outlines (using actual footprint sizes)
     for (const s of structures) {
       if (!s.alive) continue;
-      const vis = map.getVisibility(s.cx, s.cy);
+      const vis = this.renderVisibility(map, s.cx, s.cy);
       if (vis === 0) continue;
       const isPlayer = s.house === 'Spain' || s.house === 'Greece';
       const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
@@ -3281,7 +3299,7 @@ export class Renderer {
       if (!e.alive) continue;
       const ecx = Math.floor(e.pos.x / CELL_SIZE);
       const ecy = Math.floor(e.pos.y / CELL_SIZE);
-      const vis = map.getVisibility(ecx, ecy);
+      const vis = this.renderVisibility(map, ecx, ecy);
       if (vis === 0) continue;
       // R14: Fog-gated minimap — hide non-player units in fog/shroud
       if (vis < 2 && !e.isPlayerUnit) continue;
@@ -3384,7 +3402,7 @@ export class Renderer {
     // Terrain
     for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy += 1) {
       for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx += 1) {
-        const vis = map.getVisibility(cx, cy);
+        const vis = this.renderVisibility(map, cx, cy);
         if (vis === 0) continue;
         const terrain = map.getTerrain(cx, cy);
         const px = centerX + (cx - ox) * scale;
@@ -3414,7 +3432,7 @@ export class Renderer {
     // Structures
     for (const s of structures) {
       if (!s.alive) continue;
-      const vis = map.getVisibility(s.cx, s.cy);
+      const vis = this.renderVisibility(map, s.cx, s.cy);
       if (vis === 0) continue;
       const isPlayer = this.playerHouses.has(s.house as House);
       const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
@@ -3432,7 +3450,7 @@ export class Renderer {
       if (!e.alive) continue;
       const ecx = Math.floor(e.pos.x / CELL_SIZE);
       const ecy = Math.floor(e.pos.y / CELL_SIZE);
-      const vis = map.getVisibility(ecx, ecy);
+      const vis = this.renderVisibility(map, ecx, ecy);
       if (vis === 0) continue;
       if (vis < 2 && !e.isPlayerUnit) continue;
 
@@ -3556,10 +3574,10 @@ export class Renderer {
       // Left tab -- frame 0 at x=0 (C++ tab.cpp:116)
       this._cachedAssets!.drawFrame(ctx, 'tabs', 0, 0, 0);
 
-      // Credits tab -- frame 5 (C++ frame 6: metallic) at sidebar X
+      // Credits tab -- frame 6 is the normal metallic right-cap tab.
       // C++ tab.cpp:150: CC_Draw_Shape(TabShape, 6, (320-EVA_WIDTH)*RF, 0)
       const credTabX = w - 80 * RF;
-      this._cachedAssets!.drawFrame(ctx, 'tabs', 5, credTabX, 0);
+      this._cachedAssets!.drawFrame(ctx, 'tabs', 6, credTabX, 0);
 
       ctx.imageSmoothingEnabled = prevSmoothing;
     }
@@ -3595,20 +3613,20 @@ export class Renderer {
 
   renderEvaMessages(tick: number): void {
     const ctx = this.ctx;
-    // Show messages that are less than 4 seconds old (60 ticks)
-    const active = this.evaMessages.filter(m => tick - m.tick < 60);
+    const active = this.evaMessages
+      .filter(m => tick - m.tick < RA_MESSAGE_DELAY_TICKS)
+      .slice(-6);
     if (active.length === 0) return;
 
-    // C++ parity: EVA messages render INSIDE the top status bar (TabClass::Draw_It),
-    // left-aligned after the OPTIONS button area, using TPF_6PT_GRAD font.
-    // Position: x=65*RF (after OPTIONS at x=40*RF), y=2*RF (same baseline).
-    // Show only the most recent message to fit within the TAB_HEIGHT bar.
-    const msg = active[active.length - 1];
-    const age = tick - msg.tick;
-    const alpha = age < 45 ? 1.0 : 1.0 - (age - 45) / 15;
-    ctx.globalAlpha = alpha;
-    this.drawBitmapText(this._cachedAssets, msg.text,
-      65 * RESFACTOR, 2 * RESFACTOR, '#00FF00', '6pt', { align: 'left' });
+    // C++ Session.Messages.Init(Map.TacPixelX, Map.TacPixelY, 6, ..., 7*RF, ...)
+    active.forEach((msg, i) => {
+      const age = tick - msg.tick;
+      const fadeStart = RA_MESSAGE_DELAY_TICKS - 15;
+      const alpha = age < fadeStart ? 1.0 : 1.0 - (age - fadeStart) / 15;
+      ctx.globalAlpha = alpha;
+      this.drawBitmapText(this._cachedAssets, msg.text,
+        0, (8 + i * 7) * RESFACTOR, '#00FF00', '6pt', { align: 'left' });
+    });
     ctx.globalAlpha = 1;
   }
 
@@ -4063,20 +4081,6 @@ export class Renderer {
     ctx.lineTo(x + 1.5, this.height);
     ctx.stroke();
 
-    // Credits strip below radar — use a subtle darkening over the sidebar's
-    // metallic texture rather than an opaque fill that hides it.
-    // C++ draws the credits text directly on the sidebar background shapes.
-    const credY = Renderer.CREDITS_Y;
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    ctx.fillRect(x + 2, credY, w - 2, Renderer.CREDITS_H);
-    const atCapacity = this.sidebarSiloCapacity > 0 && this.sidebarCredits >= this.sidebarSiloCapacity * 0.8;
-    const credColor = atCapacity ? '#FF4444' : '#FFD700';
-    this.drawBitmapText(assets, `$${this.sidebarCredits}`, x + w / 2, credY + 1, credColor, '8pt',
-      { align: 'center', shadow: '#000' });
-    if (this.sidebarSiloCapacity > 0) {
-      this.drawBitmapText(assets, `/${this.sidebarSiloCapacity}`, x + w / 2 + 12 * RESFACTOR, credY + 1, '#888', '6pt');
-    }
-
     // Button row: repair / sell / map (C++ English layout)
     this.renderButtonRow(x, w, assets);
 
@@ -4090,18 +4094,6 @@ export class Renderer {
     // Dual production strips
     const leftItems = this.sidebarItems.filter(it => getStripSide(it) === 'left');
     const rightItems = this.sidebarItems.filter(it => getStripSide(it) === 'right');
-
-    // Strip column backgrounds — fill empty slots with strip.png (per-slot metallic texture)
-    // Note: stripna/stripus are garbled from bad extraction; use strip.png tiled instead
-    const stripSlotSheet = assets.getSheet('strip');
-    for (const [items, xOff] of [[leftItems, Renderer.LEFT_STRIP_X_OFFSET], [rightItems, Renderer.RIGHT_STRIP_X_OFFSET]] as const) {
-      if (items.length < Renderer.CAMEO_VISIBLE && stripSlotSheet) {
-        const slotScale = Renderer.CAMEO_W / stripSlotSheet.meta.frameWidth;
-        for (let s = items.length; s < Renderer.CAMEO_VISIBLE; s++) {
-          assets.drawFrame(ctx, 'strip', 0, x + xOff, Renderer.STRIP_START_Y + s * Renderer.CAMEO_H, { scale: slotScale });
-        }
-      }
-    }
 
     // Clip strips to visible cameo area
     const stripClipH = Renderer.CAMEO_VISIBLE * Renderer.CAMEO_H;
@@ -4120,9 +4112,6 @@ export class Renderer {
     // Scroll buttons below strips (C++ layout: side-by-side)
     this.renderStripScrollArrows(ctx, assets, x + Renderer.LEFT_STRIP_X_OFFSET, leftItems, this.leftStripScroll);
     this.renderStripScrollArrows(ctx, assets, x + Renderer.RIGHT_STRIP_X_OFFSET, rightItems, this.rightStripScroll);
-
-    // Superweapon buttons at bottom
-    this.renderSuperweaponButtons(x, w, assets);
 
     ctx.textAlign = 'left';
   }
@@ -4207,9 +4196,6 @@ export class Renderer {
       ctx.stroke();
     }
 
-    // Numeric labels
-    this.drawBitmapText(assets, `${produced}`, pwrX + pwrW / 2, pwrY + pwrH + 2, lowPower ? '#f88' : '#8f8', '6pt', { align: 'center' });
-    this.drawBitmapText(assets, `${consumed}`, pwrX + pwrW / 2, pwrY + pwrH + 10, lowPower ? '#f88' : '#cc0', '6pt', { align: 'center' });
   }
 
   /** Render a single production strip (C++ StripClass::Draw_It) */
@@ -4325,9 +4311,6 @@ export class Renderer {
           }
         }
 
-        // Cost label at bottom of cameo
-        const costColor = this.sidebarCredits >= item.cost ? '#FFD700' : '#664';
-        this.drawBitmapText(assets, `$${item.cost}`, stripX + camW / 2, iy + camH - 7, costColor, '6pt', { align: 'center' });
       }
     }
   }

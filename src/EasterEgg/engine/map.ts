@@ -5,6 +5,7 @@
 
 import { MAP_CELLS, CELL_SIZE, type CellPos, SpeedClass, TERRAIN_SPEED, House } from './types';
 import { ScenarioRandom } from './random';
+import { SHADOW_TABLE } from './shadow';
 
 type AnonymousSubCellHouses = [House | null, House | null, House | null, House | null, House | null];
 
@@ -223,8 +224,10 @@ export class GameMap {
    *  the cells reserved by that unit. */
   vehicleTrackReservations = new Map<number, number>();
 
-  /** Fog of war: 0=shroud, 1=fog (explored), 2=visible */
+  /** Gameplay fog of war: 0=shroud, 1=fog (explored), 2=currently visible */
   visibility: Uint8Array;
+  /** C++ display shroud: 0=!IsMapped, 1=IsMapped&&!IsVisible, 2=IsVisible */
+  displayVisibility: Uint8Array;
 
   /** Terrain template data from MapPack (set by scenario loader) — uint16 per cell */
   templateType: Uint16Array;
@@ -305,6 +308,7 @@ export class GameMap {
     this.cells = new Array(MAP_CELLS * MAP_CELLS).fill(Terrain.CLEAR);
     this.occupancy = new Int32Array(MAP_CELLS * MAP_CELLS);
     this.visibility = new Uint8Array(MAP_CELLS * MAP_CELLS);
+    this.displayVisibility = new Uint8Array(MAP_CELLS * MAP_CELLS);
     this.templateType = new Uint16Array(MAP_CELLS * MAP_CELLS);
     this.templateIcon = new Uint8Array(MAP_CELLS * MAP_CELLS);
     this.overlay = new Uint8Array(MAP_CELLS * MAP_CELLS).fill(0xFF);
@@ -982,21 +986,91 @@ export class GameMap {
     return false;
   }
 
-  /** Get visibility at cell: 0=shroud, 1=fog, 2=visible */
+  /** Get gameplay visibility at cell: 0=shroud, 1=fog, 2=currently visible */
   getVisibility(cx: number, cy: number): number {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 0;
     return this.visibility[cy * MAP_CELLS + cx];
   }
 
-  /** Set visibility at cell.
-   *  C++ parity: any cell set to visible (2) must be tracked for fog-of-war
-   *  downgrade, regardless of how it became visible. */
+  /** Get C++ display shroud state: 0=!IsMapped, 1=IsMapped&&!IsVisible, 2=IsVisible */
+  getDisplayVisibility(cx: number, cy: number): number {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return 0;
+    return this.displayVisibility[cy * MAP_CELLS + cx];
+  }
+
+  private inDisplayBounds(cx: number, cy: number): boolean {
+    return cx >= this.boundsX && cx < this.boundsX + this.boundsW &&
+      cy >= this.boundsY && cy < this.boundsY + this.boundsH;
+  }
+
+  private displayCellShadow(cx: number, cy: number): number {
+    // C++ Cell_Shadow returns -1 on top/bottom map edges to avoid neighbor reads.
+    if (cy <= 0 || cy >= MAP_CELLS - 1) return -1;
+
+    const idx = cy * MAP_CELLS + cx;
+    if (this.displayVisibility[idx] === 0) return -2;
+
+    let mask = 0;
+    if (this.getDisplayVisibility(cx - 1, cy - 1) === 0) mask |= 0x40;
+    if (this.getDisplayVisibility(cx,     cy - 1) === 0) mask |= 0x80;
+    if (this.getDisplayVisibility(cx + 1, cy - 1) === 0) mask |= 0x01;
+    if (this.getDisplayVisibility(cx - 1, cy    ) === 0) mask |= 0x20;
+    if (this.getDisplayVisibility(cx + 1, cy    ) === 0) mask |= 0x02;
+    if (this.getDisplayVisibility(cx - 1, cy + 1) === 0) mask |= 0x10;
+    if (this.getDisplayVisibility(cx,     cy + 1) === 0) mask |= 0x08;
+    if (this.getDisplayVisibility(cx + 1, cy + 1) === 0) mask |= 0x04;
+    return SHADOW_TABLE[mask];
+  }
+
+  /** C++ DisplayClass::Map_Cell display-shroud mapping. */
+  mapDisplayCell(cx: number, cy: number): boolean {
+    if (!this.inDisplayBounds(cx, cy)) return false;
+    const idx = cy * MAP_CELLS + cx;
+    if (this.displayVisibility[idx] !== 0) return false;
+
+    this.displayVisibility[idx] = 1;
+    if (this.displayCellShadow(cx, cy) === -1) {
+      this.displayVisibility[idx] = 2;
+    }
+
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (!this.inDisplayBounds(nx, ny)) continue;
+        const nIdx = ny * MAP_CELLS + nx;
+        if (this.displayVisibility[nIdx] === 2) continue;
+
+        const shadow = this.displayCellShadow(nx, ny);
+        if (shadow === -1) {
+          if (this.displayVisibility[nIdx] === 0) {
+            this.mapDisplayCell(nx, ny);
+          } else {
+            this.displayVisibility[nIdx] = 2;
+          }
+        } else if (shadow !== -2 && this.displayVisibility[nIdx] === 0) {
+          this.mapDisplayCell(nx, ny);
+        }
+      }
+    }
+    return true;
+  }
+
+  /** Set gameplay visibility at cell.
+   *  Any cell set to visible (2) is tracked for the current-sight downgrade,
+   *  and also mapped through the C++ display shroud path. */
   setVisibility(cx: number, cy: number, v: number): void {
     if (cx >= 0 && cx < MAP_CELLS && cy >= 0 && cy < MAP_CELLS) {
       const idx = cy * MAP_CELLS + cx;
       this.visibility[idx] = v;
       if (v === 2) {
         this.visibleCells.push(idx);
+        this.mapDisplayCell(cx, cy);
+      } else if (v === 0) {
+        this.displayVisibility[idx] = 0;
+      } else if (v === 1 && this.displayVisibility[idx] === 0) {
+        this.mapDisplayCell(cx, cy);
       }
     }
   }
@@ -1004,6 +1078,7 @@ export class GameMap {
   /** Reveal the entire map (all cells set to visible) */
   revealAll(): void {
     this.visibility.fill(2);
+    this.displayVisibility.fill(2);
     // Track all cells for fog-of-war downgrade (C++ parity)
     this.visibleCells.length = 0;
     for (let i = 0; i < MAP_CELLS * MAP_CELLS; i++) {
@@ -1018,6 +1093,7 @@ export class GameMap {
     for (let i = 0; i < this.visibility.length; i++) {
       if (this.visibility[i] > 0) this.visibility[i] = 0;
     }
+    this.displayVisibility.fill(0);
     this.visibleCells.length = 0;
   }
 
@@ -1058,6 +1134,7 @@ export class GameMap {
                 this.visibility[idx] = 2;
                 this.visibleCells.push(idx);
               }
+              this.mapDisplayCell(rx, ry);
             }
           }
         }

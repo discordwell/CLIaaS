@@ -43,6 +43,14 @@ describe('Camera Pipeline', () => {
       expect(cam.x).toBe(0);
       expect(cam.y).toBe(0);
     });
+
+    it('stores a screen-space tactical viewport origin', () => {
+      const cam = new Camera(480, 384, 0, 16);
+      expect(cam.viewWidth).toBe(480);
+      expect(cam.viewHeight).toBe(384);
+      expect(cam.screenX).toBe(0);
+      expect(cam.screenY).toBe(16);
+    });
   });
 
   // ─── scroll(dx, dy) ───────────────────────────────────────────────
@@ -506,6 +514,14 @@ describe('Camera Pipeline', () => {
       expect(world.x).toBe(1000 + VIEW_W);
       expect(world.y).toBe(800 + VIEW_H);
     });
+
+    it('subtracts the tactical viewport origin from screen coordinates', () => {
+      const cam = new Camera(480, 384, 0, 16);
+      cam.scroll(240, 120);
+      const world = cam.screenToWorld(0, 16);
+      expect(world.x).toBe(240);
+      expect(world.y).toBe(120);
+    });
   });
 
   // ─── worldToScreen ─────────────────────────────────────────────────
@@ -541,6 +557,14 @@ describe('Camera Pipeline', () => {
       const screen = cam.worldToScreen(500 + VIEW_W + 50, 500 + VIEW_H + 50);
       expect(screen.x).toBe(VIEW_W + 50);
       expect(screen.y).toBe(VIEW_H + 50);
+    });
+
+    it('adds the tactical viewport origin to world coordinates', () => {
+      const cam = new Camera(480, 384, 0, 16);
+      cam.scroll(240, 120);
+      const screen = cam.worldToScreen(240, 120);
+      expect(screen.x).toBe(0);
+      expect(screen.y).toBe(16);
     });
   });
 

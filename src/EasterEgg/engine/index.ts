@@ -47,6 +47,7 @@ import {
   cppIntDivFixed,
 } from './fixedPoint';
 import { Renderer, type Effect, BUILDING_FRAME_TABLE } from './renderer';
+import { getTutorialText, RA_MESSAGE_DELAY_TICKS } from './tutorialText';
 import { type LogicAnim, processLogicAnim, spawnLogicAnim } from './logicAnim';
 import { findPath, nearbyLocation } from './pathfinding';
 import {
@@ -705,7 +706,7 @@ export class Game {
   // C++ tevent.cpp TEVENT_BUILD parity: HouseClass::JustBuiltStructure is per-house.
   // houseIdx (HOUSE_TO_INDEX) → set of structure types that house has built.
   private builtStructureTypesByHouse = new Map<number, Set<string>>();
-  /** EVA text message queue — displayed briefly on screen */
+  /** EVA text message queue — displayed by MessageListClass-equivalent renderer */
   private evaMessages: { text: string; tick: number }[] = [];
   /** Count of units that have left the map (for TEVENT_LEAVES_MAP) */
   private unitsLeftMap = 0;
@@ -807,13 +808,20 @@ export class Game {
   private lastTime = 0;
   private accumulator = 0;
   private readonly tickInterval = 1000 / GAME_TICKS_PER_SEC;
+  private static readonly TACTICAL_TOP = 8 * RESFACTOR;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.assets = getSharedAssets();
     this.audio = new AudioManager();
-    // Game viewport is narrower than canvas to leave room for sidebar
-    this.camera = new Camera(canvas.width - Game.SIDEBAR_W, canvas.height);
+    // C++ DisplayClass::Set_View_Dimensions(0, 8*RESFACTOR, ...):
+    // the tactical map starts below the top tab bar and excludes the sidebar.
+    this.camera = new Camera(
+      canvas.width - Game.SIDEBAR_W,
+      canvas.height - Game.TACTICAL_TOP,
+      0,
+      Game.TACTICAL_TOP,
+    );
     this.input = new InputManager(canvas);
     this.map = new GameMap();
     this.renderer = new Renderer(canvas);
@@ -2272,8 +2280,9 @@ export class Game {
     // This matches what WASM renders, including edge clamping when HOME is near map edge.
     const homeWp = this.waypoints.get(98);
     if (homeWp) {
-      const offX = 5, offY = 4;
-      const vpCols = 10, vpRows = 8;
+      const offX = 5 * RESFACTOR, offY = 4 * RESFACTOR;
+      const vpCols = Math.floor(this.camera.viewWidth / CELL_SIZE);
+      const vpRows = Math.floor(this.camera.viewHeight / CELL_SIZE);
       // Compute C++ tactical top-left and clamp to map bounds
       let topLeftCx = homeWp.cx - offX;
       let topLeftCy = homeWp.cy - offY;
@@ -2623,9 +2632,9 @@ export class Game {
     // Periodically resume audio context if browser suspended it (e.g. tab blur)
     if (this.tick % 45 === 0) this.audio.resume();
 
-    // Prune expired EVA messages (older than 5 seconds)
+    // C++ MessageListClass keeps trigger messages for Rule.MessageDelay.
     if (this.tick % 75 === 0) {
-      this.evaMessages = this.evaMessages.filter(m => this.tick - m.tick < 75);
+      this.evaMessages = this.evaMessages.filter(m => this.tick - m.tick < RA_MESSAGE_DELAY_TICKS);
     }
 
     // Cache available items once per tick (not every render frame)
@@ -15037,7 +15046,7 @@ export class Game {
       this.map.creepShadow();
     }
     if (result.textMessage !== undefined) {
-      this.showEvaMessage(result.textMessage);
+      this.showTutorialTextMessage(result.textMessage);
     }
     if (result.setTimer !== undefined) {
       this.missionTimer = result.setTimer * TIME_UNIT_TICKS;
@@ -15637,15 +15646,24 @@ export class Game {
     }
   }
 
-  /** Display an EVA text message (by trigger data ID) */
+  /** Display a TACTION_TEXT_TRIGGER message using TUTORIAL.INI text. */
+  private showTutorialTextMessage(id: number): void {
+    const text = getTutorialText(id);
+    if (!text) return;
+    this.evaMessages.push({ text, tick: this.tick });
+    this.audio.play('eva_acknowledged');
+  }
+
+  /** Display a non-trigger UI/EVA text message. Trigger text must use showTutorialTextMessage(). */
   private showEvaMessage(id: number, customText?: string): void {
     if (customText) {
       this.evaMessages.push({ text: customText, tick: this.tick });
       this.audio.play('eva_acknowledged');
       return;
     }
-    // Map message IDs to text — from RA tutorial.txt (Soviet campaign text strings).
-    // C++ taction.cpp:371: TutorialTextData + TutorialTextOffsets[Data.Value]
+    // Non-trigger notifications used by TS subsystems that do not flow through
+    // TACTION_TEXT_TRIGGER. These are intentionally kept separate from
+    // TUTORIAL.INI text so trigger parity cannot be hidden by synthetic copy.
     const messages: Record<number, string> = {
       0: 'Locate the enemy\'s command center and destroy it.',
       1: 'Reinforcements have arrived.',
@@ -17202,19 +17220,14 @@ export class Game {
       this.tick,
     );
 
-    // Render EVA messages, mission timer, music track, and mission name overlay
+    // Render C++ top/status overlays
     this.renderer.musicTrack = this.audio.music.currentTrack;
     this.renderer.gameSpeed = this.gameSpeed;
     // C++ parity: top status bar (OPTIONS | TIME | CREDITS) — TabClass::Draw_It
     this.renderer.renderTopBar(this.tick);
     this.renderer.renderEvaMessages(this.tick);
-    this.renderer.renderMusicTrack(this.tick);
     this.renderer.renderGameSpeed();
     this.renderer.missionName = this.missionName;
-    // Mission name overlay fades during first 4 seconds (60 ticks)
-    if (this.tick < 60) {
-      this.renderMissionNameOverlay();
-    }
 
     // Render pause overlay
     if (this.state === 'paused') {

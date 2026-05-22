@@ -16,6 +16,9 @@ export class Camera {
   /** Viewport dimensions in pixels */
   viewWidth: number;
   viewHeight: number;
+  /** Screen-space origin of the tactical viewport. C++ starts below the tab bar. */
+  screenX: number;
+  screenY: number;
 
   /** H5: Playable area bounds in pixels (defaults to full 128x128 map) */
   private boundsMinX = 0;
@@ -23,9 +26,11 @@ export class Camera {
   private boundsMaxX = MAP_CELLS * CELL_SIZE;
   private boundsMaxY = MAP_CELLS * CELL_SIZE;
 
-  constructor(viewWidth: number, viewHeight: number) {
+  constructor(viewWidth: number, viewHeight: number, screenX = 0, screenY = 0) {
     this.viewWidth = viewWidth;
     this.viewHeight = viewHeight;
+    this.screenX = screenX;
+    this.screenY = screenY;
   }
 
   /** Set playable area bounds (from scenario map bounds) */
@@ -55,10 +60,13 @@ export class Camera {
     if (!mouseActive) return; // Don't scroll until mouse enters canvas
     let dx = 0;
     let dy = 0;
-    if (mouseX < EDGE_SCROLL_MARGIN) dx = -SCROLL_SPEED;
-    if (mouseX > this.viewWidth - EDGE_SCROLL_MARGIN) dx = SCROLL_SPEED;
-    if (mouseY < EDGE_SCROLL_MARGIN) dy = -SCROLL_SPEED;
-    if (mouseY > this.viewHeight - EDGE_SCROLL_MARGIN) dy = SCROLL_SPEED;
+    const localX = mouseX - this.screenX;
+    const localY = mouseY - this.screenY;
+    if (localX < 0 || localY < 0 || localX > this.viewWidth || localY > this.viewHeight) return;
+    if (localX < EDGE_SCROLL_MARGIN) dx = -SCROLL_SPEED;
+    if (localX > this.viewWidth - EDGE_SCROLL_MARGIN) dx = SCROLL_SPEED;
+    if (localY < EDGE_SCROLL_MARGIN) dy = -SCROLL_SPEED;
+    if (localY > this.viewHeight - EDGE_SCROLL_MARGIN) dy = SCROLL_SPEED;
     if (dx || dy) this.scroll(dx, dy);
   }
 
@@ -75,12 +83,12 @@ export class Camera {
 
   /** Convert screen coordinates to world coordinates */
   screenToWorld(sx: number, sy: number): { x: number; y: number } {
-    return { x: sx + this.x, y: sy + this.y };
+    return { x: sx - this.screenX + this.x, y: sy - this.screenY + this.y };
   }
 
   /** Convert world coordinates to screen coordinates */
   worldToScreen(wx: number, wy: number): { x: number; y: number } {
-    return { x: wx - this.x, y: wy - this.y };
+    return { x: wx - this.x + this.screenX, y: wy - this.y + this.screenY };
   }
 
   /** Get the visible world bounds as { left, top, right, bottom } */
