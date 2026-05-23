@@ -4,14 +4,14 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, RESFACTOR, House, Stance, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, HOUSE_FACTION, CONDITION_YELLOW, leptonToPixel } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, RESFACTOR, House, Stance, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, CONDITION_YELLOW, leptonToPixel, type Faction } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type TilesetMeta } from './assets';
 import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
 import { type GameMap, Terrain } from './map';
 import { type InputState } from './input';
 import { type MapStructure, STRUCTURE_SIZE, getBibCells } from './scenario';
-import { SHADOW_TABLE, cellShadowIndex } from './shadow';
+import { SHADOW_TABLE, cellShadowIndex, shadowTransAlphaForRGBA } from './shadow';
 import { NonCriticalRandom } from './random';
 import { RA_MESSAGE_DELAY_TICKS } from './tutorialText';
 
@@ -293,8 +293,9 @@ export class Renderer {
   sidebarW = 80 * RESFACTOR;
   leftStripScroll = 0;
   rightStripScroll = 0;
-  hasRadar = false; // requires DOME building for minimap AND sufficient power
-  doesRadarExist = false; // DOME building exists (regardless of power) — C++ DoesRadarExist
+  hasRadar = false; // C++ IsRadarActive || PlayerPtr->IsGPSActive
+  doesRadarExist = false; // C++ DoesRadarExist || PlayerPtr->IsGPSActive
+  radarCoverFrame: number | null = null; // opening/closing natoradr/ussrradr frame override
   /** U6: Fullscreen radar toggle — enlarged minimap overlay */
   isRadarFullscreen = false;
   isRadarJammed = false; // GAP generator radar jamming (C++ IsRadarJammed)
@@ -329,6 +330,8 @@ export class Renderer {
   placementCells: boolean[] | null = null; // per-cell passability for placement preview
   // Dynamic player houses (set by game on start, used for sidebar filtering)
   playerHouses: Set<House> = new Set([House.Spain, House.Greece]);
+  /** PlayerPtr side for house-specific sidebar/radar art. */
+  playerFaction: Faction = 'allied';
   // Superweapon state (set by game each frame)
   superweapons = new Map<string, SuperweaponState>();
   superweaponCursorMode: SuperweaponType | null = null;
@@ -455,11 +458,7 @@ export class Renderer {
 
   /** Is the player faction allied? (for house-specific sidebar art) */
   private isPlayerAllied(): boolean {
-    for (const h of this.playerHouses) {
-      const f = HOUSE_FACTION[h];
-      if (f === 'soviet') return false;
-    }
-    return true;
+    return this.playerFaction !== 'soviet';
   }
 
   /** Get an RGB string from the current theatre palette, with optional brightness offset */
@@ -581,12 +580,12 @@ export class Renderer {
     this.renderOffscreenIndicators(camera, entities, selectedIds);
     this.renderSidebar(assets);
     this.renderMinimap(map, entities, structures, camera, assets);
+    this.renderSidebarButtonRow(assets);
     // U6: Fullscreen radar overlay
     if (this.isRadarFullscreen && this.hasRadar) {
       this.renderFullscreenRadar(map, entities, structures, camera);
     }
 
-    if (this.idleCount > 0) this.renderIdleCount();
     if (this.showHelp) this.renderHelpOverlay();
     this.renderCursor(assets);
   }
@@ -3129,6 +3128,16 @@ export class Renderer {
     canvas.height = h;
     const octx = canvas.getContext('2d')!;
     octx.drawImage(src, 0, 0);
+    const imageData = octx.getImageData(0, 0, w, h);
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      const alpha = shadowTransAlphaForRGBA(data[i], data[i + 1], data[i + 2], data[i + 3]);
+      data[i] = 0;
+      data[i + 1] = 0;
+      data[i + 2] = 0;
+      data[i + 3] = alpha;
+    }
+    octx.putImageData(imageData, 0, 0);
     this.shadowOverlay = canvas;
     return canvas;
   }
@@ -3160,8 +3169,7 @@ export class Renderer {
 
         if (vis === 0) {
           // Unmapped cell: solid black (C++ !IsMapped → Fill_Rect BLACK)
-          // +1 overlap eliminates sub-pixel grid lines between adjacent cells
-          ctx.fillRect(sx, sy, CELL_SIZE + 1, CELL_SIZE + 1);
+          ctx.fillRect(sx, sy, CELL_SIZE, CELL_SIZE);
         } else {
           // vis === 1: IsMapped && !IsVisible — compute shadow frame from neighbor bitmask
           const idx = cellShadowIndex(cx, cy, getVis);
@@ -3379,27 +3387,28 @@ export class Renderer {
    * C++ logic: val = DoesRadarExist ? MAX_RADAR_FRAMES : 0
    * Nearest-neighbor scaling preserves pixel art (no bilinear blur).
    */
-  private drawRadarCoverPlate(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, assets?: AssetManager): void {
+  private drawRadarCoverPlate(ctx: CanvasRenderingContext2D, _x: number, _y: number, _size: number, assets?: AssetManager): void {
     const isAllied = this.isPlayerAllied();
     const sheetName = isAllied ? 'natoradr' : 'ussrradr';
+    const x = this.width - this.sidebarW;
+    const y = Renderer.RADAR_COVER_DRAW_Y;
 
     const sheet = assets?.getSheet(sheetName);
     if (sheet) {
       // C++ radar.h: RADAR_ACTIVATED_FRAME=22, MAX_RADAR_FRAMES=41
       // DoesRadarExist -> frame 41 (closed cover plate), !DoesRadarExist -> frame 0 (ornate panel)
-      const frame = this.doesRadarExist ? 41 : 0;
-      const spriteScale = size / sheet.meta.frameWidth;
+      const frame = this.radarCoverFrame ?? (this.doesRadarExist ? 41 : 0);
       // Preserve pixel art with nearest-neighbor scaling
       const prevSmoothing = ctx.imageSmoothingEnabled;
       ctx.imageSmoothingEnabled = false;
-      assets!.drawFrame(ctx, sheetName, frame, x, y, { scale: spriteScale });
+      assets!.drawFrame(ctx, sheetName, frame, x, y, { scale: RESFACTOR });
       ctx.imageSmoothingEnabled = prevSmoothing;
       return;
     }
 
     // Procedural fallback (only if natoradr/ussrradr sprite assets are missing)
     ctx.fillStyle = '#000';
-    ctx.fillRect(x, y, size, size);
+    ctx.fillRect(x, y, Renderer.RADAR_COVER_W, Renderer.RADAR_COVER_W);
   }
 
   // ─── Fullscreen Radar (U6) ──────────────────────────────
@@ -3843,16 +3852,6 @@ export class Renderer {
 
   // ─── Help Overlay ──────────────────────────────────────
 
-  private renderIdleCount(): void {
-    const ctx = this.ctx;
-    const text = `Idle: ${this.idleCount}`;
-    const { y: mmY, size: mmSize } = this.getMinimapBounds();
-    const ix = this.width - this.sidebarW;
-    this.drawBitmapText(this._cachedAssets, text,
-      ix + this.sidebarW / 2, mmY + mmSize + 4,
-      this.idleCount > 0 ? '#ff8' : '#888', '6pt', { align: 'center' });
-  }
-
   private renderHelpOverlay(): void {
     const ctx = this.ctx;
     const w = 280;
@@ -3951,20 +3950,26 @@ export class Renderer {
   // ─── Sidebar ──────────────────────────────────────────────
 
   // ─── Sidebar Layout Constants (C++ sidebar.h / power.h, LORES base × RESFACTOR) ────
+  static readonly RADAR_COVER_W = 80 * RESFACTOR;  // C++ RadarClass::RadWidth
+  static readonly RADAR_COVER_H = 70 * RESFACTOR;  // C++ RadarClass::RadHeight
+  static readonly RADAR_COVER_Y = 7 * RESFACTOR;   // C++ RadarClass::RadY
+  static readonly RADAR_COVER_DRAW_Y = 8 * RESFACTOR; // C++ CC_Draw_Shape(RadarAnim, ..., RadY + 1*RESFACTOR)
   static readonly RADAR_SIZE = 70 * RESFACTOR;    // square radar minimap (custom, 70 LORES / 140 HIRES)
   static readonly RADAR_Y = 2 * RESFACTOR;        // top margin (custom)
-  static readonly CREDITS_Y = 74 * RESFACTOR;     // credits strip below radar (custom)
-  static readonly CREDITS_H = 7 * RESFACTOR;
 
-  // Button row — C++ English layout (sidebar.h BUTTON_ONE/TWO/THREE)
-  static readonly BUTTON_ROW_Y = 81 * RESFACTOR;  // right after credits strip
-  static readonly BUTTON_H = 9 * RESFACTOR;        // C++ BUTTON_HEIGHT
-  static readonly BUTTON_ONE_X = 2 * RESFACTOR;    // (242-240)×RF — repair (wide)
-  static readonly BUTTON_ONE_W = 32 * RESFACTOR;   // 32×RF
-  static readonly BUTTON_TWO_X = 36 * RESFACTOR;   // (276-240)×RF — sell (narrow)
-  static readonly BUTTON_TWO_W = 20 * RESFACTOR;   // 20×RF
-  static readonly BUTTON_THREE_X = 58 * RESFACTOR;  // (298-240)×RF — map (narrow)
-  static readonly BUTTON_THREE_W = 20 * RESFACTOR;  // 20×RF
+  // Button row — C++ SidebarClass::Init_IO shape button coordinates.
+  // The extracted HIRES REPAIR/SELL/MAP shapes are already 34×28 pixels,
+  // so they are drawn unscaled at the same absolute positions C++ uses.
+  static readonly BUTTON_ROW_Y = (0x96 / 2) * RESFACTOR;
+  static readonly BUTTON_H = 14 * RESFACTOR;
+  static readonly BUTTON_ONE_X = (0x1f2 / 2) * RESFACTOR - 240 * RESFACTOR;
+  static readonly BUTTON_ONE_W = 17 * RESFACTOR;
+  static readonly BUTTON_TWO_X = ((RESFACTOR as number) === 2
+    ? 0x21f
+    : (Math.floor(0x21f / 2) + 1) * RESFACTOR) - 240 * RESFACTOR;
+  static readonly BUTTON_TWO_W = 17 * RESFACTOR;
+  static readonly BUTTON_THREE_X = (0x24c / 2) * RESFACTOR - 240 * RESFACTOR;
+  static readonly BUTTON_THREE_W = 17 * RESFACTOR;
 
   // Strip columns (C++ StripClass, sidebar.h)
   static readonly STRIP_START_Y = 90 * RESFACTOR;   // COLUMN_ONE_Y
@@ -3981,14 +3986,17 @@ export class Renderer {
   static readonly DOWN_X_OFFSET = 18 * RESFACTOR;   // from column X — right scroll btn
   static readonly SBUTTON_W = 16 * RESFACTOR;       // scroll button width
   static readonly SBUTTON_H = 12 * RESFACTOR;       // scroll button height
-  static readonly SCROLL_BTN_Y_OFFSET = 97 * RESFACTOR; // from column Y
+  static readonly SCROLL_BTN_Y_OFFSET = 97 * RESFACTOR - 1; // C++ Init_IO: Y + UP_Y_OFFSET*RESFACTOR, then Y--
 
   // Power bar (C++ power.h)
   static readonly POWER_Y = 88 * RESFACTOR;          // absolute Y
   static readonly POWER_HEIGHT = 110;                  // C++ POWER_HEIGHT (200-(7+70+13)) power.h:81-94 — resolution independent
   static readonly POWER_BAR_RENDERED_HEIGHT = (RESFACTOR as number) === 1 ? 76 : 153; // LORES: raw 76px, HIRES: (76×2+1) rescaled
   static readonly POWER_BAR_W = 5 * RESFACTOR;
-  static readonly POWER_BAR_X_OFFSET = 1 * RESFACTOR;
+  static readonly POWER_BAR_X_OFFSET = 0;              // C++ Draw_It: PowerBarShape at 240*RESFACTOR
+  static readonly POWER_FILL_X_OFFSET = 5 * RESFACTOR; // C++ Fill_Rect starts at 245*RESFACTOR
+  static readonly POWER_MARKER_X_OFFSET = 1 * RESFACTOR; // C++ PowerShape at (POWER_X*RESFACTOR)+RESFACTOR
+  static readonly POWER_FILL_BOTTOM = 175 * RESFACTOR + 1; // C++ power.cpp:230
 
   // Sidebar background shape Y positions (absolute, for house-specific art)
   static readonly SIDEBAR_BG_TOP_Y = 8 * RESFACTOR;    // side1na/us
@@ -4105,15 +4113,9 @@ export class Renderer {
     ctx.lineTo(x + 1.5, this.height);
     ctx.stroke();
 
-    // Button row: repair / sell / map (C++ English layout)
-    this.renderButtonRow(x, w, assets);
-
     // Power bar (C++ PowerClass::Draw_It)
     const lowPower = this.sidebarPowerConsumed > this.sidebarPowerProduced && this.sidebarPowerProduced > 0;
-    const hasPower = this.sidebarPowerProduced > 0 || this.sidebarPowerConsumed > 0;
-    if (hasPower) {
-      this.renderVerticalPowerBar(assets, x, lowPower);
-    }
+    this.renderVerticalPowerBar(assets, x, lowPower);
 
     // Dual production strips
     const leftItems = this.sidebarItems.filter(it => getStripSide(it) === 'left');
@@ -4140,31 +4142,37 @@ export class Renderer {
     ctx.textAlign = 'left';
   }
 
+  private renderSidebarButtonRow(assets: AssetManager): void {
+    this.renderButtonRow(this.width - this.sidebarW, this.sidebarW, assets);
+  }
+
   /** Render vertical power bar (C++ PowerClass::Draw_It — bounce animation, palette colors) */
   private renderVerticalPowerBar(assets: AssetManager, sidebarX: number, lowPower: boolean): void {
     const ctx = this.ctx;
-    const pwrX = sidebarX + Renderer.POWER_BAR_X_OFFSET;
+    const pwrFrameX = sidebarX + Renderer.POWER_BAR_X_OFFSET;
+    const pwrFillX = sidebarX + Renderer.POWER_FILL_X_OFFSET;
+    const markerX = sidebarX + Renderer.POWER_MARKER_X_OFFSET;
     const pwrY = Renderer.POWER_Y;
-    const pwrW = Renderer.POWER_BAR_W;
     const pwrH = Renderer.POWER_BAR_RENDERED_HEIGHT;
     const produced = this.sidebarPowerProduced;
     const consumed = this.sidebarPowerConsumed;
 
-    // Draw powerbar shape (C++: 2 frames stacked vertically, scaled by RESFACTOR)
+    // Draw powerbar shape. The extracted POWERBAR.SHP frames are already in
+    // hires pixels; C++ draws them at 240*RESFACTOR without another scale.
     const pwrSheet = assets.getSheet('powerbar');
     if (pwrSheet) {
       const frameH = pwrSheet.meta.frameHeight;
       // Frame 0 = top half, frame 1 = bottom half
-      assets.drawFrame(ctx, 'powerbar', 0, pwrX, pwrY, { scale: RESFACTOR });
+      assets.drawFrame(ctx, 'powerbar', 0, pwrFrameX, pwrY);
       if (pwrSheet.meta.frameCount > 1) {
-        assets.drawFrame(ctx, 'powerbar', 1, pwrX, pwrY + frameH * RESFACTOR, { scale: RESFACTOR });
+        assets.drawFrame(ctx, 'powerbar', 1, pwrFrameX, pwrY + frameH);
       }
     } else {
       ctx.fillStyle = '#111';
-      ctx.fillRect(pwrX, pwrY, pwrW, pwrH);
+      ctx.fillRect(pwrFrameX, pwrY, Renderer.POWER_BAR_W, pwrH);
       ctx.strokeStyle = '#333';
       ctx.lineWidth = 1;
-      ctx.strokeRect(pwrX, pwrY, pwrW, pwrH);
+      ctx.strokeRect(pwrFrameX, pwrY, Renderer.POWER_BAR_W, pwrH);
     }
 
     // C++ bounce animation: apply modtable when at target height
@@ -4180,7 +4188,7 @@ export class Renderer {
     ph = Math.max(0, Math.min(pwrH - 2, ph));
     dh = Math.max(0, Math.min(pwrH - 2, dh));
 
-    const bottom = pwrY + pwrH - 1;
+    const bottom = Renderer.POWER_FILL_BOTTOM;
 
     // Choose color based on drain vs power ratio (C++ power.cpp)
     let colors: [string, string];
@@ -4200,23 +4208,23 @@ export class Renderer {
       const c2 = flashing ? '#880000' : colors[1];
 
       ctx.fillStyle = c2;
-      ctx.fillRect(pwrX + 2, bottom - ph, 2, ph);
+      ctx.fillRect(pwrFillX, bottom - ph, 2, ph);
       ctx.fillStyle = c1;
-      ctx.fillRect(pwrX + 4, bottom - ph, 2, ph);
+      ctx.fillRect(pwrFillX + 2, bottom - ph, 2, ph);
     }
 
     // Draw drain marker shape at drain height
     const markerSheet = assets.getSheet('power_marker');
-    if (markerSheet && dh > 0) {
-      const markerY = bottom - dh - markerSheet.meta.frameHeight * RESFACTOR;
-      assets.drawFrame(ctx, 'power_marker', 0, pwrX, markerY, { scale: RESFACTOR });
-    } else if (dh > 0) {
+    const markerY = bottom - (dh + 2 * RESFACTOR);
+    if (markerSheet) {
+      assets.drawFrame(ctx, 'power_marker', 0, markerX, markerY);
+    } else {
       // Fallback: white divider line at drain level
       ctx.strokeStyle = '#fff';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(pwrX, bottom - dh);
-      ctx.lineTo(pwrX + pwrW, bottom - dh);
+      ctx.moveTo(markerX, bottom - dh);
+      ctx.lineTo(markerX + Renderer.POWER_BAR_W, bottom - dh);
       ctx.stroke();
     }
 
@@ -4342,48 +4350,37 @@ export class Renderer {
   /** Render scroll buttons below strip (C++ sprite-based, side-by-side) */
   private renderStripScrollArrows(
     ctx: CanvasRenderingContext2D, assets: AssetManager,
-    stripX: number, items: ProductionItem[], scroll: number,
+    stripX: number, _items: ProductionItem[], _scroll: number,
   ): void {
-    if (items.length === 0) return;
-    const rowH = Renderer.CAMEO_H;
-    const maxVisible = Renderer.CAMEO_VISIBLE;
-    const maxScroll = Math.max(0, (items.length - maxVisible) * rowH);
     const btnY = Renderer.STRIP_START_Y + Renderer.SCROLL_BTN_Y_OFFSET;
 
-    // Up arrow (left button) — R19: dim when disabled (C++ parity)
-    const upDisabled = scroll <= 0;
+    // Up arrow (left button). C++ always draws the ShapeButton; invalid
+    // scroll attempts play VOC_SCOLD rather than disabling the button visual.
     const upSheet = assets.getSheet('stripup');
-    if (upDisabled) ctx.globalAlpha = 0.3;
     if (upSheet) {
-      const frame = upDisabled ? 1 : 0; // frame 0=enabled, 1=disabled
-      assets.drawFrame(ctx, 'stripup', frame, stripX + Renderer.UP_X_OFFSET, btnY, { scale: RESFACTOR });
+      assets.drawFrame(ctx, 'stripup', 0, stripX + Renderer.UP_X_OFFSET, btnY);
     } else {
-      ctx.fillStyle = upDisabled ? '#444' : '#aaa';
+      ctx.fillStyle = '#aaa';
       ctx.font = '10px monospace';
       ctx.textAlign = 'center';
       ctx.fillText('\u25B2', stripX + Renderer.UP_X_OFFSET + Renderer.SBUTTON_W / 2, btnY + Renderer.SBUTTON_H / 2 + 3);
     }
-    if (upDisabled) ctx.globalAlpha = 1.0;
 
-    // Down arrow (right button) — R19: dim when disabled (C++ parity)
-    const downDisabled = scroll >= maxScroll;
+    // Down arrow (right button), same always-visible C++ ShapeButton behavior.
     const dnSheet = assets.getSheet('stripdn');
-    if (downDisabled) ctx.globalAlpha = 0.3;
     if (dnSheet) {
-      const frame = downDisabled ? 1 : 0;
-      assets.drawFrame(ctx, 'stripdn', frame, stripX + Renderer.DOWN_X_OFFSET, btnY, { scale: RESFACTOR });
+      assets.drawFrame(ctx, 'stripdn', 0, stripX + Renderer.DOWN_X_OFFSET, btnY);
     } else {
-      ctx.fillStyle = downDisabled ? '#444' : '#aaa';
+      ctx.fillStyle = '#aaa';
       ctx.font = '10px monospace';
       ctx.textAlign = 'center';
       ctx.fillText('\u25BC', stripX + Renderer.DOWN_X_OFFSET + Renderer.SBUTTON_W / 2, btnY + Renderer.SBUTTON_H / 2 + 3);
     }
-    if (downDisabled) ctx.globalAlpha = 1.0;
   }
 
   // ─── Button Row (Repair / Sell / Map — C++ English layout, SHP sprites) ──────
 
-  /** Render the 3-icon button row with C++ positions: repair (64px wide), sell (40px), map (40px) */
+  /** Render the 3-icon button row at the C++ ShapeButtonClass positions. */
   private renderButtonRow(sidebarX: number, _sidebarW: number, assets: AssetManager): void {
     const ctx = this.ctx;
     const btnY = Renderer.BUTTON_ROW_Y;
@@ -4401,11 +4398,7 @@ export class Renderer {
       const spriteSheet = assets.getSheet(btn.sprite);
       if (spriteSheet) {
         const frame = btn.active ? 1 : 0;
-        // Scale LORES shape to fill button area
-        const btnScale = Math.min(btn.w / spriteSheet.meta.frameWidth, btnH / spriteSheet.meta.frameHeight);
-        const sw = spriteSheet.meta.frameWidth * btnScale;
-        const sh = spriteSheet.meta.frameHeight * btnScale;
-        assets.drawFrame(ctx, btn.sprite, frame, bx + (btn.w - sw) / 2, btnY + (btnH - sh) / 2, { scale: btnScale });
+        assets.drawFrame(ctx, btn.sprite, frame, bx, btnY);
       } else {
         // Fallback: semi-transparent button with text
         ctx.fillStyle = btn.active ? 'rgba(255,200,60,0.45)' : 'rgba(20,20,28,0.55)';

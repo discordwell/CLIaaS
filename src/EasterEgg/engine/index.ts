@@ -47,6 +47,15 @@ import {
   cppIntDivFixed,
 } from './fixedPoint';
 import { Renderer, type Effect, BUILDING_FRAME_TABLE } from './renderer';
+import {
+  advanceRadarAnimation,
+  createRadarVisualState,
+  isRadarActive,
+  isRadarExisting,
+  radarDisplayFrame,
+  updateRadarAvailability,
+  type RadarVisualState,
+} from './radar';
 import { getTutorialText, RA_MESSAGE_DELAY_TICKS } from './tutorialText';
 import { type LogicAnim, processLogicAnim, spawnLogicAnim } from './logicAnim';
 import { findPath, nearbyLocation } from './pathfinding';
@@ -773,8 +782,11 @@ export class Game {
   private baseRebuildQueue: Array<{ type: string; cell: number; house: House }> = [];
   private baseRebuildCooldown = 0;
 
-  // Comparison mode — activated via ?anttest=compare
+  // Manual-step mode — activated by compare/agent harnesses so screenshots are
+  // driven only by explicit step() calls, like the C++ agent harness.
   comparisonMode = false;
+  private radarVisual: RadarVisualState = createRadarVisualState();
+  private radarVisualLastAdvancedTick = -1;
   /** When true, fog of war is disabled (all cells visible) */
   fogDisabled = false;
   /** C++ RulesClass::IsAllyReveal after scenario [General] overrides. */
@@ -2066,6 +2078,8 @@ export class Game {
     this.state = 'loading';
     this.stopped = false;
     this.tick = 0;
+    this.radarVisual = createRadarVisualState();
+    this.radarVisualLastAdvancedTick = -1;
     this.scenarioId = scenarioId;
     this.difficulty = difficulty;
     this.onStateChange?.('loading');
@@ -2267,8 +2281,12 @@ export class Game {
       }
     }
 
-    // Initial fog of war reveal
-    this.updateFogOfWar();
+    // Initial fog of war reveal.
+    // C++ scenario.cpp:646 calls Map.All_To_Look(true) after scenario load.
+    // display.cpp:4448-4452 skips buildings for that pass; buildings only
+    // cascade sight if a player unit maps their footprint and Revealed()
+    // calls Look(). The normal per-frame pass below includes buildings.
+    this.applyScenarioInitLook();
     this.markCurrentPlayerSightMapped();
 
     // H5: Clamp camera to playable bounds, not full 128x128 map
@@ -2282,20 +2300,16 @@ export class Game {
     const homeWp = this.waypoints.get(98);
     if (homeWp) {
       const offX = 5 * RESFACTOR, offY = 4 * RESFACTOR;
-      const vpCols = Math.floor(this.camera.viewWidth / CELL_SIZE);
-      const vpRows = Math.floor(this.camera.viewHeight / CELL_SIZE);
-      // Compute C++ tactical top-left and clamp to map bounds
-      let topLeftCx = homeWp.cx - offX;
-      let topLeftCy = homeWp.cy - offY;
-      const mapMinCx = this.map.boundsX;
-      const mapMinCy = this.map.boundsY;
-      const mapMaxCx = this.map.boundsX + this.map.boundsW - vpCols;
-      const mapMaxCy = this.map.boundsY + this.map.boundsH - vpRows;
-      topLeftCx = Math.max(mapMinCx, Math.min(mapMaxCx, topLeftCx));
-      topLeftCy = Math.max(mapMinCy, Math.min(mapMaxCy, topLeftCy));
-      // Viewport center in world pixels
-      const centerCx = topLeftCx + offX + 0.5;
-      const centerCy = topLeftCy + offY + 0.5;
+      const vpCols = this.camera.viewWidth / CELL_SIZE;
+      const vpRows = this.camera.viewHeight / CELL_SIZE;
+      const topLeftCx = homeWp.cx - offX;
+      const topLeftCy = homeWp.cy - offY;
+      // C++ Read_INI passes Cell_Coord(top-left) to Set_Tactical_Position.
+      // Cell_Coord returns the cell center, so campaign starts are half a
+      // cell into the nominal top-left. Set_Tactical_Position then clamps in
+      // leptons, so min/max-edge starts can lose the half-cell offset.
+      const centerCx = topLeftCx + vpCols / 2 + 0.5;
+      const centerCy = topLeftCy + vpRows / 2 + 0.5;
       this.camera.centerOn(centerCx * CELL_SIZE, centerCy * CELL_SIZE);
     } else {
       // Fallback: center on average player unit position
@@ -2489,7 +2503,13 @@ export class Game {
       this.state = 'paused';
       this.audio.music.pause();
       this.onStateChange?.('paused');
-      this.timerId = window.setTimeout(this.gameLoop, 100);
+      if (this.timerId) {
+        window.clearTimeout(this.timerId);
+        this.timerId = 0;
+      }
+      if (!this.comparisonMode) {
+        this.timerId = window.setTimeout(this.gameLoop, 100);
+      }
     }
   }
 
@@ -2508,14 +2528,27 @@ export class Game {
   step(n = 1): void {
     const wasPaused = this.state === 'paused';
     if (wasPaused) this.state = 'playing';
+
+    if (n <= 0) {
+      this.renderer.interpolationAlpha = 1;
+      this.render();
+      if (wasPaused && this.state === 'playing') this.state = 'paused';
+      return;
+    }
+
     for (let i = 0; i < n; i++) {
+      // C++ Main_Loop renders the current HidPage before Logic.AI advances the
+      // frame. Agent screenshots read that back buffer after agent_step(), so
+      // the visible frame is the state before the final stepped logic tick.
+      if (i === n - 1) {
+        this.renderer.interpolationAlpha = 1;
+        this.render();
+      }
       // C++ agent_step breaks on do_tick() returning true (game over).
       // Match this: stop stepping when game enters won/lost state.
       if (this.state !== 'playing') break;
       this.update();
     }
-    this.renderer.interpolationAlpha = 1; // agent step: show latest state, no interpolation
-    this.render();
     if (wasPaused && this.state === 'playing') this.state = 'paused';
   }
 
@@ -2536,6 +2569,10 @@ export class Game {
   /** Main game loop — uses setTimeout fallback when RAF is throttled */
   private gameLoop = (): void => {
     if (this.state === 'paused') {
+      if (this.comparisonMode) {
+        this.timerId = 0;
+        return;
+      }
       this.processPauseMenuInput();
       // Sync pause menu state to renderer
       this.renderer.pauseMenuOpen = this.pauseMenuOpen;
@@ -3794,6 +3831,7 @@ export class Game {
     );
     this.powerProduced = powerGrid.produced;
     this.powerConsumed = powerGrid.consumed;
+    this.updatePlayerRadarAvailability();
 
     // Low power warning (every 10 seconds when power demand exceeds supply)
     if (this.powerConsumed > this.powerProduced && this.powerProduced > 0 &&
@@ -3976,6 +4014,41 @@ export class Game {
   /** Sub detection — delegates to fog.ts */
   private updateSubDetection(): void {
     _updateSubDetection(this._fogCtx);
+  }
+
+  private revealSightForPlayer(cx: number, cy: number, radius: number): void {
+    if (!radius || radius > 10) return;
+    _revealAroundCell(this.map, cx, cy, radius);
+    this.markPlayerMappedSight(cx, cy, radius);
+  }
+
+  private applyScenarioInitLook(): void {
+    if (this.fogDisabled || this.gpsActive) {
+      this.updateFogOfWar();
+      return;
+    }
+
+    for (const e of this.entities) {
+      if (!e.alive || e.inLimbo) continue;
+      if (!this.isHouseHumanOrPlayerControl(e.house)) continue;
+      this.revealSightForPlayer(e.cell.cx, e.cell.cy, e.stats.sight);
+    }
+
+    const lookedStructures = new Set<number>();
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let i = 0; i < this.structures.length; i++) {
+        if (lookedStructures.has(i)) continue;
+        const s = this.structures[i];
+        if (!s.alive || s.house !== this.playerHouse) continue;
+        if (!this.isStructureFootprintMappedForPlayer(s)) continue;
+        lookedStructures.add(i);
+        this.revealSightForPlayer(s.cx, s.cy, STRUCTURE_SIGHT[s.type] ?? 5);
+        changed = true;
+      }
+    }
+    this.updateSubDetection();
   }
 
   /** Check if a screen click is on the minimap; if so, scroll camera there */
@@ -16064,8 +16137,40 @@ export class Game {
   hasBuilding(type: string): boolean {
     const BUILDING_ALIASES: Record<string, string> = { TENT: 'BARR', BARR: 'TENT', SYRD: 'SPEN', SPEN: 'SYRD' };
     const alt = BUILDING_ALIASES[type];
-    return this.structures.some(s => s.alive && (s.type === type || (alt !== undefined && s.type === alt)) &&
-      this.isAllied(s.house, this.playerHouse));
+    return this.structures.some(s =>
+      s.alive &&
+      s.house === this.playerHouse &&
+      (s.type === type || (alt !== undefined && s.type === alt)));
+  }
+
+  private hasActivePlayerRadarFacility(): boolean {
+    return this.structures.some(s =>
+      s.alive &&
+      s.type === 'DOME' &&
+      !isStructureUnderConstruction(s) &&
+      !s.sellProgress &&
+      s.house === this.playerHouse);
+  }
+
+  private hasFullPlayerPower(): boolean {
+    return this.powerConsumed === 0 || this.powerProduced >= this.powerConsumed;
+  }
+
+  private updatePlayerRadarAvailability(): void {
+    updateRadarAvailability(this.radarVisual, {
+      hasRadarFacility: this.hasActivePlayerRadarFacility(),
+      hasFullPower: this.hasFullPlayerPower(),
+      isGpsActive: this.gpsActive,
+    });
+  }
+
+  private updateRadarVisualFrameForRender(): void {
+    // C++ Main_Loop runs Map.Input/RadarClass::AI before Map.Render. Advance the
+    // opening/closing cover animation once per stepped frame, not once per canvas
+    // paint in the interpolated browser loop.
+    if (this.radarVisualLastAdvancedTick === this.tick) return;
+    this.radarVisualLastAdvancedTick = this.tick;
+    advanceRadarAnimation(this.radarVisual);
   }
 
   /** Calculate total silo storage capacity from alive player structures.
@@ -17052,6 +17157,7 @@ export class Game {
 
   /** Render the current frame */
   private render(): void {
+    this.updateRadarVisualFrameForRender();
     this.renderer.attackMoveMode = this.attackMoveMode;
     this.renderer.sellMode = this.sellMode;
     this.renderer.repairMode = this.repairMode;
@@ -17069,11 +17175,9 @@ export class Game {
     this.renderer.rightStripScroll = this.stripScrollPositions.right;
     // Power bar bounce animation (C++ PowerClass::AI — runs each tick)
     this.renderer.updatePowerAnimation();
-    // Radar requires DOME and sufficient power
-    // C++ house.cpp:4160-4170: Power_Fraction() returns 0 when powerProduced=0 and drain>0
-    const hasPower = this.powerConsumed === 0 || this.powerProduced >= this.powerConsumed;
-    this.renderer.doesRadarExist = this.hasBuilding('DOME');
-    this.renderer.hasRadar = this.renderer.doesRadarExist && hasPower;
+    this.renderer.doesRadarExist = isRadarExisting(this.radarVisual, this.gpsActive);
+    this.renderer.hasRadar = isRadarActive(this.radarVisual, this.gpsActive);
+    this.renderer.radarCoverFrame = radarDisplayFrame(this.radarVisual);
     // U6: Pass fullscreen radar state to renderer
     this.renderer.isRadarFullscreen = this.isRadarFullscreen;
     this.renderer.crates = this.crates;
@@ -17102,6 +17206,7 @@ export class Game {
     this.renderer.missionTimer = this.missionTimer;
     this.renderer.theatre = this.theatre;
     this.renderer.difficulty = this.difficulty;
+    this.renderer.playerFaction = this.playerFaction;
     // Placement ghost
     if (this.pendingPlacement) {
       const { mouseX, mouseY } = this.input.state;
@@ -17174,7 +17279,7 @@ export class Game {
     this.renderer.missionName = this.missionName;
 
     // Render pause overlay
-    if (this.state === 'paused') {
+    if (this.state === 'paused' && !this.comparisonMode) {
       this.renderer.renderPauseOverlay();
     }
 

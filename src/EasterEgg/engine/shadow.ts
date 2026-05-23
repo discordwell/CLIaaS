@@ -63,3 +63,17 @@ export function cellShadowIndex(
   if (getVis(cx + 1, cy + 1) === 0) idx |= SHADOW_BIT_SE;
   return idx;
 }
+
+/** C++ display.cpp builds ShadowTrans from:
+ *   {WHITE+1→BLACK,130}, {WHITE→BLACK,170}, {LTGRAY→BLACK,250}, {DKGRAY→BLACK,250}
+ * SHADOW.SHP was extracted through the RA palette, so we match those source
+ * colors by RGBA value and turn them into black alpha-mask pixels. */
+export function shadowTransAlphaForRGBA(r: number, g: number, b: number, a: number): number {
+  if (a === 0) return 0;
+  if (r === 16 && g === 12 && b === 12) return 130;  // WHITE+1 palette slot in the extracted sheet
+  if (r === 255 && g === 255 && b === 255) return 170; // WHITE
+  if (r === 170 && g === 170 && b === 170) return 250; // LTGRAY
+  if (r === 85 && g === 85 && b === 85) return 250;    // DKGRAY/GREY
+  if (r === 0 && g === 0 && b === 0) return 255;        // existing solid black pixels
+  return a;
+}

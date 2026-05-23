@@ -693,6 +693,7 @@ export default function AntGame({ onExit }: AntGameProps) {
       const canvas = canvasRef.current;
       const game = new Game(canvas);
       gameRef.current = game;
+      game.comparisonMode = true;
       const preserveSourceFog = params.get('fog') === 'source' || params.get('disableFog') === '0';
       game.fogDisabled = !preserveSourceFog;
 

@@ -1133,9 +1133,11 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'E3', name: 'Rocket', cost: 300, buildTime: 75, prerequisite: 'TENT', faction: 'allied', techLevel: 2, points: 10 },  // rules.ini Owner=allies (line 829)
   { type: 'E4', name: 'Flame', cost: 300, buildTime: 75, prerequisite: 'BARR', faction: 'soviet', techPrereq: 'STEK', techLevel: 6, points: 15 },  // rules.ini Prerequisite=stek (line 836)
   { type: 'E6', name: 'Engineer', cost: 500, buildTime: 100, prerequisite: 'TENT', faction: 'both', techLevel: 5, points: 20 },
-  { type: 'DOG', name: 'Dog', cost: 200, buildTime: 30, prerequisite: 'KENN', faction: 'soviet', techLevel: 3, points: 5 },  // rules.ini Prerequisite=kenn (line 781)
-  { type: 'MEDI', name: 'Medic', cost: 800, buildTime: 90, prerequisite: 'TENT', faction: 'allied', techLevel: 2, points: 15 },
+  { type: 'E7', name: 'Tanya', cost: 1200, buildTime: 120, prerequisite: 'TENT', faction: 'both', techPrereq: 'ATEK', techLevel: 11, points: 25 },
   { type: 'SPY', name: 'Spy', cost: 500, buildTime: 60, prerequisite: 'TENT', faction: 'allied', techPrereq: 'DOME', techLevel: 6, points: 15 },  // rules.ini Prerequisite=dome, Owner=allies
+  { type: 'THF', name: 'Thief', cost: 500, buildTime: 60, prerequisite: 'TENT', faction: 'allied', techPrereq: 'ATEK', techLevel: 11, points: 10 },
+  { type: 'MEDI', name: 'Medic', cost: 800, buildTime: 90, prerequisite: 'TENT', faction: 'allied', techLevel: 2, points: 15 },
+  { type: 'DOG', name: 'Dog', cost: 200, buildTime: 30, prerequisite: 'KENN', faction: 'soviet', techLevel: 3, points: 5 },  // rules.ini Prerequisite=kenn (line 781)
   // Vehicles (from WEAP) — faction + techLevel from rules.ini
   { type: 'JEEP', name: 'Ranger', cost: 600, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techLevel: 3, points: 20 },
   { type: '1TNK', name: 'Light Tank', cost: 700, buildTime: 120, prerequisite: 'WEAP', faction: 'allied', techLevel: 4, points: 30 },
@@ -1155,8 +1157,6 @@ export const PRODUCTION_ITEMS: ProductionItem[] = [
   { type: 'DTRK', name: 'Demo Truck', cost: 2400, buildTime: 200, prerequisite: 'MSLO', faction: 'both', techLevel: 13, points: 5 },  // aftrmath.ini Prerequisite=mslo, Owner=allies,soviet, Cost=2400
   { type: 'MRJ', name: 'Radar Jammer', cost: 600, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'DOME', techLevel: 12, points: 30 },  // rules.ini Prerequisite=weap,dome, Owner=allies
   { type: 'MGG', name: 'Mobile Gap Gen', cost: 600, buildTime: 100, prerequisite: 'WEAP', faction: 'allied', techPrereq: 'ATEK', techLevel: 11, points: 40 },  // rules.ini Prerequisite=weap,atek, Owner=allies
-  { type: 'E7', name: 'Tanya', cost: 1200, buildTime: 120, prerequisite: 'TENT', faction: 'both', techPrereq: 'ATEK', techLevel: 11, points: 25 },
-  { type: 'THF', name: 'Thief', cost: 500, buildTime: 60, prerequisite: 'TENT', faction: 'allied', techPrereq: 'ATEK', techLevel: 11, points: 10 },
   { type: 'V2RL', name: 'V2 Rocket', cost: 700, buildTime: 140, prerequisite: 'WEAP', faction: 'soviet', techPrereq: 'DOME', techLevel: 4, points: 40 },  // rules.ini Prerequisite=weap,dome (line 482)
   { type: 'MNLY', name: 'Minelayer', cost: 800, buildTime: 120, prerequisite: 'WEAP', faction: 'both', techPrereq: 'FIX', techLevel: 3, points: 50 },  // rules.ini Owner=allies,soviet (line 680), Prerequisite=weap,fix (line 674)
   // Naval (from SYRD — Allied Shipyard)

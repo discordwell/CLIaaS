@@ -46,7 +46,7 @@ function checkPlacementAdjacency(
   return false;
 }
 
-/** Simulate button row click (C++ English layout: repair=64px, sell=40px, map=40px) */
+/** Simulate button row click with C++ ShapeButtonClass hitboxes. */
 function buttonRowClick(
   relX: number, sellMode: boolean, repairMode: boolean,
 ): { sellMode: boolean; repairMode: boolean; mapClicked: boolean } {
@@ -164,10 +164,10 @@ describe('Production Queue — C++ Parity', () => {
 
 describe('Button Row — C++ English Layout', () => {
   it('repair button toggles repairMode', () => {
-    const r1 = buttonRowClick(10, false, false);
+    const r1 = buttonRowClick(20, false, false);
     expect(r1.repairMode).toBe(true);
     expect(r1.sellMode).toBe(false);
-    const r2 = buttonRowClick(10, false, true);
+    const r2 = buttonRowClick(20, false, true);
     expect(r2.repairMode).toBe(false);
   });
 
@@ -180,7 +180,7 @@ describe('Button Row — C++ English Layout', () => {
   });
 
   it('activating repair deactivates sell', () => {
-    const r = buttonRowClick(10, true, false);
+    const r = buttonRowClick(20, true, false);
     expect(r.repairMode).toBe(true);
     expect(r.sellMode).toBe(false);
   });
@@ -198,25 +198,26 @@ describe('Button Row — C++ English Layout', () => {
     expect(r.mapClicked).toBe(true);
   });
 
-  it('button positions match C++ English layout (64, 40, 40)', () => {
-    // Repair: [4, 68), Sell: [72, 112), Map: [116, 156)
-    expect(Renderer.BUTTON_ONE_X).toBe(4);
-    expect(Renderer.BUTTON_ONE_W).toBe(64);
-    expect(Renderer.BUTTON_TWO_X).toBe(72);
-    expect(Renderer.BUTTON_TWO_W).toBe(40);
-    expect(Renderer.BUTTON_THREE_X).toBe(116);
-    expect(Renderer.BUTTON_THREE_W).toBe(40);
+  it('button positions match C++ Init_IO shape coordinates', () => {
+    // C++ sidebar.cpp: Repair.X=0x1f2, Upgrade.X=0x21f, Zoom.X=0x24c at RESFACTOR=2.
+    // Relative to the 480px sidebar origin: Repair [18,52), Sell [63,97), Map [108,142).
+    expect(Renderer.BUTTON_ONE_X).toBe(18);
+    expect(Renderer.BUTTON_ONE_W).toBe(34);
+    expect(Renderer.BUTTON_TWO_X).toBe(63);
+    expect(Renderer.BUTTON_TWO_W).toBe(34);
+    expect(Renderer.BUTTON_THREE_X).toBe(108);
+    expect(Renderer.BUTTON_THREE_W).toBe(34);
 
-    expect(buttonRowClick(4, false, false).repairMode).toBe(true);   // left edge of repair
-    expect(buttonRowClick(67, false, false).repairMode).toBe(true);  // right edge of repair
-    expect(buttonRowClick(72, false, false).sellMode).toBe(true);    // left edge of sell
-    expect(buttonRowClick(111, false, false).sellMode).toBe(true);   // right edge of sell
-    expect(buttonRowClick(116, false, false).mapClicked).toBe(true); // left edge of map
-    expect(buttonRowClick(155, false, false).mapClicked).toBe(true); // right edge of map
+    expect(buttonRowClick(18, false, false).repairMode).toBe(true);  // left edge of repair
+    expect(buttonRowClick(51, false, false).repairMode).toBe(true);  // right edge of repair
+    expect(buttonRowClick(63, false, false).sellMode).toBe(true);    // left edge of sell
+    expect(buttonRowClick(96, false, false).sellMode).toBe(true);    // right edge of sell
+    expect(buttonRowClick(108, false, false).mapClicked).toBe(true); // left edge of map
+    expect(buttonRowClick(141, false, false).mapClicked).toBe(true); // right edge of map
   });
 
-  it('button height matches C++ BUTTON_HEIGHT ×2', () => {
-    expect(Renderer.BUTTON_H).toBe(18); // 9×2
+  it('button height matches extracted C++ SHP frame height', () => {
+    expect(Renderer.BUTTON_H).toBe(28);
   });
 });
 
@@ -274,7 +275,8 @@ describe('Strip Bounds — C++ HIRES Layout', () => {
 describe('Scroll Buttons — C++ Layout (side-by-side below strip)', () => {
   it('scroll buttons are at STRIP_START_Y + SCROLL_BTN_Y_OFFSET', () => {
     const btnY = Renderer.STRIP_START_Y + Renderer.SCROLL_BTN_Y_OFFSET;
-    expect(btnY).toBe(374); // 180 + 194
+    // C++ sidebar.cpp Init_IO subtracts one pixel after applying UP_Y_OFFSET.
+    expect(btnY).toBe(373); // 180 + 194 - 1
   });
 
   it('up button at UP_X_OFFSET=4, down button at DOWN_X_OFFSET=36', () => {
@@ -303,9 +305,9 @@ describe('Scroll Buttons — C++ Layout (side-by-side below strip)', () => {
     expect(scroll).toBe(maxScroll);
   });
 
-  it('button row ends exactly where strips start (no gap)', () => {
+  it('button row leaves the C++ 2 px gap before strips start', () => {
     const btnEnd = Renderer.BUTTON_ROW_Y + Renderer.BUTTON_H;
-    expect(btnEnd).toBe(Renderer.STRIP_START_Y); // 162+18 = 180
+    expect(btnEnd).toBe(Renderer.STRIP_START_Y - RESFACTOR);
   });
 
   it('strip clip height is 4 × 48 = 192px', () => {
@@ -837,12 +839,9 @@ describe('Sidebar Chrome — C++ TabShape Metallic Tabs', () => {
     expect(bot + 62 * RF).toBe(200 * RF);
   });
 
-  it('credits strip Y is between radar and button row', () => {
-    // Credits strip must sit below the radar area and above the button row
-    const credY = Renderer.CREDITS_Y;
+  it('button row is inside the C++ top sidebar section', () => {
     const btnY = Renderer.BUTTON_ROW_Y;
-    expect(credY).toBeGreaterThan(0);
-    expect(credY).toBeLessThan(btnY);
-    expect(credY + Renderer.CREDITS_H).toBeLessThanOrEqual(btnY);
+    expect(btnY).toBe((0x96 / 2) * RESFACTOR);
+    expect(btnY + Renderer.BUTTON_H).toBe(Renderer.STRIP_START_Y - RESFACTOR);
   });
 });

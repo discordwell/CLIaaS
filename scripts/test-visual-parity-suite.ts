@@ -362,7 +362,10 @@ test.describe('Visual Parity Suite', () => {
           return { dataUrl: c.toDataURL('image/png'), width: w, height: h, nonBlackRatio: 0, alphaRatio: 0 };
         });
         const tsFrame = await tsPage.evaluate((): CapturedFrame => {
-          (window as any).__agentStep?.(0);
+          // C++ agent_render reads the existing HidPage back buffer. TS
+          // __agentStep(n) already leaves the equivalent pre-Logic frame on
+          // canvas, so do not force a render-only step here or the capture
+          // moves one logic frame ahead of the original.
           const c = document.querySelector('canvas');
           if (!c) return { dataUrl: null, width: 0, height: 0, nonBlackRatio: 0, alphaRatio: 0 };
           return { dataUrl: c.toDataURL('image/png'), width: c.width, height: c.height, nonBlackRatio: 0, alphaRatio: 0 };

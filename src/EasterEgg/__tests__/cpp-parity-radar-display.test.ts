@@ -3,12 +3,12 @@
  *
  * In the original C++, the radar area displays one of three visual states:
  *
- * 1. INACTIVE (no DOME or low power): Faction emblem overlay
- *    - Allied houses → natoradr.shp final frame (NATO compass rose)
- *    - Soviet houses → ussrradr.shp final frame (Soviet star)
+ * 1. INACTIVE/ANIMATING: natoradr/ussrradr cover frames
+ *    - Allied houses → natoradr.shp
+ *    - Soviet houses → ussrradr.shp
  *    C++ source: radar.cpp:370-381 (_hiresradarnames[] selects per-house SHP),
  *    radar.cpp:1596 (Radar_Anim draws RadarAnim at RadarAnimFrame),
- *    radar.cpp:1662-1665 (deactivation ends at MAX_RADAR_FRAMES → last frame = emblem)
+ *    radar.cpp:1638-1665 (activation/deactivation animates cover frames)
  *
  * 2. ACTIVE: Live minimap showing terrain, units, structures
  *    C++ source: radar.cpp:480 (IsRadarActive branch draws cell-by-cell minimap)
@@ -30,9 +30,20 @@
  *   HOUSE_BAD      → ussrradr.shp (Soviet)
  */
 
-import { describe, it, expect } from 'vitest';
-import { House, HOUSE_FACTION } from '../engine/types';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { describe, it, expect, vi } from 'vitest';
+import { HOUSE_FACTION, RESFACTOR } from '../engine/types';
 import { Renderer } from '../engine/renderer';
+import {
+  MAX_RADAR_FRAMES,
+  RADAR_ACTIVATED_FRAME,
+  advanceRadarAnimation,
+  createRadarVisualState,
+  isRadarActive,
+  radarDisplayFrame,
+  updateRadarAvailability,
+} from '../engine/radar';
 
 // ─── Canvas mock ────────────────────────────────────────
 
@@ -88,6 +99,27 @@ const CPP_RADAR_SHP: Record<string, 'natoradr' | 'ussrradr'> = {
 // ─── Tests ──────────────────────────────────────────────
 
 describe('C++ parity: Radar display states (radar.cpp)', () => {
+  describe('radar animation asset coverage', () => {
+    it('manifest includes the extracted C++ radar cover SHPs', () => {
+      const manifest = JSON.parse(readFileSync(
+        join(__dirname, '../../..', 'public/ra/assets/manifest.json'),
+        'utf-8',
+      ));
+
+      for (const sprite of ['natoradr', 'ussrradr']) {
+        expect(manifest[sprite], `${sprite}.png exists and must be loadable through AssetManager`).toEqual({
+          frameWidth: 80,
+          frameHeight: 80,
+          frameCount: 42,
+          columns: 16,
+          rows: 3,
+          sheetWidth: 1280,
+          sheetHeight: 240,
+        });
+      }
+    });
+  });
+
   describe('faction → radar SHP mapping (radar.cpp:370-381)', () => {
     it('all houses map to the correct faction for radar overlay selection', () => {
       for (const [house, shp] of Object.entries(CPP_RADAR_SHP)) {
@@ -135,16 +167,16 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
     });
 
     it('doesRadarExist defaults to false', () => {
-      // C++ radar.h:136: DoesRadarExist — tracks whether DOME building exists
+      // C++ radar.h:136: DoesRadarExist — tracks whether the cover has opened.
       const r = new Renderer(mockCanvas());
       expect(r.doesRadarExist).toBe(false);
     });
 
-    it('doesRadarExist is independent of hasRadar (DOME vs power)', () => {
+    it('doesRadarExist is independent of hasRadar (opened cover vs active display)', () => {
       // C++ radar.cpp:601: val = DoesRadarExist ? MAX_RADAR_FRAMES : 0
-      // DoesRadarExist = DOME built, hasRadar = DOME + power
+      // DoesRadarExist is the animated cover state, not merely DOME presence.
       const r = new Renderer(mockCanvas());
-      // DOME exists but no power → doesRadarExist=true, hasRadar=false
+      // Radar opened previously, but the tactical minimap is currently inactive.
       r.doesRadarExist = true;
       r.hasRadar = false;
       expect(r.doesRadarExist).toBe(true);
@@ -193,41 +225,80 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
   });
 
   describe('radar activation conditions (house.cpp:1258-1312)', () => {
-    it('radar requires DOME building AND sufficient power', () => {
+    it('powered DOME requests activation but does not become active until the cover opens', () => {
       // C++ house.cpp:1302: if (IsGPSActive || (ActiveBScan & STRUCTF_RADAR))
       // house.cpp:1303: if (IsGPSActive || Power_Fraction() >= 1)
-      // TS equivalent: hasRadar = hasBuilding('DOME') && hasPower
+      // radar.cpp:1638-1646: RadarClass::AI opens frames 0..22 before IsRadarActive.
+      const state = createRadarVisualState();
 
-      // No DOME → no radar
-      expect(simulateRadar(false, 100, 50)).toBe(false);
-      // DOME but low power → no radar
-      expect(simulateRadar(true, 100, 150)).toBe(false);
-      // DOME with sufficient power → radar
-      expect(simulateRadar(true, 100, 50)).toBe(true);
-      // DOME with equal power → radar active (produced >= consumed)
-      expect(simulateRadar(true, 100, 100)).toBe(true);
+      updateRadarAvailability(state, { hasRadarFacility: true, hasFullPower: true, isGpsActive: false });
+
+      expect(state.isRadarActivating).toBe(true);
+      expect(isRadarActive(state)).toBe(false);
+      expect(radarDisplayFrame(state)).toBe(0);
+
+      for (let i = 0; i < RADAR_ACTIVATED_FRAME - 1; i++) advanceRadarAnimation(state);
+      expect(isRadarActive(state)).toBe(false);
+      expect(state.doesRadarExist).toBe(false);
+      expect(radarDisplayFrame(state)).toBe(RADAR_ACTIVATED_FRAME - 1);
+
+      advanceRadarAnimation(state);
+      expect(isRadarActive(state)).toBe(true);
+      expect(state.doesRadarExist).toBe(true);
+      expect(radarDisplayFrame(state)).toBeNull();
     });
 
-    it('DOME with zero power production and zero consumption has power', () => {
+    it('unpowered initial DOME does not mark DoesRadarExist until it has opened once', () => {
+      const state = createRadarVisualState();
+
+      updateRadarAvailability(state, { hasRadarFacility: true, hasFullPower: false, isGpsActive: false });
+
+      expect(isRadarActive(state)).toBe(false);
+      expect(state.doesRadarExist).toBe(false);
+      expect(radarDisplayFrame(state)).toBe(0);
+    });
+
+    it('DOME with zero power production and zero consumption can start opening', () => {
       // C++ house.cpp:4160-4170: Power_Fraction() returns 1 when Drain==0
-      // TS: powerConsumed === 0 → hasPower = true
-      expect(simulateRadar(true, 0, 0)).toBe(true); // no power system = has power
+      const state = createRadarVisualState();
+      updateRadarAvailability(state, { hasRadarFacility: true, hasFullPower: true, isGpsActive: false });
+      expect(state.isRadarActivating).toBe(true);
     });
 
     it('DOME with zero production but nonzero consumption has no power', () => {
       // C++ house.cpp:4168: Power=0, Drain>0 → Power_Fraction()=0 → low power
-      // TS: powerConsumed(100) !== 0 && powerProduced(0) < powerConsumed(100) → no power
-      expect(simulateRadar(true, 0, 100)).toBe(false);
+      const state = createRadarVisualState();
+      updateRadarAvailability(state, { hasRadarFacility: true, hasFullPower: false, isGpsActive: false });
+      expect(state.isRadarActivating).toBe(false);
+      expect(isRadarActive(state)).toBe(false);
+    });
+
+    it('active radar losing power closes through frame 41 and keeps DoesRadarExist', () => {
+      const state = createRadarVisualState();
+      state.doesRadarExist = true;
+      state.isRadarActive = true;
+      state.radarAnimFrame = RADAR_ACTIVATED_FRAME;
+
+      updateRadarAvailability(state, { hasRadarFacility: true, hasFullPower: false, isGpsActive: false });
+
+      expect(state.isRadarDeactivating).toBe(true);
+      expect(isRadarActive(state)).toBe(false);
+      expect(radarDisplayFrame(state)).toBe(RADAR_ACTIVATED_FRAME);
+
+      for (let i = RADAR_ACTIVATED_FRAME; i < MAX_RADAR_FRAMES; i++) advanceRadarAnimation(state);
+      expect(state.isRadarDeactivating).toBe(false);
+      expect(state.doesRadarExist).toBe(true);
+      expect(radarDisplayFrame(state)).toBe(MAX_RADAR_FRAMES);
     });
   });
 
   describe('cover plate frame selection (radar.cpp:601)', () => {
     // C++ radar.cpp:601: int val = (DoesRadarExist) ? MAX_RADAR_FRAMES : 0;
     // CC_Draw_Shape(RadarAnim, val, ...)
-    // Frame 0 = ornate panel with faction emblem (no DOME)
-    // Frame 41 = dark cover plate (DOME exists but inactive/no power)
+    // Frame 0 = closed panel before radar has ever opened.
+    // Frame 41 = closed panel after a radar that previously existed has deactivated.
 
-    it('no DOME → frame 0 (ornate radar panel)', () => {
+    it('radar never opened → frame 0', () => {
       // C++ !DoesRadarExist → val = 0 → natoradr/ussrradr frame 0
       const r = new Renderer(mockCanvas());
       r.doesRadarExist = false;
@@ -236,7 +307,7 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
       expect(r.doesRadarExist ? 41 : 0).toBe(0);
     });
 
-    it('DOME exists but no power → frame 41 (dark cover plate)', () => {
+    it('previously opened radar that is now inactive → frame 41', () => {
       // C++ DoesRadarExist=true, !IsRadarActive → val = MAX_RADAR_FRAMES = 41
       const r = new Renderer(mockCanvas());
       r.doesRadarExist = true;
@@ -248,19 +319,86 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
     it('MAX_RADAR_FRAMES = 41 (radar.h:122)', () => {
       // C++ radar.h: enum RadarClassEnums { MAX_RADAR_FRAMES = 41 };
       // Validates the constant used in frame selection
-      expect(41).toBe(41); // self-documenting: frame index matches C++ constant
+      expect(MAX_RADAR_FRAMES).toBe(41); // self-documenting: frame index matches C++ constant
     });
 
     it('RADAR_ACTIVATED_FRAME = 22 (radar.h:121)', () => {
       // C++ radar.h: enum RadarClassEnums { RADAR_ACTIVATED_FRAME = 22 };
       // This is the transition point between opening/closing animation
-      expect(22).toBe(22); // self-documenting: midpoint of 42-frame animation
+      expect(RADAR_ACTIVATED_FRAME).toBe(22); // self-documenting: midpoint of 42-frame animation
+    });
+
+    it('inactive radar draws the Allied cover SHP at the C++ radar origin', () => {
+      const r = new Renderer(mockCanvas());
+      r.hasRadar = false;
+      r.doesRadarExist = false;
+      const assets = {
+        getSheet: vi.fn((name: string) => name === 'natoradr'
+          ? { image: {}, meta: { frameWidth: 80, frameHeight: 80, frameCount: 42, columns: 16, rows: 3, sheetWidth: 1280, sheetHeight: 240 } }
+          : undefined),
+        drawFrame: vi.fn(),
+      };
+      const map = { boundsX: 0, boundsY: 0, boundsW: 126, boundsH: 126 };
+
+      (r as any).renderMinimap(map, [], [], {}, assets);
+
+      expect(assets.drawFrame).toHaveBeenCalledWith(
+        expect.anything(),
+        'natoradr',
+        0,
+        mockCanvas().width - 80 * RESFACTOR,
+        8 * RESFACTOR,
+        { scale: RESFACTOR },
+      );
+    });
+
+    it('inactive radar draws frame 41 when the cover had already opened', () => {
+      const r = new Renderer(mockCanvas());
+      r.hasRadar = false;
+      r.doesRadarExist = true;
+      const assets = {
+        getSheet: vi.fn((name: string) => name === 'natoradr'
+          ? { image: {}, meta: { frameWidth: 80, frameHeight: 80, frameCount: 42, columns: 16, rows: 3, sheetWidth: 1280, sheetHeight: 240 } }
+          : undefined),
+        drawFrame: vi.fn(),
+      };
+      const map = { boundsX: 0, boundsY: 0, boundsW: 126, boundsH: 126 };
+
+      (r as any).renderMinimap(map, [], [], {}, assets);
+
+      expect(assets.drawFrame).toHaveBeenCalledWith(
+        expect.anything(),
+        'natoradr',
+        41,
+        expect.any(Number),
+        expect.any(Number),
+        { scale: RESFACTOR },
+      );
+    });
+
+    it('opening radar draws the current animation frame instead of jumping to minimap', () => {
+      const r = new Renderer(mockCanvas());
+      r.hasRadar = false;
+      r.doesRadarExist = false;
+      r.radarCoverFrame = 7;
+      const assets = {
+        getSheet: vi.fn((name: string) => name === 'natoradr'
+          ? { image: {}, meta: { frameWidth: 80, frameHeight: 80, frameCount: 42, columns: 16, rows: 3, sheetWidth: 1280, sheetHeight: 240 } }
+          : undefined),
+        drawFrame: vi.fn(),
+      };
+      const map = { boundsX: 0, boundsY: 0, boundsW: 126, boundsH: 126 };
+
+      (r as any).renderMinimap(map, [], [], {}, assets);
+
+      expect(assets.drawFrame).toHaveBeenCalledWith(
+        expect.anything(),
+        'natoradr',
+        7,
+        expect.any(Number),
+        expect.any(Number),
+        { scale: RESFACTOR },
+      );
     });
   });
 });
-
-/** Simulate the TS radar activation logic from engine/index.ts */
-function simulateRadar(hasDome: boolean, powerProduced: number, powerConsumed: number): boolean {
-  const hasPower = powerConsumed === 0 || powerProduced >= powerConsumed;
-  return hasDome && hasPower;
-}

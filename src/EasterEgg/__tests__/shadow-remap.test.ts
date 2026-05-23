@@ -7,10 +7,21 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { UnitType, House, BODY_SHAPE } from '../engine/types';
+import { shadowTransAlphaForRGBA } from '../engine/shadow';
 
 beforeEach(() => resetEntityIds());
 
 describe('Shadow rendering prerequisites', () => {
+  it('SHADOW.SHP white/gray source pixels are remapped to black alpha like C++ ShadowTrans', () => {
+    // C++ display.cpp:351-355,420 draws SHADOW.SHP with SHAPE_GHOST + ShadowTrans.
+    // Raw extracted white/gray pixels must not be rendered as visible white outlines.
+    expect(shadowTransAlphaForRGBA(16, 12, 12, 255)).toBe(130);
+    expect(shadowTransAlphaForRGBA(255, 255, 255, 255)).toBe(170);
+    expect(shadowTransAlphaForRGBA(170, 170, 170, 255)).toBe(250);
+    expect(shadowTransAlphaForRGBA(85, 85, 85, 255)).toBe(250);
+    expect(shadowTransAlphaForRGBA(0, 0, 0, 0)).toBe(0);
+  });
+
   it('vehicle spriteFrame uses BODY_SHAPE with bodyFacing32 index', () => {
     const tank = new Entity(UnitType.V_2TNK, House.Spain, 100, 100);
     // Shadow uses the same spriteFrame as the unit body

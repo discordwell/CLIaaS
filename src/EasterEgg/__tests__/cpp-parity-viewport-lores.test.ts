@@ -19,6 +19,7 @@
 import { describe, it, expect } from 'vitest';
 import { CELL_SIZE, RESFACTOR } from '../engine/types';
 import { Renderer } from '../engine/renderer';
+import { Camera } from '../engine/camera';
 
 describe('C++ viewport parity (LORES/HIRES via RESFACTOR)', () => {
 
@@ -72,15 +73,60 @@ describe('C++ viewport parity (LORES/HIRES via RESFACTOR)', () => {
     expect(GAME_AREA_H / CELL_SIZE).toBe(16);
   });
 
+  it('HOME waypoint camera uses C++ Cell_Coord half-cell tactical origin', () => {
+    // C++ display.cpp:4314:
+    // Set_Tactical_Position(Cell_Coord(WAYPT_HOME - 128*4*RESFACTOR - 5*RESFACTOR))
+    // inline.h:452: Cell_Coord returns the center of the cell, not Coord_Whole.
+    // For SCG01EA, HOME 6079 = (63,47), map bounds (49,45,30,36).
+    const camera = new Camera(GAME_AREA_W, GAME_AREA_H, 0, Renderer.TAB_HEIGHT);
+    camera.setPlayableBounds(49, 45, 30, 36);
+    const homeCx = 6079 % 128;
+    const homeCy = Math.floor(6079 / 128);
+    const vpCols = GAME_AREA_W / CELL_SIZE;
+    const vpRows = GAME_AREA_H / CELL_SIZE;
+    const topLeftCx = Math.max(49, Math.min(49 + 30 - vpCols, homeCx - 5 * RESFACTOR));
+    const topLeftCy = Math.max(45, Math.min(45 + 36 - vpRows, homeCy - 4 * RESFACTOR));
+
+    camera.centerOn(
+      (topLeftCx + vpCols / 2 + 0.5) * CELL_SIZE,
+      (topLeftCy + vpRows / 2 + 0.5) * CELL_SIZE,
+    );
+
+    expect(camera.x).toBe(topLeftCx * CELL_SIZE + CELL_SIZE / 2);
+    expect(camera.y).toBe(topLeftCy * CELL_SIZE + CELL_SIZE / 2);
+  });
+
+  it('HOME waypoint camera clamps after Cell_Coord, matching Set_Tactical_Position', () => {
+    // SCG08EA HOME requests (19,55), outside map bounds (23,57,87,54).
+    // C++ Set_Tactical_Position clamps that lepton coordinate back to the
+    // exact map edge, so no half-cell bias remains on either axis.
+    const camera = new Camera(GAME_AREA_W, GAME_AREA_H, 0, Renderer.TAB_HEIGHT);
+    camera.setPlayableBounds(23, 57, 87, 54);
+    const homeCx = 8093 % 128;
+    const homeCy = Math.floor(8093 / 128);
+    const vpCols = GAME_AREA_W / CELL_SIZE;
+    const vpRows = GAME_AREA_H / CELL_SIZE;
+    const requestedTopLeftCx = homeCx - 5 * RESFACTOR;
+    const requestedTopLeftCy = homeCy - 4 * RESFACTOR;
+
+    camera.centerOn(
+      (requestedTopLeftCx + vpCols / 2 + 0.5) * CELL_SIZE,
+      (requestedTopLeftCy + vpRows / 2 + 0.5) * CELL_SIZE,
+    );
+
+    expect(camera.x).toBe(23 * CELL_SIZE);
+    expect(camera.y).toBe(57 * CELL_SIZE);
+  });
+
   // Sidebar sub-component layout constants
-  it('sidebar layout constants are LORES base × RESFACTOR', () => {
+  it('sidebar layout constants are source-backed C++ coordinates', () => {
     expect(Renderer.RADAR_SIZE).toBe(70 * RESFACTOR);
     expect(Renderer.RADAR_Y).toBe(2 * RESFACTOR);
     expect(Renderer.STRIP_START_Y).toBe(90 * RESFACTOR);
     expect(Renderer.CAMEO_W).toBe(32 * RESFACTOR);
     expect(Renderer.CAMEO_H).toBe(24 * RESFACTOR);
-    expect(Renderer.BUTTON_ROW_Y).toBe(81 * RESFACTOR);
-    expect(Renderer.BUTTON_H).toBe(9 * RESFACTOR);
+    expect(Renderer.BUTTON_ROW_Y).toBe((0x96 / 2) * RESFACTOR);
+    expect(Renderer.BUTTON_H).toBe(14 * RESFACTOR);
     expect(Renderer.POWER_Y).toBe(88 * RESFACTOR);
     expect(Renderer.SIDEBAR_BG_TOP_Y).toBe(8 * RESFACTOR);
     expect(Renderer.SIDEBAR_BG_MID_Y).toBe(88 * RESFACTOR);
@@ -91,7 +137,6 @@ describe('C++ viewport parity (LORES/HIRES via RESFACTOR)', () => {
     // Fractional pixels cause blurry rendering — all layout must be integer at any RESFACTOR
     const values = [
       Renderer.TAB_HEIGHT, Renderer.RADAR_SIZE, Renderer.RADAR_Y,
-      Renderer.CREDITS_Y, Renderer.CREDITS_H,
       Renderer.BUTTON_ROW_Y, Renderer.BUTTON_H,
       Renderer.BUTTON_ONE_X, Renderer.BUTTON_ONE_W,
       Renderer.BUTTON_TWO_X, Renderer.BUTTON_TWO_W,

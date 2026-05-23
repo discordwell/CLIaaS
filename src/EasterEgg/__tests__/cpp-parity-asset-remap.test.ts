@@ -869,34 +869,20 @@ describe('Vehicle rotation stages (udata.cpp)', () => {
 });
 
 // ============================================================
-// Section 9: Shadow rendering constant — assets.ts:281
+// Section 9: Shadow rendering table — display.cpp ShadowTrans
 // ============================================================
-describe('Shadow rendering color (assets.ts:281)', () => {
+describe('Shadow rendering color table (display.cpp ShadowTrans)', () => {
   // C++ uses SHAPE_GHOST with a translucent table (display.cpp:420-427).
   // The shadow is rendered by blitting the sprite shape with palette-index
   // remapping to darken the underlying terrain.
-  //
-  // TS approximates this with a solid gray fill using 'source-in' composite:
-  //   assets.ts:281: sctx.fillStyle = 'rgb(100,100,100)';
-  //
-  // In C++, the shadow darkness depends on the translucent table generated
-  // from the palette. The TS value of rgb(100,100,100) is an approximation.
-  // We verify the TS shadow approach exists and uses a reasonable value.
 
-  it('TS shadow color rgb(100,100,100) is a reasonable approximation of C++ shadow', () => {
-    // C++ generates a translucent table from the palette (display.cpp:420).
-    // The exact darkness varies by palette entry. TS uses a uniform gray.
-    // 100/255 ≈ 0.39 opacity when used with 'multiply' blend mode.
-    // This is within the range of C++ shadow transparency (typically 40-60%).
-    const SHADOW_R = 100;
-    const SHADOW_G = 100;
-    const SHADOW_B = 100;
-    // Verify the values are dark enough to create visible shadows
-    // but not so dark as to be solid black
-    expect(SHADOW_R).toBeGreaterThan(50);
-    expect(SHADOW_R).toBeLessThan(150);
-    expect(SHADOW_G).toBe(SHADOW_R); // uniform gray
-    expect(SHADOW_B).toBe(SHADOW_R); // uniform gray
+  it('TS uses the C++ black alpha levels instead of a uniform gray approximation', async () => {
+    const { shadowTransAlphaForRGBA } = await import('../engine/shadow');
+
+    expect(shadowTransAlphaForRGBA(16, 12, 12, 255)).toBe(130);
+    expect(shadowTransAlphaForRGBA(255, 255, 255, 255)).toBe(170);
+    expect(shadowTransAlphaForRGBA(170, 170, 170, 255)).toBe(250);
+    expect(shadowTransAlphaForRGBA(85, 85, 85, 255)).toBe(250);
   });
 });
 

@@ -6,13 +6,21 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { Renderer } from '../engine/renderer';
-import { PRODUCTION_ITEMS } from '../engine/types';
+import { Game } from '../engine';
+import { getAvailableItems, type ProductionContext } from '../engine/production';
+import { PRODUCTION_ITEMS, RESFACTOR, UNIT_STATS, House } from '../engine/types';
 
 function mockCanvas(): HTMLCanvasElement {
   return {
     width: 640,
     height: 400,
+    style: {},
+    getBoundingClientRect: () => ({ width: 640, height: 400, left: 0, top: 0, right: 640, bottom: 400 }),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
     getContext: () => ({
       imageSmoothingEnabled: false,
       globalAlpha: 1,
@@ -44,6 +52,126 @@ function mockCanvas(): HTMLCanvasElement {
 }
 
 describe('sidebar production visuals', () => {
+  it('orders allied infantry cameos by C++ InfantryType order', () => {
+    const ctx: ProductionContext = {
+      structures: [],
+      entities: [],
+      entityById: new Map(),
+      credits: 10000,
+      playerHouse: House.Greece,
+      playerFaction: 'allied',
+      playerTechLevel: 8,
+      scenarioProductionItems: PRODUCTION_ITEMS,
+      productionQueue: new Map(),
+      pendingPlacement: null,
+      wallPlacementPrepaid: false,
+      map: {} as ProductionContext['map'],
+      tick: 0,
+      powerProduced: 100,
+      powerConsumed: 0,
+      builtUnitTypes: new Set(),
+      builtInfantryTypes: new Set(),
+      builtAircraftTypes: new Set(),
+      rallyPoints: new Map(),
+      isAllied: (a, b) => a === b,
+      hasBuilding: type => type === 'TENT' || type === 'DOME',
+      playSound: vi.fn(),
+      playEva: vi.fn(),
+      addEntity: vi.fn(),
+      findPassableSpawn: () => ({ cx: 0, cy: 0 }),
+    };
+
+    const infantryTypes = getAvailableItems(ctx)
+      .filter(item => UNIT_STATS[item.type]?.isInfantry)
+      .map(item => item.type);
+
+    // C++ RA/defines.h InfantryType and idata.cpp order:
+    // E1, E2, E3, E4, E6, E7, SPY, THF, MEDI, GENERAL, DOG.
+    // With SCG08-like tech/prereqs, E7/THF are hidden but SPY still precedes MEDI.
+    expect(infantryTypes).toEqual(['E1', 'E3', 'E6', 'SPY', 'MEDI']);
+  });
+
+  it('draws the C++ power bar frame even when produced and consumed power are zero', () => {
+    const renderer = new Renderer(mockCanvas());
+    renderer.sidebarPowerProduced = 0;
+    renderer.sidebarPowerConsumed = 0;
+
+    const drawFrame = vi.fn();
+    const assets = {
+      getSheet: (name: string) => {
+        if (name === 'powerbar') {
+          return { meta: { frameWidth: 20, frameHeight: 112, frameCount: 2 } };
+        }
+        if (name === 'power_marker') {
+          return { meta: { frameWidth: 18, frameHeight: 12, frameCount: 1 } };
+        }
+        return null;
+      },
+      drawFrame,
+    };
+
+    (renderer as any).renderSidebar(assets);
+
+    expect(drawFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      'powerbar',
+      0,
+      640 - 80 * RESFACTOR,
+      88 * RESFACTOR,
+    );
+    expect(drawFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      'powerbar',
+      1,
+      640 - 80 * RESFACTOR,
+      88 * RESFACTOR + 112,
+    );
+    expect(drawFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      'power_marker',
+      0,
+      640 - 80 * RESFACTOR + RESFACTOR,
+      175 * RESFACTOR + 1 - 2 * RESFACTOR,
+    );
+  });
+
+  it('draws strip scroll buttons even when a production strip has no buildable items', () => {
+    const renderer = new Renderer(mockCanvas());
+    const drawFrame = vi.fn();
+    const assets = {
+      getSheet: (name: string) => {
+        if (name === 'stripup' || name === 'stripdn') {
+          return { meta: { frameWidth: 32, frameHeight: 27, frameCount: 2 } };
+        }
+        return null;
+      },
+      drawFrame,
+    };
+
+    (renderer as any).renderStripScrollArrows(
+      (renderer as any).ctx,
+      assets,
+      640 - 80 * RESFACTOR + 8 * RESFACTOR,
+      [],
+      0,
+    );
+
+    expect(drawFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      'stripup',
+      0,
+      640 - 80 * RESFACTOR + 8 * RESFACTOR + 2 * RESFACTOR,
+      90 * RESFACTOR + 97 * RESFACTOR - 1,
+    );
+    expect(drawFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      'stripdn',
+      0,
+      640 - 80 * RESFACTOR + 8 * RESFACTOR + 18 * RESFACTOR,
+      90 * RESFACTOR + 97 * RESFACTOR - 1,
+    );
+  });
+
   it('does not draw TS cost text over idle cameos', () => {
     const renderer = new Renderer(mockCanvas());
     const drawBitmapText = vi.fn();
@@ -76,5 +204,146 @@ describe('sidebar production visuals', () => {
       expect.any(String),
       expect.anything(),
     );
+  });
+
+  it('does not render a TS-only idle unit count over the radar panel', () => {
+    const rendererSrc = readFileSync(
+      join(__dirname, '../engine/renderer.ts'),
+      'utf-8',
+    );
+
+    expect(rendererSrc).not.toContain('Idle:');
+    expect(rendererSrc).not.toContain('renderIdleCount');
+  });
+
+  it('uses PlayerPtr faction for sidebar art, not mixed allied/player houses', () => {
+    const renderer = new Renderer(mockCanvas());
+    renderer.playerFaction = 'allied';
+    renderer.playerHouses = new Set([House.Greece, House.BadGuy]);
+    const drawFrame = vi.fn();
+    const assets = {
+      getSheet: (name: string) => {
+        if (['side1na', 'side2na', 'side3na', 'natoradr'].includes(name)) {
+          return { meta: { frameWidth: 80, frameHeight: 80, frameCount: 42 } };
+        }
+        if (['side1us', 'side2us', 'side3us', 'ussrradr'].includes(name)) {
+          return { meta: { frameWidth: 80, frameHeight: 80, frameCount: 42 } };
+        }
+        return null;
+      },
+      drawFrame,
+    };
+
+    (renderer as any).renderSidebar(assets);
+    (renderer as any).drawRadarCoverPlate((renderer as any).ctx, 0, 0, 0, assets);
+
+    expect(drawFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      'side1na',
+      0,
+      expect.any(Number),
+      expect.any(Number),
+      expect.anything(),
+    );
+    expect(drawFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      'natoradr',
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.anything(),
+    );
+    expect(drawFrame).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'side1us',
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.anything(),
+    );
+    expect(drawFrame).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'ussrradr',
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.anything(),
+    );
+  });
+
+  it('does not unlock PlayerPtr production from allied non-PlayerPtr factories', () => {
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const game = new Game(mockCanvas());
+    game.playerHouse = House.Greece;
+    game.playerFaction = 'allied';
+    (game as any).alliances = new Map([
+      [House.Greece, new Set([House.Greece, House.Turkey])],
+      [House.Turkey, new Set([House.Turkey, House.Greece])],
+    ]);
+    game.structures = [{
+      type: 'FACT',
+      house: House.Turkey,
+      alive: true,
+      cx: 31,
+      cy: 31,
+      hp: 400,
+      maxHp: 400,
+    } as any];
+
+    expect(game.getAvailableItems().map(item => item.type)).not.toContain('POWR');
+
+    game.structures.push({
+      type: 'FACT',
+      house: House.Greece,
+      alive: true,
+      cx: 35,
+      cy: 31,
+      hp: 400,
+      maxHp: 400,
+    } as any);
+
+    expect(game.getAvailableItems().map(item => item.type)).toContain('POWR');
+    vi.unstubAllGlobals();
+  });
+
+  it('initial scenario look skips buildings unless unit sight maps their footprint', () => {
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    vi.stubGlobal('Audio', class {
+      src = '';
+      preload = '';
+      addEventListener = vi.fn();
+    });
+    try {
+      const game = new Game(mockCanvas());
+      game.playerHouse = House.Greece;
+      (game as any).structures = [
+        { type: 'TENT', house: House.Greece, alive: true, cx: 11, cy: 10, hp: 400, maxHp: 400 },
+        { type: 'DOME', house: House.Greece, alive: true, cx: 40, cy: 40, hp: 400, maxHp: 400 },
+      ];
+      (game as any).entities = [{
+        alive: true,
+        inLimbo: false,
+        house: House.Greece,
+        cell: { cx: 10, cy: 10 },
+        stats: { sight: 1 },
+      }];
+
+      (game as any).applyScenarioInitLook();
+
+      // C++ scenario.cpp:646 calls Map.All_To_Look(true); display.cpp:4450
+      // skips buildings in that initial pass.
+      expect(game.map.getDisplayVisibility(40, 40)).toBe(0);
+      // But if unit sight maps a PlayerPtr building footprint, TechnoClass::Revealed
+      // calls Look(), so that building can cascade its own sight.
+      expect(game.map.getDisplayVisibility(16, 10)).toBeGreaterThan(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
