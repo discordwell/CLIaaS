@@ -461,6 +461,16 @@ export class Renderer {
     return this.playerFaction !== 'soviet';
   }
 
+  /** C++ theater-specific SHPs use the same logical name with a theater suffix.
+   * The extractor stores snow variants as *_snow and falls back to base art. */
+  private theatreSheetName(assets: AssetManager, baseName: string): string {
+    if (this.theatre === 'SNOW') {
+      const snowName = `${baseName}_snow`;
+      if (assets.hasSheet(snowName)) return snowName;
+    }
+    return baseName;
+  }
+
   /** Get an RGB string from the current theatre palette, with optional brightness offset */
   private palColor(idx: number, brightnessOffset = 0): string {
     if (!this.pal) return '#555';
@@ -1191,10 +1201,10 @@ export class Renderer {
         const tmpl = map.templateType[idx] || 0;
         const icon = map.templateIcon[idx] || 0;
 
-        // Try real tileset tile first (skip for INTERIOR theatre)
+        // Try real tileset tile first.
         // For TREE terrain, draw ground from atlas but still render tree overlay on top
         let atlasDrawn = false;
-        if (useTileset && tmpl > 0 && tmpl !== 0xFFFF) {
+        if (useTileset && tmpl > 0 && tmpl !== 0xFFFF && tmpl !== 255) {
           if (this.drawTileFromAtlas(ctx, tmpl, icon, screen.x, screen.y)) {
             if (terrain !== Terrain.TREE && !treeType) continue; // Tile drawn from atlas, skip procedural
             atlasDrawn = true; // Fall through to TREE case below
@@ -1205,13 +1215,14 @@ export class Renderer {
           }
         }
 
-        // Clear template cells: draw tileset grass for CLEAR and TREE terrain.
-        // C++ cell.cpp:981-987: CLEAR1 uses Clear_Icon() = (cx&3)|((cy&3)<<2) for 16 variations
-        if (useTileset && (tmpl === 0 || tmpl === 0xFFFF || tmpl === 255) && (terrain === Terrain.CLEAR || terrain === Terrain.TREE)) {
+        // Clear template cells: C++ chooses base art from TType, not Land.
+        // cell.cpp:981-987: TEMPLATE_NONE, TEMPLATE_CLEAR1, and 255 all draw
+        // TEMPLATE_CLEAR1 with Clear_Icon() = (cx&3)|((cy&3)<<2).
+        if (useTileset && (tmpl === 0 || tmpl === 0xFFFF || tmpl === 255)) {
           const clearIcon = (cx & 3) | ((cy & 3) << 2);
           if (this.drawTileFromAtlas(ctx, 255, clearIcon, screen.x, screen.y)) {
-            if (terrain === Terrain.CLEAR) continue;
-            atlasDrawn = true; // TREE cells need overlay on top
+            atlasDrawn = true;
+            if (terrain !== Terrain.TREE && !treeType) continue;
           }
         }
 
@@ -1219,8 +1230,9 @@ export class Renderer {
         // needs a tree overlay, defer the sprite and move on. C++ terrain
         // objects do not replace Land_Type.
         if (atlasDrawn && terrain !== Terrain.TREE) {
-          if (treeType && treeType !== '_clump' && assets.hasSheet(treeType)) {
-            deferredTrees.push({ name: treeType, x: screen.x, y: screen.y });
+          if (treeType && treeType !== '_clump') {
+            const treeSheet = this.theatreSheetName(assets, treeType);
+            if (assets.hasSheet(treeSheet)) deferredTrees.push({ name: treeSheet, x: screen.x, y: screen.y });
           }
           continue;
         }
@@ -1373,9 +1385,9 @@ export class Renderer {
 
               if (treeType === '_clump') {
                 // Covered by a nearby clump origin sprite — just show grass
-              } else if (treeType && assets.hasSheet(treeType)) {
+              } else if (treeType && assets.hasSheet(this.theatreSheetName(assets, treeType))) {
                 // Defer tree sprite to second pass (clump sprites span multiple cells)
-                deferredTrees.push({ name: treeType, x: screen.x, y: screen.y });
+                deferredTrees.push({ name: this.theatreSheetName(assets, treeType), x: screen.x, y: screen.y });
               } else {
                 // Procedural fallback (MapPack trees or missing sprites)
                 // Tree shadow on ground
@@ -1442,8 +1454,9 @@ export class Renderer {
           }
         }
 
-        if (terrain !== Terrain.TREE && treeType && treeType !== '_clump' && assets.hasSheet(treeType)) {
-          deferredTrees.push({ name: treeType, x: screen.x, y: screen.y });
+        if (terrain !== Terrain.TREE && treeType && treeType !== '_clump') {
+          const treeSheet = this.theatreSheetName(assets, treeType);
+          if (assets.hasSheet(treeSheet)) deferredTrees.push({ name: treeSheet, x: screen.x, y: screen.y });
         }
       }
     }
@@ -1513,44 +1526,20 @@ export class Renderer {
         if (ovl === 0xFF) continue;
 
         const screen = camera.worldToScreen(cx * CELL_SIZE, cy * CELL_SIZE);
-        const h = cellHash(cx, cy);
-
         if (ovl >= 5 && ovl <= 8) {
           // Gold ore — OVERLAY_GOLD1..4 visual type; density is OverlayData.
           const density = map.oreDensity[cy * 128 + cx];
           const frame = density !== 0xFF ? Math.min(density, 11) : 0;
           const variant = ovl - 5 + 1;
-          const sheetName = `gold0${variant}`;
+          const sheetName = this.theatreSheetName(assets, `gold0${variant}`);
           assets.drawFrame(ctx, sheetName, frame, screen.x, screen.y);
-          // Animated sparkle overlay
-          const sparklePhase = (tick + h * 3) % 40;
-          if (sparklePhase < 6) {
-            const sparkAlpha = sparklePhase < 3 ? sparklePhase / 3 : (6 - sparklePhase) / 3;
-            const sx = screen.x + 4 + ((h * 7) % 14);
-            const sy = screen.y + 4 + ((h * 11) % 14);
-            ctx.fillStyle = `rgba(255,255,200,${sparkAlpha * 0.8})`;
-            ctx.fillRect(sx, sy, 2, 2);
-            ctx.fillRect(sx - 1, sy + 1, 4, 1);
-            ctx.fillRect(sx + 1, sy - 1, 1, 4);
-          }
         } else if (ovl >= 9 && ovl <= 12) {
           // Gems — OVERLAY_GEMS1..4 visual type; density is OverlayData.
           const gemDensity = map.oreDensity[cy * 128 + cx];
           const frame = Math.min(gemDensity !== 0xFF ? gemDensity : 0, 2);
           const variant = ovl - 9 + 1;
-          const sheetName = `gem0${variant}`;
+          const sheetName = this.theatreSheetName(assets, `gem0${variant}`);
           assets.drawFrame(ctx, sheetName, frame, screen.x, screen.y);
-          // Animated gem sparkle
-          const gemPhase = (tick + h * 5) % 24;
-          if (gemPhase < 6) {
-            const sparkAlpha = gemPhase < 3 ? gemPhase / 3 : (6 - gemPhase) / 3;
-            const gx = screen.x + 6 + ((h * 13) % 12);
-            const gy = screen.y + 6 + ((h * 9) % 12);
-            ctx.fillStyle = `rgba(180,230,255,${sparkAlpha * 0.9})`;
-            ctx.fillRect(gx, gy, 2, 2);
-            ctx.fillRect(gx - 1, gy + 1, 4, 1);
-            ctx.fillRect(gx + 1, gy - 1, 1, 4);
-          }
         } else {
           const wallType = map.getWallType(cx, cy) || overlayWallType(ovl);
           const wallSheet = WALL_OVERLAY_SHEETS[wallType];

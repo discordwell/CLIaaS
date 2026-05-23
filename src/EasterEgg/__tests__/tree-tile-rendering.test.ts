@@ -1,9 +1,9 @@
 /**
  * Tests for tree terrain tile rendering logic.
  *
- * Verifies that TREE terrain cells with clear templates (tmpl=0 or 0xFFFF)
- * use the tileset clear tile (255,0) instead of procedural grass, preventing
- * visible color/texture mismatch with surrounding tileset-rendered cells.
+ * Verifies that clear-template cells (tmpl=0, 0xFFFF, or 255) use the
+ * tileset clear tile before Land_Type-specific logic, preventing visible
+ * color/texture mismatch with surrounding tileset-rendered cells.
  *
  * Also verifies that tree sprite rendering is deferred to a second pass
  * so clump sprites (TC01-TC05, 72-96px wide) aren't overwritten by
@@ -13,30 +13,33 @@ import { describe, it, expect } from 'vitest';
 import { Terrain } from '../engine/map';
 
 describe('Tree tile rendering logic', () => {
-  // The key fix: TREE cells with clear templates should get atlas ground
-  // instead of procedural grass. This tests the condition logic.
+  // C++ CellClass::Draw_It chooses base art from TType first:
+  // TEMPLATE_NONE, TEMPLATE_CLEAR1, and 255 all draw TEMPLATE_CLEAR1 with
+  // Clear_Icon(), regardless of the movement Land_Type.
+
+  function shouldDrawClearTemplate(useTileset: boolean, tmpl: number): boolean {
+    return useTileset && (tmpl === 0 || tmpl === 0xFFFF || tmpl === 255);
+  }
 
   it('TREE terrain with clear template (tmpl=0) qualifies for atlas clear tile', () => {
-    const terrain = Terrain.TREE;
     const tmpl = 0;
     const useTileset = true;
 
-    // This matches the condition in renderer.ts renderTerrain()
-    const shouldDrawClearTile =
-      useTileset && (tmpl === 0 || tmpl === 0xFFFF) && (terrain === Terrain.CLEAR || terrain === Terrain.TREE);
-
-    expect(shouldDrawClearTile).toBe(true);
+    expect(shouldDrawClearTemplate(useTileset, tmpl)).toBe(true);
   });
 
   it('TREE terrain with clear template (tmpl=0xFFFF) qualifies for atlas clear tile', () => {
-    const terrain = Terrain.TREE;
     const tmpl = 0xFFFF;
     const useTileset = true;
 
-    const shouldDrawClearTile =
-      useTileset && (tmpl === 0 || tmpl === 0xFFFF) && (terrain === Terrain.CLEAR || terrain === Terrain.TREE);
+    expect(shouldDrawClearTemplate(useTileset, tmpl)).toBe(true);
+  });
 
-    expect(shouldDrawClearTile).toBe(true);
+  it('TType 255 qualifies for Clear_Icon instead of TIcon', () => {
+    const tmpl = 255;
+    const useTileset = true;
+
+    expect(shouldDrawClearTemplate(useTileset, tmpl)).toBe(true);
   });
 
   it('TREE terrain does NOT continue after atlas draw (needs overlay)', () => {
@@ -55,37 +58,29 @@ describe('Tree tile rendering logic', () => {
     expect(shouldContinue).toBe(true);
   });
 
-  it('WATER terrain does not qualify for clear tile atlas path', () => {
+  it('WATER terrain still qualifies for clear-template base art when TType is clear', () => {
     const terrain = Terrain.WATER;
     const tmpl = 0;
     const useTileset = true;
 
-    const shouldDrawClearTile =
-      useTileset && (tmpl === 0 || tmpl === 0xFFFF) && (terrain === Terrain.CLEAR || terrain === Terrain.TREE);
-
-    expect(shouldDrawClearTile).toBe(false);
+    expect(terrain).toBe(Terrain.WATER);
+    expect(shouldDrawClearTemplate(useTileset, tmpl)).toBe(true);
   });
 
-  it('ROCK terrain does not qualify for clear tile atlas path', () => {
+  it('ROCK terrain still qualifies for clear-template base art when TType is clear', () => {
     const terrain = Terrain.ROCK;
     const tmpl = 0;
     const useTileset = true;
 
-    const shouldDrawClearTile =
-      useTileset && (tmpl === 0 || tmpl === 0xFFFF) && (terrain === Terrain.CLEAR || terrain === Terrain.TREE);
-
-    expect(shouldDrawClearTile).toBe(false);
+    expect(terrain).toBe(Terrain.ROCK);
+    expect(shouldDrawClearTemplate(useTileset, tmpl)).toBe(true);
   });
 
-  it('non-zero templates do not enter clear tile path', () => {
-    const terrain = Terrain.TREE;
+  it('non-sentinel templates do not enter clear tile path', () => {
     const tmpl = 42;
     const useTileset = true;
 
-    const shouldDrawClearTile =
-      useTileset && (tmpl === 0 || tmpl === 0xFFFF) && (terrain === Terrain.CLEAR || terrain === Terrain.TREE);
-
-    expect(shouldDrawClearTile).toBe(false);
+    expect(shouldDrawClearTemplate(useTileset, tmpl)).toBe(false);
   });
 
   // Deferred tree rendering: _clump satellite cells should only show grass,

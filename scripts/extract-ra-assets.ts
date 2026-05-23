@@ -99,6 +99,10 @@ function generateSmudgeAssets(): [string, string, string][] {
   entries.push(['SNOW.MIX', 'BIB1.SNO', 'bib1_snow']);
   entries.push(['SNOW.MIX', 'BIB2.SNO', 'bib2_snow']);
   entries.push(['SNOW.MIX', 'BIB3.SNO', 'bib3_snow']);
+  for (let i = 1; i <= 6; i++) {
+    entries.push(['SNOW.MIX', `SC${i}.SNO`, `sc${i}_snow`]);
+    entries.push(['SNOW.MIX', `CR${i}.SNO`, `cr${i}_snow`]);
+  }
   return entries;
 }
 
@@ -319,33 +323,61 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['TEMPERAT.MIX', 'GOLD02.TEM', 'gold02'],
   ['TEMPERAT.MIX', 'GOLD03.TEM', 'gold03'],
   ['TEMPERAT.MIX', 'GOLD04.TEM', 'gold04'],
+  ['SNOW.MIX', 'GOLD01.SNO', 'gold01_snow'],
+  ['SNOW.MIX', 'GOLD02.SNO', 'gold02_snow'],
+  ['SNOW.MIX', 'GOLD03.SNO', 'gold03_snow'],
+  ['SNOW.MIX', 'GOLD04.SNO', 'gold04_snow'],
   ['TEMPERAT.MIX', 'GEM01.TEM', 'gem01'],
   ['TEMPERAT.MIX', 'GEM02.TEM', 'gem02'],
   ['TEMPERAT.MIX', 'GEM03.TEM', 'gem03'],
   ['TEMPERAT.MIX', 'GEM04.TEM', 'gem04'],
-  // Trees (theater-specific .TEM files from TEMPERAT.MIX)
+  ['SNOW.MIX', 'GEM01.SNO', 'gem01_snow'],
+  ['SNOW.MIX', 'GEM02.SNO', 'gem02_snow'],
+  ['SNOW.MIX', 'GEM03.SNO', 'gem03_snow'],
+  ['SNOW.MIX', 'GEM04.SNO', 'gem04_snow'],
+  // Trees (theater-specific .TEM/.SNO files)
   // T01-T17 single trees (T04, T09 don't exist in C++ source)
   ['TEMPERAT.MIX', 'T01.TEM', 't01'],
+  ['SNOW.MIX', 'T01.SNO', 't01_snow'],
   ['TEMPERAT.MIX', 'T02.TEM', 't02'],
+  ['SNOW.MIX', 'T02.SNO', 't02_snow'],
   ['TEMPERAT.MIX', 'T03.TEM', 't03'],
+  ['SNOW.MIX', 'T03.SNO', 't03_snow'],
   ['TEMPERAT.MIX', 'T05.TEM', 't05'],
+  ['SNOW.MIX', 'T05.SNO', 't05_snow'],
   ['TEMPERAT.MIX', 'T06.TEM', 't06'],
+  ['SNOW.MIX', 'T06.SNO', 't06_snow'],
   ['TEMPERAT.MIX', 'T07.TEM', 't07'],
+  ['SNOW.MIX', 'T07.SNO', 't07_snow'],
   ['TEMPERAT.MIX', 'T08.TEM', 't08'],
+  ['SNOW.MIX', 'T08.SNO', 't08_snow'],
   ['TEMPERAT.MIX', 'T10.TEM', 't10'],
+  ['SNOW.MIX', 'T10.SNO', 't10_snow'],
   ['TEMPERAT.MIX', 'T11.TEM', 't11'],
+  ['SNOW.MIX', 'T11.SNO', 't11_snow'],
   ['TEMPERAT.MIX', 'T12.TEM', 't12'],
+  ['SNOW.MIX', 'T12.SNO', 't12_snow'],
   ['TEMPERAT.MIX', 'T13.TEM', 't13'],
+  ['SNOW.MIX', 'T13.SNO', 't13_snow'],
   ['TEMPERAT.MIX', 'T14.TEM', 't14'],
+  ['SNOW.MIX', 'T14.SNO', 't14_snow'],
   ['TEMPERAT.MIX', 'T15.TEM', 't15'],
+  ['SNOW.MIX', 'T15.SNO', 't15_snow'],
   ['TEMPERAT.MIX', 'T16.TEM', 't16'],
+  ['SNOW.MIX', 'T16.SNO', 't16_snow'],
   ['TEMPERAT.MIX', 'T17.TEM', 't17'],
+  ['SNOW.MIX', 'T17.SNO', 't17_snow'],
   // TC01-TC05 tree clumps
   ['TEMPERAT.MIX', 'TC01.TEM', 'tc01'],
+  ['SNOW.MIX', 'TC01.SNO', 'tc01_snow'],
   ['TEMPERAT.MIX', 'TC02.TEM', 'tc02'],
+  ['SNOW.MIX', 'TC02.SNO', 'tc02_snow'],
   ['TEMPERAT.MIX', 'TC03.TEM', 'tc03'],
+  ['SNOW.MIX', 'TC03.SNO', 'tc03_snow'],
   ['TEMPERAT.MIX', 'TC04.TEM', 'tc04'],
+  ['SNOW.MIX', 'TC04.SNO', 'tc04_snow'],
   ['TEMPERAT.MIX', 'TC05.TEM', 'tc05'],
+  ['SNOW.MIX', 'TC05.SNO', 'tc05_snow'],
 ];
 
 // Combine manual entries with generated bulk categories
@@ -863,6 +895,27 @@ async function main(): Promise<void> {
         }
         houses[houseName] = houseColors;
       }
+      // C++ hdata.cpp maps these houses to existing PCOLOR rows even though
+      // PALETTE.CPS only stores the color ramps. Keep the generated data aligned
+      // with the runtime House enum and the dedicated Iron Curtain red remap.
+      houses.GoodGuy = houses.Greece;   // PCOLOR_LTBLUE
+      houses.BadGuy = houses.USSR;      // PCOLOR_RED
+      houses.Neutral = houses.Spain;    // PCOLOR_GOLD
+      houses.Special = houses.Spain;    // PCOLOR_GOLD
+      houses.Multi1 = houses.Spain;     // PCOLOR_GOLD
+      houses.Multi2 = houses.Greece;    // PCOLOR_LTBLUE
+      houses.Multi3 = houses.USSR;      // PCOLOR_RED
+      houses.Multi4 = houses.England;   // PCOLOR_GREEN
+      houses.Multi5 = houses.Ukraine;   // PCOLOR_ORANGE
+      houses.Multi6 = houses.Germany;   // PCOLOR_GREY
+      houses.Multi7 = houses.France;    // PCOLOR_BLUE
+      houses.Multi8 = houses.Turkey;    // PCOLOR_BROWN
+      houses.IronCurtain = [
+        [252, 60, 40], [240, 52, 36], [228, 44, 32], [216, 40, 28],
+        [204, 36, 24], [192, 32, 20], [176, 28, 16], [160, 24, 12],
+        [144, 20, 10], [128, 16, 8], [112, 12, 6], [96, 10, 4],
+        [80, 8, 4], [64, 6, 2], [48, 4, 2], [32, 2, 1],
+      ];
       const remapJson = { source: sourceColors, houses };
       writeFileSync(join(OUTPUT_DIR, 'remap-colors.json'), JSON.stringify(remapJson));
       log(`  Wrote remap-colors.json (${sourceIndices.length} source colors, ${Object.keys(houses).length} houses)`);

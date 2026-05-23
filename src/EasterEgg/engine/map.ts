@@ -329,6 +329,31 @@ export class GameMap {
     this.boundsY = y;
     this.boundsW = w;
     this.boundsH = h;
+    this.markDisplayShroudRing();
+  }
+
+  private setDisplayVisible(cx: number, cy: number): void {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return;
+    this.displayVisibility[cy * MAP_CELLS + cx] = 2;
+  }
+
+  /** C++ scenario.cpp:588-599 marks the one-cell perimeter outside the
+   * playable map as IsMapped/IsVisible so shroud art does not form a black wall
+   * at scenario bounds. This is display-only; gameplay sight stays shrouded. */
+  private markDisplayShroudRing(): void {
+    const left = this.boundsX - 1;
+    const right = this.boundsX + this.boundsW;
+    const top = this.boundsY - 1;
+    const bottom = this.boundsY + this.boundsH;
+
+    for (let cx = left; cx <= right; cx++) {
+      this.setDisplayVisible(cx, top);
+      this.setDisplayVisible(cx, bottom);
+    }
+    for (let cy = this.boundsY; cy < this.boundsY + this.boundsH; cy++) {
+      this.setDisplayVisible(left, cy);
+      this.setDisplayVisible(right, cy);
+    }
   }
 
   /** Get terrain at a cell position */
@@ -1087,13 +1112,20 @@ export class GameMap {
   }
 
   /** Shroud the entire map — C++ Map.Shroud_The_Map() parity.
-   *  Resets all cells to shroud (0). Used when GPS is lost (ATEK destroyed).
+   *  Resets playable cells to shroud (0), preserving the visible scenario
+   *  perimeter ring C++ seeds to avoid an edge wall of darkness.
+   *  Used when GPS is lost (ATEK destroyed).
    *  The normal fog-of-war update will re-reveal around player units next tick. */
   shroudAll(): void {
     for (let i = 0; i < this.visibility.length; i++) {
       if (this.visibility[i] > 0) this.visibility[i] = 0;
     }
-    this.displayVisibility.fill(0);
+    for (let cy = this.boundsY; cy < this.boundsY + this.boundsH; cy++) {
+      for (let cx = this.boundsX; cx < this.boundsX + this.boundsW; cx++) {
+        this.displayVisibility[cy * MAP_CELLS + cx] = 0;
+      }
+    }
+    this.markDisplayShroudRing();
     this.visibleCells.length = 0;
   }
 

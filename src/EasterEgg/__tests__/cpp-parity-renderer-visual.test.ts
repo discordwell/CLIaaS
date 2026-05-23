@@ -11,8 +11,11 @@
  *   - defines.h:1139-1163   — HousesType enum with color comments per house
  */
 
-import { describe, it, expect } from 'vitest';
-import { House } from '../engine/types';
+import { describe, it, expect, vi } from 'vitest';
+import { Camera } from '../engine/camera';
+import { GameMap, Terrain } from '../engine/map';
+import { Renderer } from '../engine/renderer';
+import { CELL_SIZE, House } from '../engine/types';
 
 // ============================================================
 // Section 1: Minimap Blip Colors — hdata.cpp + radar.cpp:740
@@ -506,5 +509,177 @@ describe('cell clear variation formula (cell.cpp:981-987)', () => {
     // This isn't expected in practice (cell coords are non-negative) but
     // documents the behavior
     expect(tsClearIcon(-1, -1)).toBe(cppClearIcon(-1, -1));
+  });
+});
+
+describe('renderer clear-template base art (cell.cpp:981-987)', () => {
+  function mockCanvas(): { canvas: HTMLCanvasElement; ctx: any } {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      fillStyle: '#000',
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+    };
+    return {
+      canvas: {
+        width: CELL_SIZE,
+        height: CELL_SIZE,
+        getContext: () => ctx,
+      } as unknown as HTMLCanvasElement,
+      ctx,
+    };
+  }
+
+  it.each([0, 0xFFFF, 255])('draws TEMPLATE_CLEAR1 art for sentinel template %s even when Land is ROCK', (tmpl) => {
+    // C++ chooses the base icon from TType before Land_Type-specific logic:
+    // TEMPLATE_NONE, TEMPLATE_CLEAR1, and 255 all use Clear_Icon(). INTERIOR
+    // Recalc_Attributes can classify the same cell as LAND_ROCK for movement,
+    // but that must not change the base tile art.
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    renderer.theatre = 'INTERIOR';
+
+    const atlasImage = {};
+    (renderer as any).tilesetImage = atlasImage;
+    (renderer as any).tilesetMeta = {
+      tileW: CELL_SIZE,
+      tileH: CELL_SIZE,
+      atlasW: 512,
+      atlasH: 512,
+      tileCount: 1,
+      tiles: { '255,5': { ax: 77, ay: 88, lt: 'Rock' } },
+    };
+    (renderer as any).tilesetReady = true;
+    (renderer as any).tilesetTheatre = 'INTERIOR';
+
+    const camera = new Camera(0, 0);
+    camera.x = 5 * CELL_SIZE;
+    camera.y = 5 * CELL_SIZE;
+
+    const map = new GameMap();
+    map.setBounds(5, 5, 1, 1);
+    map.setTerrain(5, 5, Terrain.ROCK);
+    const idx = 5 * 128 + 5;
+    map.templateType[idx] = tmpl;
+    map.templateIcon[idx] = 13; // ignored by C++ for these sentinel templates
+
+    (renderer as any).renderTerrain(camera, map, 0, {});
+
+    expect(ctx.drawImage).toHaveBeenCalledWith(
+      atlasImage,
+      77,
+      88,
+      CELL_SIZE,
+      CELL_SIZE,
+      0,
+      0,
+      CELL_SIZE,
+      CELL_SIZE,
+    );
+    expect(ctx.fillRect).not.toHaveBeenCalledWith(0, 0, CELL_SIZE, CELL_SIZE);
+  });
+});
+
+describe('renderer theatre-specific terrain object art', () => {
+  function mockCanvas(): { canvas: HTMLCanvasElement; ctx: any } {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      fillStyle: '#000',
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+    };
+    return {
+      canvas: {
+        width: CELL_SIZE,
+        height: CELL_SIZE,
+        getContext: () => ctx,
+      } as unknown as HTMLCanvasElement,
+      ctx,
+    };
+  }
+
+  it('uses .SNO tree art on snow theatre maps', () => {
+    // C++ TerrainTypeClass::Init builds terrain filenames from IniName plus
+    // Theaters[theater].Suffix, so TC01 on SNOW loads TC01.SNO, not TC01.TEM.
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    renderer.theatre = 'SNOW';
+
+    const camera = new Camera(0, 0);
+    camera.x = 10 * CELL_SIZE;
+    camera.y = 10 * CELL_SIZE;
+
+    const map = new GameMap();
+    map.setBounds(10, 10, 1, 1);
+    map.setTerrain(10, 10, Terrain.CLEAR);
+    map.setTreeType(10, 10, 'tc01');
+
+    const assets = {
+      hasSheet: vi.fn((name: string) => name === 'tc01_snow'),
+      drawFrame: vi.fn(),
+    };
+
+    (renderer as any).renderTerrain(camera, map, 0, assets);
+
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'tc01_snow', 0, 0, 0);
+  });
+
+  it.each([
+    { overlay: 5, density: 4, expectedSheet: 'gold01_snow', expectedFrame: 4 },
+    { overlay: 9, density: 2, expectedSheet: 'gem01_snow', expectedFrame: 2 },
+  ])('uses .SNO overlay art without procedural sparkle for $expectedSheet', ({ overlay, density, expectedSheet, expectedFrame }) => {
+    // C++ CellClass::Draw_It delegates overlays to OverlayTypeClass image data
+    // and OverlayData frame selection. It does not draw extra sparkle pixels.
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    renderer.theatre = 'SNOW';
+
+    const camera = new Camera(0, 0);
+    camera.x = 12 * CELL_SIZE;
+    camera.y = 12 * CELL_SIZE;
+
+    const map = new GameMap();
+    map.overlay[12 * 128 + 12] = overlay;
+    map.oreDensity[12 * 128 + 12] = density;
+
+    const assets = {
+      hasSheet: vi.fn((name: string) => name === expectedSheet),
+      drawFrame: vi.fn(),
+    };
+
+    (renderer as any).renderOverlays(camera, map, 7, assets);
+
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, expectedSheet, expectedFrame, 0, 0);
+    expect(ctx.fillRect).not.toHaveBeenCalled();
   });
 });

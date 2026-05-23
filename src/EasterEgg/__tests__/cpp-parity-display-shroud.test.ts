@@ -19,6 +19,22 @@ function unit(cx: number, cy: number, sight: number): { x: number; y: number; si
 }
 
 describe('DisplayClass::Map_Cell shroud state', () => {
+  it('seeds the visible perimeter ring around scenario bounds', () => {
+    // C++ scenario.cpp:588-599 maps the one-cell ring outside MapCellX/Y
+    // so Cell_Shadow does not render a wall of black at playable edges.
+    const map = new GameMap();
+    map.setBounds(23, 57, 87, 54);
+
+    expect(map.getDisplayVisibility(22, 57)).toBe(2);
+    expect(map.getDisplayVisibility(110, 57)).toBe(2);
+    expect(map.getDisplayVisibility(23, 56)).toBe(2);
+    expect(map.getDisplayVisibility(109, 111)).toBe(2);
+
+    expect(map.getDisplayVisibility(21, 57)).toBe(0);
+    expect(map.getDisplayVisibility(111, 57)).toBe(0);
+    expect(map.getVisibility(22, 57)).toBe(0);
+  });
+
   it('maps reveal-radius edge cells as IsMapped but not necessarily IsVisible', () => {
     const map = new GameMap();
 
@@ -57,5 +73,22 @@ describe('DisplayClass::Map_Cell shroud state', () => {
     expect(map.getDisplayVisibility(64, 64)).toBe(0);
     expect(map.getVisibility(64, 61)).toBe(0);
     expect(map.getDisplayVisibility(64, 61)).toBe(0);
+  });
+
+  it('preserves the scenario perimeter ring when the map is reshrouded', () => {
+    // C++ MapClass::Shroud_The_Map only clears cells inside MapCell bounds,
+    // leaving the source-seeded perimeter ring visible.
+    const map = new GameMap();
+    map.setBounds(10, 10, 20, 20);
+    map.setVisibility(15, 15, 2);
+    map.revealAll();
+
+    map.shroudAll();
+
+    expect(map.getVisibility(15, 15)).toBe(0);
+    expect(map.getDisplayVisibility(15, 15)).toBe(0);
+    expect(map.getVisibility(9, 10)).toBe(0);
+    expect(map.getDisplayVisibility(9, 10)).toBe(2);
+    expect(map.getDisplayVisibility(30, 29)).toBe(2);
   });
 });
