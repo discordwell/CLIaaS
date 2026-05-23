@@ -3977,6 +3977,7 @@ export class Renderer {
   static readonly CAMEO_H = 24 * RESFACTOR;          // OBJECT_HEIGHT
   static readonly CAMEO_VISIBLE = 4;                  // MAX_VISIBLE (C++ = 4!)
   static readonly CAMEO_GAP = 0;                      // C++ has no gap between cameos
+  static readonly CAMEO_DRAW_X_OFFSET = 2 * RESFACTOR; // LEFT_EDGE_OFFSET
   static readonly LEFT_STRIP_X_OFFSET = 8 * RESFACTOR;   // (248-240)×RF = COLUMN_ONE relative
   static readonly RIGHT_STRIP_X_OFFSET = 43 * RESFACTOR; // (283-240)×RF = COLUMN_TWO relative
 
@@ -4240,6 +4241,17 @@ export class Renderer {
     const camW = Renderer.CAMEO_W;
     const camH = Renderer.CAMEO_H;
     const rowH = camH; // CAMEO_GAP = 0
+    const cameoX = stripX + Renderer.CAMEO_DRAW_X_OFFSET;
+
+    // C++ StripClass::Draw_It draws the side-specific strip background once,
+    // inset by LEFT_EDGE_OFFSET, only when fewer than MAX_VISIBLE cameos exist.
+    if (items.length < Renderer.CAMEO_VISIBLE) {
+      const bgName = this.isPlayerAllied() ? 'stripna' : 'stripus';
+      const bg = assets.getSheet(bgName);
+      if (bg) {
+        assets.drawFrame(ctx, bgName, strip === 'left' ? 0 : 1, cameoX, startY);
+      }
+    }
 
     if (items.length === 0) return;
 
@@ -4250,25 +4262,18 @@ export class Renderer {
       // Cull off-screen items
       if (iy < startY - rowH || iy > this.height) continue;
 
-      // Draw strip.png background for cameo slot (scale LORES → HIRES)
-      const stripSheet = assets.getSheet('strip');
-      if (stripSheet) {
-        const stripScale = camW / stripSheet.meta.frameWidth;
-        assets.drawFrame(ctx, 'strip', 0, stripX, iy, { scale: stripScale });
-      } else {
-        ctx.fillStyle = 'rgba(30,30,40,0.9)';
-        ctx.fillRect(stripX, iy, camW, camH);
-        ctx.strokeStyle = 'rgba(80,80,80,0.5)';
-        ctx.lineWidth = 0.5;
-        ctx.strokeRect(stripX, iy, camW, camH);
-      }
-
       // Draw cameo icon (HIRES 64x48 — all icons should be HIRES)
       const iconName = item.type.toLowerCase() + 'icon';
       const iconSheet = assets.getSheet(iconName);
       if (iconSheet) {
         ctx.drawImage(iconSheet.image, 0, 0, iconSheet.meta.frameWidth, iconSheet.meta.frameHeight,
-          stripX, iy, camW, camH);
+          cameoX, iy, camW, camH);
+      } else {
+        ctx.fillStyle = 'rgba(30,30,40,0.9)';
+        ctx.fillRect(cameoX, iy, camW, camH);
+        ctx.strokeStyle = 'rgba(80,80,80,0.5)';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(cameoX, iy, camW, camH);
       }
 
       // Check production state — use factory type key (5-factory system)
@@ -4286,9 +4291,9 @@ export class Renderer {
           const pipsSheet = assets.getSheet('pips');
           if (pipsSheet) {
             const pipScale = camW / pipsSheet.meta.frameWidth;
-            assets.drawFrame(ctx, 'pips', 3, stripX, iy + (camH - pipsSheet.meta.frameHeight * pipScale) / 2, { scale: pipScale });
+            assets.drawFrame(ctx, 'pips', 3, cameoX, iy + (camH - pipsSheet.meta.frameHeight * pipScale) / 2, { scale: pipScale });
           } else {
-            this.drawBitmapText(assets, 'READY', stripX + camW / 2, iy + camH / 2 - 4, '#0f0', '6pt', { align: 'center' });
+            this.drawBitmapText(assets, 'READY', cameoX + camW / 2, iy + camH / 2 - 4, '#0f0', '6pt', { align: 'center' });
           }
         } else {
           // Clock overlay (C++ ClockShapes with SHAPE_GHOST)
@@ -4301,15 +4306,15 @@ export class Renderer {
             ctx.globalAlpha = lowPower ? 0.55 : 0.5;
             ctx.filter = 'brightness(0)';
             const clockScale = camW / clockSheet.meta.frameWidth;
-            assets.drawFrame(ctx, 'clock', clockFrame, stripX, iy, { scale: clockScale });
+            assets.drawFrame(ctx, 'clock', clockFrame, cameoX, iy, { scale: clockScale });
             ctx.restore();
           } else {
             const uncoverH = camH * (1 - progress);
             ctx.fillStyle = lowPower ? 'rgba(180,40,40,0.5)' : 'rgba(0,0,0,0.55)';
-            ctx.fillRect(stripX, iy, camW, uncoverH);
+            ctx.fillRect(cameoX, iy, camW, uncoverH);
             ctx.font = 'bold 7px monospace';
             this.drawBitmapText(assets, `${Math.floor(progress * 100)}%`,
-              stripX + camW / 2, iy + camH / 2 - 4, lowPower ? '#f88' : '#8f8', '6pt', { align: 'center' });
+              cameoX + camW / 2, iy + camH / 2 - 4, lowPower ? '#f88' : '#8f8', '6pt', { align: 'center' });
           }
 
           // Paused: draw "HOLDING" pip (frame 4)
@@ -4317,7 +4322,7 @@ export class Renderer {
             const pipsSheet = assets.getSheet('pips');
             if (pipsSheet) {
               const pipScale = camW / pipsSheet.meta.frameWidth;
-              assets.drawFrame(ctx, 'pips', 4, stripX, iy + (camH - pipsSheet.meta.frameHeight * pipScale) / 2, { scale: pipScale });
+              assets.drawFrame(ctx, 'pips', 4, cameoX, iy + (camH - pipsSheet.meta.frameHeight * pipScale) / 2, { scale: pipScale });
             }
           }
         }
@@ -4326,8 +4331,9 @@ export class Renderer {
           this.drawBitmapText(assets, `x${qEntry.queueCount}`, stripX + camW - 6, iy + 1, '#ff0', '6pt', { align: 'center' });
         }
       } else {
-        // Not building: darken if can't afford (C++ SHAPE_GHOST on unavailable)
-        if (this.sidebarCredits < item.cost) {
+        // Not building: C++ darkens other items in the same factory strip while
+        // that factory is busy. It does not darken merely because cash is low.
+        if (qEntry) {
           const clockSheet = assets.getSheet('clock');
           if (clockSheet) {
             // Full clock (frame 0) as dark overlay — same brightness(0) fix
@@ -4335,14 +4341,13 @@ export class Renderer {
             ctx.globalAlpha = 0.5;
             ctx.filter = 'brightness(0)';
             const clockScale = camW / clockSheet.meta.frameWidth;
-            assets.drawFrame(ctx, 'clock', 0, stripX, iy, { scale: clockScale });
+            assets.drawFrame(ctx, 'clock', 0, cameoX, iy, { scale: clockScale });
             ctx.restore();
           } else {
             ctx.fillStyle = 'rgba(0,0,0,0.4)';
-            ctx.fillRect(stripX, iy, camW, camH);
+            ctx.fillRect(cameoX, iy, camW, camH);
           }
         }
-
       }
     }
   }

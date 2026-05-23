@@ -172,6 +172,113 @@ describe('sidebar production visuals', () => {
     );
   });
 
+  it('draws C++ strip backgrounds inset by LEFT_EDGE_OFFSET when a column is not full', () => {
+    const renderer = new Renderer(mockCanvas());
+    renderer.playerFaction = 'allied';
+    const drawFrame = vi.fn();
+    const assets = {
+      getSheet: (name: string) => name === 'stripna'
+        ? { meta: { frameWidth: 64, frameHeight: 192, frameCount: 2 } }
+        : null,
+      drawFrame,
+    };
+    const stripX = 640 - 80 * RESFACTOR + 43 * RESFACTOR;
+    const startY = 90 * RESFACTOR;
+
+    (renderer as any).renderStrip(
+      (renderer as any).ctx,
+      assets,
+      stripX,
+      startY,
+      [],
+      0,
+      false,
+      'right',
+    );
+
+    expect(drawFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      'stripna',
+      1,
+      stripX + 2 * RESFACTOR,
+      startY,
+    );
+  });
+
+  it('draws production cameos at C++ Column.X plus LEFT_EDGE_OFFSET', () => {
+    const renderer = new Renderer(mockCanvas());
+    renderer.sidebarCredits = 10000;
+    const image = {};
+    const assets = {
+      getSheet: (name: string) => name === 'e1icon'
+        ? { image, meta: { frameWidth: 64, frameHeight: 48, frameCount: 1 } }
+        : null,
+      drawFrame: vi.fn(),
+    };
+    const item = PRODUCTION_ITEMS.find(p => p.type === 'E1')!;
+    const stripX = 640 - 80 * RESFACTOR + 43 * RESFACTOR;
+    const startY = 90 * RESFACTOR;
+
+    (renderer as any).renderStrip(
+      (renderer as any).ctx,
+      assets,
+      stripX,
+      startY,
+      [item],
+      0,
+      false,
+      'right',
+    );
+
+    expect((renderer as any).ctx.drawImage).toHaveBeenCalledWith(
+      image,
+      0,
+      0,
+      64,
+      48,
+      stripX + 2 * RESFACTOR,
+      startY,
+      32 * RESFACTOR,
+      24 * RESFACTOR,
+    );
+  });
+
+  it('does not darken idle cameos only because current cash is below item cost', () => {
+    const renderer = new Renderer(mockCanvas());
+    renderer.sidebarCredits = 0;
+    const image = {};
+    const drawFrame = vi.fn();
+    const assets = {
+      getSheet: (name: string) => {
+        if (name === 'e6icon') return { image, meta: { frameWidth: 64, frameHeight: 48, frameCount: 1 } };
+        if (name === 'clock') return { image: {}, meta: { frameWidth: 64, frameHeight: 48, frameCount: 55, columns: 16, rows: 4 } };
+        return null;
+      },
+      drawFrame,
+    };
+    const item = PRODUCTION_ITEMS.find(p => p.type === 'E6')!;
+
+    (renderer as any).renderStrip(
+      (renderer as any).ctx,
+      assets,
+      640 - 80 * RESFACTOR + 43 * RESFACTOR,
+      90 * RESFACTOR,
+      [item],
+      0,
+      false,
+      'right',
+    );
+
+    expect(drawFrame).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'clock',
+      0,
+      expect.any(Number),
+      expect.any(Number),
+      expect.anything(),
+    );
+  });
+
   it('does not draw TS cost text over idle cameos', () => {
     const renderer = new Renderer(mockCanvas());
     const drawBitmapText = vi.fn();
