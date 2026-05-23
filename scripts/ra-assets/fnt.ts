@@ -14,14 +14,15 @@
  * Info block: byte +4 = maxHeight, byte +5 = maxWidth
  *
  * Glyph data: 4-bit packed nibbles (2 pixels per byte, low nibble first).
- * Nibble 0 = transparent/background, nibble 1 = foreground.
+ * Nibble 0 = transparent/background, non-zero nibbles are font-palette
+ * indices. Gradient/metal fonts rely on the exact nibble value.
  */
 
 export interface FntGlyph {
   width: number;
   height: number;     // actual glyph rows (charHeight)
   topBlank: number;   // blank rows above glyph
-  /** 1-bit glyph bitmap: 1=foreground, 0=transparent. Width × height. */
+  /** 4-bit font palette indices. 0=transparent. Width × height. */
   bitmap: Uint8Array;
 }
 
@@ -57,7 +58,7 @@ export function parseFnt(data: Buffer): FntFont {
 
     if (charHeight === 0 || charDataOff >= data.length) continue;
 
-    // Decode 4-bit packed nibble data → 1-bit bitmap
+    // Decode 4-bit packed nibble data → font palette indices.
     const bitmap = new Uint8Array(charWidth * charHeight);
     let dataIdx = charDataOff;
     for (let y = 0; y < charHeight; y++) {
@@ -67,13 +68,13 @@ export function parseFnt(data: Buffer): FntFont {
 
         // Low nibble = first pixel
         const lo = byte & 0x0F;
-        bitmap[y * charWidth + x] = lo !== 0 ? 1 : 0;
+        bitmap[y * charWidth + x] = lo;
         x++;
 
         // High nibble = second pixel (if width allows)
         if (x < charWidth) {
           const hi = (byte >> 4) & 0x0F;
-          bitmap[y * charWidth + x] = hi !== 0 ? 1 : 0;
+          bitmap[y * charWidth + x] = hi;
           x++;
         }
       }
@@ -87,8 +88,9 @@ export function parseFnt(data: Buffer): FntFont {
 
 /**
  * Generate a glyph atlas PNG data. Renders all glyphs into a grid with
- * white foreground on transparent background. Each glyph occupies
- * maxWidth × maxHeight cells.
+ * indexed foreground on transparent background. RGB encodes the 4-bit font
+ * palette index as index*17, while alpha remains an ordinary glyph mask.
+ * Each glyph occupies maxWidth × maxHeight cells.
  *
  * Returns: { rgba, atlasWidth, atlasHeight, glyphMeta }
  * glyphMeta[charCode] = { x, y, width, height, topBlank }
@@ -122,13 +124,15 @@ export function generateGlyphAtlas(font: FntFont): {
     // Render glyph into atlas at correct vertical position
     for (let gy = 0; gy < glyph.height; gy++) {
       for (let gx = 0; gx < glyph.width; gx++) {
-        if (glyph.bitmap[gy * glyph.width + gx]) {
+        const fontIndex = glyph.bitmap[gy * glyph.width + gx];
+        if (fontIndex) {
           const px = ox + gx;
           const py = oy + glyph.topBlank + gy;
           const idx = (py * atlasWidth + px) * 4;
-          rgba[idx] = 255;     // R
-          rgba[idx + 1] = 255; // G
-          rgba[idx + 2] = 255; // B
+          const encoded = fontIndex * 17;
+          rgba[idx] = encoded;
+          rgba[idx + 1] = encoded;
+          rgba[idx + 2] = encoded;
           rgba[idx + 3] = 255; // A
         }
       }

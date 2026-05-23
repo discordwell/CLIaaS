@@ -192,8 +192,8 @@ export class AssetManager {
       ),
       // House color remap data (optional — falls back to tint overlay)
       this.loadRemapColors(cacheBust),
-      // Bitmap fonts (C++ 6POINT.FNT / 8POINT.FNT — optional, falls back to ctx.fillText)
-      ...['6point-font', '8point-font'].map(name =>
+      // Bitmap fonts (C++ 6POINT.FNT / 8POINT.FNT / 12METFNT.FNT — optional, falls back to ctx.fillText)
+      ...['6point-font', '8point-font', 'metal12-font'].map(name =>
         Promise.all([
           fetch(`${BASE_URL}/${name}.json${cacheBust}`).then(r => r.ok ? r.json() : null).catch(() => null),
           loadImage(`${BASE_URL}/${name}.png${cacheBust}`).catch(() => null),
@@ -399,7 +399,7 @@ export class AssetManager {
     return canvas;
   }
 
-  /** Get a bitmap font by name ('6point' or '8point'). Returns null if not loaded. */
+  /** Get a bitmap font by name ('6point', '8point', or 'metal12'). Returns null if not loaded. */
   getFont(name: string): BitmapFont | null {
     return this.fonts.get(name) ?? null;
   }

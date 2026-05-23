@@ -5027,8 +5027,10 @@ export class Game {
         this.sellMode = !this.sellMode;
         this.repairMode = false;
       } else if (relX >= Renderer.BUTTON_THREE_X && relX < Renderer.BUTTON_THREE_X + Renderer.BUTTON_THREE_W) {
-        // U6: Map button — toggle fullscreen radar overlay
-        this.isRadarFullscreen = !this.isRadarFullscreen;
+        // C++ disables the zoom/map button until radar is active.
+        if (isRadarActive(this.radarVisual, this.gpsActive)) {
+          this.isRadarFullscreen = !this.isRadarFullscreen;
+        }
       }
       return;
     }

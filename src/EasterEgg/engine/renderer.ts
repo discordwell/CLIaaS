@@ -63,6 +63,28 @@ const PCOLOR_GREEN_FONT_RAMP = [
   '#698a5d',
 ] as const;
 
+// C++ init.cpp:2780-2788 — MetalScheme for the in-game top tabs.
+// 12METFNT.FNT pixels encode font-palette nibbles; these entries are the
+// palette colors C++ installs for TPF_METAL12 | TPF_USE_GRAD_PAL.
+const METAL12_FONT_PALETTE = [
+  '#000000',
+  '#efefef', // palette index 128
+  '#000000', // palette index 12
+  '#555555', // palette index 13
+  '#aaaaaa', // palette index 14
+  '#ffff55',
+  '#ff5555',
+  '#aa5500',
+  '#aa0000',
+  '#55ffff',
+  '#5151ff',
+  '#0000aa',
+  '#000000',
+  '#555555',
+  '#aaaaaa',
+  '#ffffff',
+] as const;
+
 // TEMPERATE.PAL palette index ranges for terrain rendering
 // These are the actual palette indices from the extracted TEMPERAT.PAL
 const PAL_GRASS_START = 144;  // indices 144-155: green terrain ramp (light→dark)
@@ -1021,21 +1043,22 @@ export class Renderer {
   // ─── Bitmap Text (C++ 6POINT/8POINT.FNT parity) ──────────
 
   /** Draw text using C++ bitmap font if available, falling back to canvas fillText.
-   *  size: '6pt' → 6POINT.FNT, '8pt' → 8POINT.FNT */
+   *  size: '6pt' → 6POINT.FNT, '8pt' → 8POINT.FNT, 'metal12' → 12METFNT.FNT */
   private drawBitmapText(
     assets: AssetManager | undefined,
     text: string, x: number, y: number,
     color: string,
-    size: '6pt' | '8pt' = '8pt',
+    size: '6pt' | '8pt' | 'metal12' = '8pt',
     options?: {
       align?: 'left' | 'center' | 'right';
       shadow?: string;
       fullShadow?: string;
       scale?: number;
       gradient?: readonly string[];
+      indexedPalette?: readonly string[];
     },
   ): void {
-    const fontName = size === '6pt' ? '6point' : '8point';
+    const fontName = size === '6pt' ? '6point' : size === 'metal12' ? 'metal12' : '8point';
     const font = assets?.getFont(fontName);
     if (font) {
       font.drawText(this.ctx, text, x, y, color, options);
@@ -2243,6 +2266,13 @@ export class Renderer {
 
       // Apply altitude offset for rendering (sprite drawn higher)
       screen.y -= altY;
+
+      // C++ infantry.cpp:545-548 adjusts InfantryClass::Draw_It before
+      // Techno_Draw_Object: y += 4; x -= 2.
+      if (entity.stats.isInfantry) {
+        screen.x -= 2;
+        screen.y += 4;
+      }
 
       // Harvester dock-slide: while dumping ore, slide the HARV sprite slightly north into
       // the PROC footprint (visual overlap with refinery bay — C++ docks the harvester at
@@ -3607,8 +3637,11 @@ export class Renderer {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, h - 1, w, 1);
 
+    const metalText = { align: 'center' as const, indexedPalette: METAL12_FONT_PALETTE, letterSpacing: 1 };
+
     // OPTIONS button (left, centered at x=40*RF -- EVA_WIDTH/2)
-    this.drawBitmapText(this._cachedAssets, 'Options', 40 * RF, 2 * RF, '#ccc', '6pt', { align: 'center' });
+    // C++ tab.cpp:123 uses TPF_METAL12 | TPF_CENTER | TPF_USE_GRAD_PAL at y=0.
+    this.drawBitmapText(this._cachedAssets, 'Options', 40 * RF, 0, '#efefef', 'metal12', metalText);
 
     // Mission timer (center, x=200*RF). Only show if active.
     if (this.missionTimer > 0) {
@@ -3621,13 +3654,13 @@ export class Renderer {
       const timerText = hours > 0
         ? `Time:${hours.toString().padStart(2, '0')}:${displayMins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
         : `Time:${displayMins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-      this.drawBitmapText(this._cachedAssets, timerText, 200 * RF, 2 * RF, '#ccc', '6pt', { align: 'center' });
+      this.drawBitmapText(this._cachedAssets, timerText, 200 * RF, 0, '#efefef', 'metal12', metalText);
       void tick;
     }
 
     // Credits amount (right, over the credits tab at x=280*RF)
     const creditsText = `${this.sidebarCredits}`;
-    this.drawBitmapText(this._cachedAssets, creditsText, 280 * RF, 2 * RF, '#ccc', '6pt', { align: 'center' });
+    this.drawBitmapText(this._cachedAssets, creditsText, 280 * RF, 0, '#efefef', 'metal12', metalText);
   }
 
   // ─── EVA Messages & Mission Timer ──────────────────────
@@ -4391,7 +4424,10 @@ export class Renderer {
       // Sprite icon (C++ ShapeButtonClass::Draw_Me — frame 0=unpressed, 1=pressed, 2=disabled)
       const spriteSheet = assets.getSheet(btn.sprite);
       if (spriteSheet) {
-        const frame = btn.active ? 1 : 0;
+        // C++ SidebarClass::Init_IO/Radar_Activate disables the zoom/map
+        // ShapeButton in normal games until radar is active.
+        const disabled = btn.sprite === 'map_btn' && !this.hasRadar;
+        const frame = disabled ? 2 : (btn.active ? 1 : 0);
         assets.drawFrame(ctx, btn.sprite, frame, bx, btnY);
       } else {
         // Fallback: semi-transparent button with text

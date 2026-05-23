@@ -633,9 +633,13 @@ async function main(): Promise<void> {
 
   // --- Non-sprite asset extraction ---
 
-  // Extract bitmap fonts (6POINT.FNT, 8POINT.FNT from CONQUER.MIX)
+  // Extract bitmap fonts from CONQUER/HIRES data.
   log('Extracting bitmap fonts...');
-  for (const [fntName, outPrefix] of [['6POINT.FNT', '6point-font'], ['8POINT.FNT', '8point-font']] as const) {
+  for (const [fntName, outPrefix] of [
+    ['6POINT.FNT', '6point-font'],
+    ['8POINT.FNT', '8point-font'],
+    ['12METFNT.FNT', 'metal12-font'],
+  ] as const) {
     let fntData: Buffer | null = null;
     for (const searchMix of ['CONQUER.MIX', 'GENERAL.MIX', 'LOCAL.MIX', 'HIRES.MIX', 'TEMPERAT.MIX']) {
       const mix = mixParsed.get(searchMix);

@@ -13,9 +13,10 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { Camera } from '../engine/camera';
+import { Entity } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
 import { Renderer } from '../engine/renderer';
-import { CELL_SIZE, House } from '../engine/types';
+import { CELL_SIZE, House, UnitType } from '../engine/types';
 
 // ============================================================
 // Section 1: Minimap Blip Colors — hdata.cpp + radar.cpp:740
@@ -681,5 +682,200 @@ describe('renderer theatre-specific terrain object art', () => {
 
     expect(assets.drawFrame).toHaveBeenCalledWith(ctx, expectedSheet, expectedFrame, 0, 0);
     expect(ctx.fillRect).not.toHaveBeenCalled();
+  });
+});
+
+describe('renderer infantry draw anchor (infantry.cpp:545-548)', () => {
+  function mockCanvas(): { canvas: HTMLCanvasElement; ctx: any } {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      fillStyle: '#000',
+      strokeStyle: '#fff',
+      lineWidth: 1,
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      strokeRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      setLineDash: vi.fn(),
+    };
+    return {
+      canvas: {
+        width: 160,
+        height: 120,
+        getContext: () => ctx,
+      } as unknown as HTMLCanvasElement,
+      ctx,
+    };
+  }
+
+  it('draws infantry at C++ x-2/y+4 adjusted coordinates', () => {
+    // C++ InfantryClass::Draw_It receives Map.Coord_To_Pixel output, then
+    // applies y += 4 and x -= 2 before Techno_Draw_Object(SHAPE_CENTER).
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    const camera = new Camera(160, 120);
+    const map = new GameMap();
+    map.setBounds(0, 0, 128, 128);
+    map.revealAll();
+
+    const e1 = new Entity(UnitType.I_E1, House.Spain, 64, 64);
+    e1.prevPos = { ...e1.pos };
+
+    const assets = {
+      getSheet: vi.fn(() => ({
+        meta: {
+          frameWidth: 50,
+          frameHeight: 39,
+          frameCount: 438,
+        },
+      })),
+      getRemappedSheet: vi.fn(() => null),
+      drawFrame: vi.fn(),
+      drawFrameFrom: vi.fn(),
+    };
+
+    (renderer as any).renderEntities(camera, map, [e1], assets, new Set(), 0);
+
+    const baseScreen = camera.worldToScreen(e1.pos.x, e1.pos.y);
+    const call = assets.drawFrame.mock.calls[0];
+    expect(call[0]).toBe(ctx);
+    expect(call[1]).toBe('e1');
+    expect(call[2]).toEqual(expect.any(Number));
+    expect(call[3]).toBeCloseTo(baseScreen.x - 2);
+    expect(call[4]).toBeCloseTo(baseScreen.y + 4);
+    expect(call[5]).toEqual({ centerX: true, centerY: true });
+  });
+});
+
+describe('renderer sidebar map button state (sidebar.cpp:341-344)', () => {
+  function mockCanvas(): { canvas: HTMLCanvasElement; ctx: any } {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      fillStyle: '#000',
+      strokeStyle: '#fff',
+      lineWidth: 1,
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      strokeRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      setLineDash: vi.fn(),
+    };
+    return {
+      canvas: {
+        width: 640,
+        height: 400,
+        getContext: () => ctx,
+      } as unknown as HTMLCanvasElement,
+      ctx,
+    };
+  }
+
+  it('draws MAP.SHP disabled frame while radar is inactive', () => {
+    // C++ SidebarClass::Init_IO disables the Zoom button unless
+    // IsRadarActive && Is_Zoomable(). ShapeButtonClass::Draw_Me uses frame 2
+    // for IsDisabled.
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    renderer.hasRadar = false;
+
+    const assets = {
+      getSheet: vi.fn(() => ({ meta: { frameWidth: 34, frameHeight: 28, frameCount: 3 } })),
+      drawFrame: vi.fn(),
+    };
+
+    (renderer as any).renderButtonRow(480, 160, assets);
+
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'repair', 0, 480 + Renderer.BUTTON_ONE_X, Renderer.BUTTON_ROW_Y);
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'sell', 0, 480 + Renderer.BUTTON_TWO_X, Renderer.BUTTON_ROW_Y);
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'map_btn', 2, 480 + Renderer.BUTTON_THREE_X, Renderer.BUTTON_ROW_Y);
+  });
+});
+
+describe('renderer top tab font (tab.cpp:123, credits.cpp:118-157)', () => {
+  function mockCanvas(): { canvas: HTMLCanvasElement; ctx: any } {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      fillStyle: '#000',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+    };
+    return {
+      canvas: {
+        width: 640,
+        height: 400,
+        getContext: () => ctx,
+      } as unknown as HTMLCanvasElement,
+      ctx,
+    };
+  }
+
+  it('draws Options and credits with C++ 12METFNT at y=0', () => {
+    // C++ WIN32 TabClass::Draw_It/CreditClass::Graphic_Logic use
+    // TPF_METAL12 | TPF_CENTER | TPF_USE_GRAD_PAL at y=0. A 6POINT
+    // replacement shifts the glyphs and produces a persistent top-bar diff.
+    const { canvas } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    renderer.sidebarCredits = 1000;
+
+    const metalFont = { drawText: vi.fn() };
+    const assets = {
+      getSheet: vi.fn(() => ({ meta: { frameWidth: 160, frameHeight: 14, frameCount: 9 } })),
+      drawFrame: vi.fn(),
+      getFont: vi.fn((name: string) => name === 'metal12' ? metalFont : null),
+    };
+    (renderer as any)._cachedAssets = assets;
+
+    renderer.renderTopBar(1);
+
+    expect(assets.getFont).toHaveBeenCalledWith('metal12');
+    expect(metalFont.drawText).toHaveBeenCalledWith(
+      expect.anything(),
+      'Options',
+      80,
+      0,
+      '#efefef',
+      expect.objectContaining({ align: 'center', indexedPalette: expect.any(Array), letterSpacing: 1 }),
+    );
+    expect(metalFont.drawText).toHaveBeenCalledWith(
+      expect.anything(),
+      '1000',
+      560,
+      0,
+      '#efefef',
+      expect.objectContaining({ align: 'center', indexedPalette: expect.any(Array), letterSpacing: 1 }),
+    );
   });
 });

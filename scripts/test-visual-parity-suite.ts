@@ -105,6 +105,7 @@ function tsUrl(scenario: string): string {
   url.searchParams.set('anttest', 'agent');
   url.searchParams.set('scenario', scenario);
   url.searchParams.set('difficulty', 'normal');
+  url.searchParams.set('seed', '0');
   if (TS_FOG_MODE) url.searchParams.set('fog', TS_FOG_MODE);
   return addHarnessNoise(url, scenario, 'ts');
 }

@@ -712,8 +712,16 @@ export default function AntGame({ onExit }: AntGameProps) {
         }
       }
 
-      import('./engine/agentHarness').then(({ installHarness }) => {
-        game.start(scenarioId, diff).then(() => {
+      let cancelled = false;
+      void (async () => {
+        try {
+          const { installHarness } = await import('./engine/agentHarness');
+          if (cancelled) return;
+          await game.start(scenarioId, diff);
+          if (cancelled) {
+            game.stop();
+            return;
+          }
           game.pause();
           if (!preserveSourceFog) game.disableFog();
           // C++ parity: scenario load has already consumed init-time RNG.
@@ -721,13 +729,16 @@ export default function AntGame({ onExit }: AntGameProps) {
           game.consumeInitRNG();
           game.step(0); // render-only — don't advance game state (C++ parity: tick 0 at harness init)
           installHarness(game);
-        }).catch((err) => {
-          console.error('Agent harness: game start failed', err);
-          setError(String(err));
-        });
-      });
+        } catch (err) {
+          if (!cancelled) {
+            console.error('Agent harness: game start failed', err);
+            setError(String(err));
+          }
+        }
+      })();
 
       return () => {
+        cancelled = true;
         game.stop();
         gameRef.current = null;
         const w = window as unknown as Record<string, unknown>;
