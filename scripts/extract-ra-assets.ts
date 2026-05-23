@@ -302,6 +302,8 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['HIRES.MIX', 'STRIPUP.SHP', 'stripup'],   // Scroll up arrow (3 frames: up/down/disabled)
   ['HIRES.MIX', 'STRIPDN.SHP', 'stripdn'],   // Scroll down arrow (3 frames)
   ['HIRES.MIX', 'POWER.SHP', 'power_marker'], // Power bar drain level marker
+  ['HIRES.MIX', 'NATORADR.SHP', 'natoradr'],   // Allied radar cover animation
+  ['HIRES.MIX', 'USSRRADR.SHP', 'ussrradr'],   // Soviet radar cover animation
   ['HIRES.MIX', 'SIDE1NA.SHP', 'side1na'],   // Allied sidebar top section
   ['HIRES.MIX', 'SIDE2NA.SHP', 'side2na'],   // Allied sidebar middle section
   ['HIRES.MIX', 'SIDE3NA.SHP', 'side3na'],   // Allied sidebar bottom section

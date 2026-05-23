@@ -1476,22 +1476,22 @@
     "sheetHeight": 12
   },
   "natoradr": {
-    "frameWidth": 80,
-    "frameHeight": 80,
-    "frameCount": 42,
+    "frameWidth": 160,
+    "frameHeight": 141,
+    "frameCount": 43,
     "columns": 16,
     "rows": 3,
-    "sheetWidth": 1280,
-    "sheetHeight": 240
+    "sheetWidth": 2560,
+    "sheetHeight": 423
   },
   "ussrradr": {
-    "frameWidth": 80,
-    "frameHeight": 80,
-    "frameCount": 42,
+    "frameWidth": 160,
+    "frameHeight": 141,
+    "frameCount": 43,
     "columns": 16,
     "rows": 3,
-    "sheetWidth": 1280,
-    "sheetHeight": 240
+    "sheetWidth": 2560,
+    "sheetHeight": 423
   },
   "side1na": {
     "frameWidth": 160,

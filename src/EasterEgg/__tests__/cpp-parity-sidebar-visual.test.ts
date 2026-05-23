@@ -224,10 +224,14 @@ describe('sidebar production visuals', () => {
     const assets = {
       getSheet: (name: string) => {
         if (['side1na', 'side2na', 'side3na', 'natoradr'].includes(name)) {
-          return { meta: { frameWidth: 80, frameHeight: 80, frameCount: 42 } };
+          return name === 'natoradr'
+            ? { meta: { frameWidth: 160, frameHeight: 141, frameCount: 43 } }
+            : { meta: { frameWidth: 80, frameHeight: 80, frameCount: 42 } };
         }
         if (['side1us', 'side2us', 'side3us', 'ussrradr'].includes(name)) {
-          return { meta: { frameWidth: 80, frameHeight: 80, frameCount: 42 } };
+          return name === 'ussrradr'
+            ? { meta: { frameWidth: 160, frameHeight: 141, frameCount: 43 } }
+            : { meta: { frameWidth: 80, frameHeight: 80, frameCount: 42 } };
         }
         return null;
       },
@@ -251,7 +255,6 @@ describe('sidebar production visuals', () => {
       expect.any(Number),
       expect.any(Number),
       expect.any(Number),
-      expect.anything(),
     );
     expect(drawFrame).not.toHaveBeenCalledWith(
       expect.anything(),
@@ -267,7 +270,6 @@ describe('sidebar production visuals', () => {
       expect.any(Number),
       expect.any(Number),
       expect.any(Number),
-      expect.anything(),
     );
   });
 

@@ -108,13 +108,13 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
 
       for (const sprite of ['natoradr', 'ussrradr']) {
         expect(manifest[sprite], `${sprite}.png exists and must be loadable through AssetManager`).toEqual({
-          frameWidth: 80,
-          frameHeight: 80,
-          frameCount: 42,
+          frameWidth: 160,
+          frameHeight: 141,
+          frameCount: 43,
           columns: 16,
           rows: 3,
-          sheetWidth: 1280,
-          sheetHeight: 240,
+          sheetWidth: 2560,
+          sheetHeight: 423,
         });
       }
     });
@@ -332,9 +332,10 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
       const r = new Renderer(mockCanvas());
       r.hasRadar = false;
       r.doesRadarExist = false;
+      const radarMeta = { frameWidth: 160, frameHeight: 141, frameCount: 43, columns: 16, rows: 3, sheetWidth: 2560, sheetHeight: 423 };
       const assets = {
         getSheet: vi.fn((name: string) => name === 'natoradr'
-          ? { image: {}, meta: { frameWidth: 80, frameHeight: 80, frameCount: 42, columns: 16, rows: 3, sheetWidth: 1280, sheetHeight: 240 } }
+          ? { image: {}, meta: radarMeta }
           : undefined),
         drawFrame: vi.fn(),
       };
@@ -348,7 +349,6 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
         0,
         mockCanvas().width - 80 * RESFACTOR,
         8 * RESFACTOR,
-        { scale: RESFACTOR },
       );
     });
 
@@ -356,9 +356,10 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
       const r = new Renderer(mockCanvas());
       r.hasRadar = false;
       r.doesRadarExist = true;
+      const radarMeta = { frameWidth: 160, frameHeight: 141, frameCount: 43, columns: 16, rows: 3, sheetWidth: 2560, sheetHeight: 423 };
       const assets = {
         getSheet: vi.fn((name: string) => name === 'natoradr'
-          ? { image: {}, meta: { frameWidth: 80, frameHeight: 80, frameCount: 42, columns: 16, rows: 3, sheetWidth: 1280, sheetHeight: 240 } }
+          ? { image: {}, meta: radarMeta }
           : undefined),
         drawFrame: vi.fn(),
       };
@@ -372,7 +373,6 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
         41,
         expect.any(Number),
         expect.any(Number),
-        { scale: RESFACTOR },
       );
     });
 
@@ -381,9 +381,10 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
       r.hasRadar = false;
       r.doesRadarExist = false;
       r.radarCoverFrame = 7;
+      const radarMeta = { frameWidth: 160, frameHeight: 141, frameCount: 43, columns: 16, rows: 3, sheetWidth: 2560, sheetHeight: 423 };
       const assets = {
         getSheet: vi.fn((name: string) => name === 'natoradr'
-          ? { image: {}, meta: { frameWidth: 80, frameHeight: 80, frameCount: 42, columns: 16, rows: 3, sheetWidth: 1280, sheetHeight: 240 } }
+          ? { image: {}, meta: radarMeta }
           : undefined),
         drawFrame: vi.fn(),
       };
@@ -397,7 +398,6 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
         7,
         expect.any(Number),
         expect.any(Number),
-        { scale: RESFACTOR },
       );
     });
   });

@@ -3385,7 +3385,7 @@ export class Renderer {
    *   - Frame 0: ornate radar panel with faction emblem (no DOME built)
    *   - Frame 41 (MAX_RADAR_FRAMES): dark cover plate (DOME exists, no power)
    * C++ logic: val = DoesRadarExist ? MAX_RADAR_FRAMES : 0
-   * Nearest-neighbor scaling preserves pixel art (no bilinear blur).
+   * HIRES.MIX frames are already in 640x400 pixel coordinates; draw unscaled.
    */
   private drawRadarCoverPlate(ctx: CanvasRenderingContext2D, _x: number, _y: number, _size: number, assets?: AssetManager): void {
     const isAllied = this.isPlayerAllied();
@@ -3398,10 +3398,10 @@ export class Renderer {
       // C++ radar.h: RADAR_ACTIVATED_FRAME=22, MAX_RADAR_FRAMES=41
       // DoesRadarExist -> frame 41 (closed cover plate), !DoesRadarExist -> frame 0 (ornate panel)
       const frame = this.radarCoverFrame ?? (this.doesRadarExist ? 41 : 0);
-      // Preserve pixel art with nearest-neighbor scaling
+      // Preserve pixel art for the unscaled HIRES frame.
       const prevSmoothing = ctx.imageSmoothingEnabled;
       ctx.imageSmoothingEnabled = false;
-      assets!.drawFrame(ctx, sheetName, frame, x, y, { scale: RESFACTOR });
+      assets!.drawFrame(ctx, sheetName, frame, x, y);
       ctx.imageSmoothingEnabled = prevSmoothing;
       return;
     }
