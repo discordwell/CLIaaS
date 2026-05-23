@@ -38,7 +38,7 @@ import {
   buildDefaultAlliances, modifyDamage, getWarheadMultiplier,
   SuperweaponType, SUPERWEAPON_DEFS, getStripSide,
 } from '../engine/types';
-import { Entity, resetEntityIds, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION } from '../engine/entity';
+import { Entity, resetEntityIds, CloakState, CLOAK_TRANSITION_FRAMES } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
 import type { MapStructure } from '../engine/scenario';
 import { STRUCTURE_SIZE, STRUCTURE_MAX_HP } from '../engine/scenario';
@@ -559,9 +559,9 @@ function makeFogContext(overrides: Partial<FogContext> = {}): FogContext {
 }
 
 describe('updateSubDetection — behavioral edge cases', () => {
-  it('C++ parity: global sonar detects distant subs when player has anti-sub (house.cpp:2622-2632)', () => {
-    // C++ sonar pulse iterates ALL vessels with no distance check — global sweep.
-    // When the player has an anti-sub unit, distant subs ARE detected.
+  it('C++ parity: passive anti-sub scanner does not detect distant subs', () => {
+    // C++ sonar pulse is a superweapon path. Passive scanner detection is only
+    // FootClass::Per_Cell_Process adjacency.
     const detector = makeEntity(UnitType.V_DD, House.Spain, 100, 100);
     const sub = makeEntity(UnitType.V_SS, House.USSR, 100 + CELL_SIZE * 50, 100);
     sub.cloakState = CloakState.CLOAKED;
@@ -569,7 +569,7 @@ describe('updateSubDetection — behavioral edge cases', () => {
     const ctx = makeFogContext({ entities: [detector, sub] });
     updateSubDetection(ctx);
 
-    expect(sub.cloakState).toBe(CloakState.UNCLOAKING);
+    expect(sub.cloakState).toBe(CloakState.CLOAKED);
   });
 
   it('C++ parity: scanner detects cloaked sub in adjacent cell (foot.cpp:1373-1386)', () => {
@@ -583,7 +583,7 @@ describe('updateSubDetection — behavioral edge cases', () => {
     updateSubDetection(ctx);
 
     expect(sub.cloakState).toBe(CloakState.UNCLOAKING);
-    expect(sub.sonarPulseTimer).toBe(SONAR_PULSE_DURATION);
+    expect(sub.sonarPulseTimer).toBe(0);
   });
 
   it('detects sub in CLOAKING state (mid-transition)', () => {
@@ -647,7 +647,7 @@ describe('updateSubDetection — behavioral edge cases', () => {
     updateSubDetection(ctx);
 
     expect(sub.cloakState).toBe(CloakState.UNCLOAKING);
-    expect(sub.sonarPulseTimer).toBe(SONAR_PULSE_DURATION);
+    expect(sub.sonarPulseTimer).toBe(0);
   });
 
   it('dead detector does not detect', () => {
@@ -755,9 +755,18 @@ function makeProductionContext(overrides: Partial<ProductionContext> = {}): Prod
 }
 
 describe('getAvailableItems — from production.ts', () => {
-  it('returns empty array when base is not discovered', () => {
-    const ctx = makeProductionContext({ baseDiscovered: false });
-    expect(getAvailableItems(ctx)).toEqual([]);
+  it('ignores legacy baseDiscovered when computing available items', () => {
+    const undiscovered = makeProductionContext({
+      baseDiscovered: false,
+      hasBuilding: (type: string) => type === 'TENT' || type === 'BARR',
+    });
+    const discovered = makeProductionContext({
+      baseDiscovered: true,
+      hasBuilding: (type: string) => type === 'TENT' || type === 'BARR',
+    });
+
+    expect(getAvailableItems(undiscovered).map(item => item.type).sort())
+      .toEqual(getAvailableItems(discovered).map(item => item.type).sort());
   });
 
   it('filters by prerequisite building', () => {

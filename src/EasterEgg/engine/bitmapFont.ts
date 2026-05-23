@@ -17,6 +17,14 @@ export interface BitmapFontMeta {
   glyphs: Record<string, { ax: number; ay: number; w: number; h: number; topBlank: number }>;
 }
 
+export interface BitmapFontDrawOptions {
+  align?: 'left' | 'center' | 'right';
+  shadow?: string;
+  fullShadow?: string;
+  scale?: number;
+  gradient?: readonly string[];
+}
+
 export class BitmapFont {
   private atlas: HTMLImageElement;
   private meta: BitmapFontMeta;
@@ -31,8 +39,9 @@ export class BitmapFont {
   /** Get or create a tinted version of the atlas for the given color.
    *  The extracted atlas is white-on-transparent. We tint it by drawing
    *  the color over the atlas using 'source-atop' composite. */
-  private getTintedAtlas(color: string): HTMLCanvasElement {
-    const cached = this.tintCache.get(color);
+  private getTintedAtlas(color: string, gradient?: readonly string[]): HTMLCanvasElement {
+    const key = gradient?.length ? `gradient:${gradient.join('|')}` : color;
+    const cached = this.tintCache.get(key);
     if (cached) return cached;
 
     const c = document.createElement('canvas');
@@ -45,11 +54,23 @@ export class BitmapFont {
 
     // Tint: fill with color only where atlas has pixels
     ctx.globalCompositeOperation = 'source-atop';
-    ctx.fillStyle = color;
-    ctx.fillRect(0, 0, c.width, c.height);
+    if (gradient?.length) {
+      for (let row = 0; row < c.height; row++) {
+        const rowInCell = row % this.meta.cellHeight;
+        const rampIndex = Math.min(
+          gradient.length - 1,
+          Math.floor(rowInCell * gradient.length / this.meta.cellHeight),
+        );
+        ctx.fillStyle = gradient[rampIndex];
+        ctx.fillRect(0, row, c.width, 1);
+      }
+    } else {
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, c.width, c.height);
+    }
     ctx.globalCompositeOperation = 'source-over';
 
-    this.tintCache.set(color, c);
+    this.tintCache.set(key, c);
     return c;
   }
 
@@ -69,6 +90,7 @@ export class BitmapFont {
    *  Options:
    *    align: 'left' (default) | 'center' | 'right'
    *    shadow: color string for 1px drop shadow (C++ TPF_DROPSHADOW)
+   *    fullShadow: color string for outline shadow (C++ TPF_FULLSHADOW)
    *    scale: integer multiplier (default 1) */
   drawText(
     ctx: CanvasRenderingContext2D,
@@ -76,7 +98,7 @@ export class BitmapFont {
     x: number,
     y: number,
     color: string,
-    options?: { align?: 'left' | 'center' | 'right'; shadow?: string; scale?: number },
+    options?: BitmapFontDrawOptions,
   ): void {
     const align = options?.align ?? 'left';
     const shadow = options?.shadow;
@@ -90,13 +112,24 @@ export class BitmapFont {
     const prevSmooth = ctx.imageSmoothingEnabled;
     ctx.imageSmoothingEnabled = false;
 
+    if (options?.fullShadow) {
+      const shadowOffsets = [
+        [-1, -1], [0, -1], [1, -1],
+        [-1, 0],           [1, 0],
+        [-1, 1],  [0, 1],  [1, 1],
+      ] as const;
+      for (const [dx, dy] of shadowOffsets) {
+        this.blitText(ctx, text, drawX + dx * scale, y + dy * scale, options.fullShadow, scale);
+      }
+    }
+
     // Draw shadow first (1px offset down-right)
     if (shadow) {
       this.blitText(ctx, text, drawX + scale, y + scale, shadow, scale);
     }
 
     // Draw foreground
-    this.blitText(ctx, text, drawX, y, color, scale);
+    this.blitText(ctx, text, drawX, y, color, scale, options?.gradient);
 
     ctx.imageSmoothingEnabled = prevSmooth;
   }
@@ -109,8 +142,9 @@ export class BitmapFont {
     y: number,
     color: string,
     scale: number,
+    gradient?: readonly string[],
   ): void {
-    const tinted = this.getTintedAtlas(color);
+    const tinted = this.getTintedAtlas(color, gradient);
     let cx = Math.round(x);
 
     for (let i = 0; i < text.length; i++) {

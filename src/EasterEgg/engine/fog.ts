@@ -45,7 +45,8 @@ export interface FogContext {
   /** C++ house.h:268 IsGPSActive — GPS satellite has been launched, full map vision active.
    *  Set by superweapon system when GPS fires, cleared when ATEK destroyed (house.cpp:1420-1425). */
   gpsActive: boolean;
-  baseDiscovered: boolean;
+  /** Legacy compatibility field; C++ structure sight is not gated by base discovery. */
+  baseDiscovered?: boolean;
   /** rules.ini/scenario [General] AllyReveal. Defaults to true for older tests. */
   allyReveal?: boolean;
   powerProduced: number;
@@ -93,23 +94,19 @@ export function updateFogOfWar(ctx: FogContext): void {
     }
   }
 
-  // Structures only reveal fog after the player has discovered their base.
-  // In ant missions, the base is hidden until a unit gets close (checkBaseDiscovery).
   // C++ All_To_Look(units_only=true) at init skips buildings; per-tick sight includes them.
-  if (ctx.baseDiscovered) {
-    for (const s of ctx.structures) {
-      const revealsForPlayer =
-        s.house === ctx.playerHouse ||
-        ((ctx.allyReveal ?? true) && ctx.isAllied(s.house, ctx.playerHouse));
-      if (s.alive && revealsForPlayer) {
-        // C++ building.cpp uses Class->SightRange directly — no health reduction.
-        const sight = STRUCTURE_SIGHT[s.type] ?? 5;
-        // C++ map.cpp:296: if (!sightrange || sightrange > 10) return;
-        if (!sight || sight > 10) continue;
-        const wx = s.cx * CELL_SIZE + CELL_SIZE / 2;
-        const wy = s.cy * CELL_SIZE + CELL_SIZE / 2;
-        units.push({ x: wx, y: wy, sight });
-      }
+  for (const s of ctx.structures) {
+    const revealsForPlayer =
+      s.house === ctx.playerHouse ||
+      ((ctx.allyReveal ?? true) && ctx.isAllied(s.house, ctx.playerHouse));
+    if (s.alive && revealsForPlayer) {
+      // C++ building.cpp uses Class->SightRange directly — no health reduction.
+      const sight = STRUCTURE_SIGHT[s.type] ?? 5;
+      // C++ map.cpp:296: if (!sightrange || sightrange > 10) return;
+      if (!sight || sight > 10) continue;
+      const wx = s.cx * CELL_SIZE + CELL_SIZE / 2;
+      const wy = s.cy * CELL_SIZE + CELL_SIZE / 2;
+      units.push({ x: wx, y: wy, sight });
     }
   }
 

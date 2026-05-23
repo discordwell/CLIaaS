@@ -52,6 +52,17 @@ const HOUSE_MINIMAP_COLOR: Record<string, string> = {
   [House.Special]: '#FFFFFF', // white (C++ HOUSE_SPECIAL — reinforcements/scripted)
 };
 
+// C++ TACTION_TEXT_TRIGGER: PCOLOR_GREEN with TPF_6PT_GRAD|TPF_USE_GRAD_PAL.
+// init.cpp fills FontRemap[10..15] from PALETTE.CPS row PCOLOR_GREEN columns 2..7.
+const PCOLOR_GREEN_FONT_RAMP = [
+  '#c7e786',
+  '#b2d37d',
+  '#9ebe75',
+  '#8aae6d',
+  '#799a65',
+  '#698a5d',
+] as const;
+
 // TEMPERATE.PAL palette index ranges for terrain rendering
 // These are the actual palette indices from the extracted TEMPERAT.PAL
 const PAL_GRASS_START = 144;  // indices 144-155: green terrain ramp (light→dark)
@@ -1007,7 +1018,13 @@ export class Renderer {
     text: string, x: number, y: number,
     color: string,
     size: '6pt' | '8pt' = '8pt',
-    options?: { align?: 'left' | 'center' | 'right'; shadow?: string; scale?: number },
+    options?: {
+      align?: 'left' | 'center' | 'right';
+      shadow?: string;
+      fullShadow?: string;
+      scale?: number;
+      gradient?: readonly string[];
+    },
   ): void {
     const fontName = size === '6pt' ? '6point' : '8point';
     const font = assets?.getFont(fontName);
@@ -1020,11 +1037,17 @@ export class Renderer {
     const fontSize = size === '6pt' ? 7 : 10;
     ctx.font = `bold ${fontSize}px monospace`;
     ctx.textAlign = options?.align ?? 'left';
+    if (options?.fullShadow) {
+      ctx.fillStyle = options.fullShadow;
+      for (const [dx, dy] of [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]] as const) {
+        ctx.fillText(text, x + dx, y + fontSize + dy);
+      }
+    }
     if (options?.shadow) {
       ctx.fillStyle = options.shadow;
       ctx.fillText(text, x + 1, y + fontSize + 1);
     }
-    ctx.fillStyle = color;
+    ctx.fillStyle = options?.gradient?.[0] ?? color;
     ctx.fillText(text, x, y + fontSize);
   }
 
@@ -3614,7 +3637,7 @@ export class Renderer {
   renderEvaMessages(tick: number): void {
     const ctx = this.ctx;
     const active = this.evaMessages
-      .filter(m => tick - m.tick < RA_MESSAGE_DELAY_TICKS)
+      .filter(m => tick > m.tick && tick - m.tick < RA_MESSAGE_DELAY_TICKS)
       .slice(-6);
     if (active.length === 0) return;
 
@@ -3625,7 +3648,8 @@ export class Renderer {
       const alpha = age < fadeStart ? 1.0 : 1.0 - (age - fadeStart) / 15;
       ctx.globalAlpha = alpha;
       this.drawBitmapText(this._cachedAssets, msg.text,
-        0, (8 + i * 7) * RESFACTOR, '#00FF00', '6pt', { align: 'left' });
+        0, (8 + i * 7) * RESFACTOR, PCOLOR_GREEN_FONT_RAMP[0], '6pt',
+        { align: 'left', fullShadow: '#000000', gradient: PCOLOR_GREEN_FONT_RAMP });
     });
     ctx.globalAlpha = 1;
   }

@@ -13,6 +13,15 @@ import { Renderer } from '../engine/renderer';
 import { getTutorialText, RA_MESSAGE_DELAY_TICKS } from '../engine/tutorialText';
 import { RESFACTOR } from '../engine/types';
 
+const PCOLOR_GREEN_FONT_RAMP = [
+  '#c7e786',
+  '#b2d37d',
+  '#9ebe75',
+  '#8aae6d',
+  '#799a65',
+  '#698a5d',
+] as const;
+
 function mockCanvas(): HTMLCanvasElement {
   return {
     width: 640,
@@ -89,9 +98,9 @@ describe('MessageListClass visual placement', () => {
       'Find Einstein.',
       0,
       8 * RESFACTOR,
-      '#00FF00',
+      PCOLOR_GREEN_FONT_RAMP[0],
       '6pt',
-      { align: 'left' },
+      { align: 'left', fullShadow: '#000000', gradient: PCOLOR_GREEN_FONT_RAMP },
     ]);
     expect(drawBitmapText.mock.calls[1][3]).toBe(15 * RESFACTOR);
     expect(drawBitmapText.mock.calls[2][3]).toBe(22 * RESFACTOR);
@@ -109,5 +118,18 @@ describe('MessageListClass visual placement', () => {
     drawBitmapText.mockClear();
     renderer.renderEvaMessages(RA_MESSAGE_DELAY_TICKS);
     expect(drawBitmapText).not.toHaveBeenCalled();
+  });
+
+  it('does not draw messages added during the current logic tick', () => {
+    const renderer = new Renderer(mockCanvas());
+    const drawBitmapText = vi.fn();
+    (renderer as any).drawBitmapText = drawBitmapText;
+    renderer.evaMessages = [{ text: 'Keep the Chronosphere on-line', tick: 1 }];
+
+    renderer.renderEvaMessages(1);
+    expect(drawBitmapText).not.toHaveBeenCalled();
+
+    renderer.renderEvaMessages(2);
+    expect(drawBitmapText).toHaveBeenCalledTimes(1);
   });
 });

@@ -581,14 +581,15 @@ describe('C++ Parity: ConYard requirement for production', () => {
     expect(navalSoviet.length, 'Soviet naval units from SPEN').toBeGreaterThan(0);
   });
 
-  it('no items when base not discovered', () => {
-    // C++ sidebar only populated after base detected
+  it('legacy baseDiscovered does not hide production items', () => {
+    // C++ sidebar availability is based on factories/prereqs, not a separate
+    // distance-based base-discovery flag.
     const ctx = makeProductionCtx({
       baseDiscovered: false,
       hasBuilding: () => true,
     });
     const items = getAvailableItems(ctx);
-    expect(items.length).toBe(0);
+    expect(items.length).toBeGreaterThan(0);
   });
 
   it('losing ConYard removes structure options', () => {
@@ -601,10 +602,8 @@ describe('C++ Parity: ConYard requirement for production', () => {
     // Items with prerequisite 'FACT' should NOT appear
     const factReqItems = items.filter(i => i.prerequisite === 'FACT');
     expect(factReqItems.length).toBe(0);
-    // Items with prerequisite 'POWR' (like SYRD) should appear
-    // (but only if faction matches and tech level is met)
-    const powrReqItems = items.filter(i => i.prerequisite === 'POWR');
-    expect(powrReqItems.length).toBeGreaterThan(0);
+    // BuildingTypeClass production still requires an active construction yard.
+    expect(items.some(i => i.isStructure)).toBe(false);
   });
 });
 

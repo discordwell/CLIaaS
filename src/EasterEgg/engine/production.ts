@@ -30,7 +30,8 @@ export interface ProductionContext {
   playerHouse: House;
   playerFaction: Faction;
   playerTechLevel: number;
-  baseDiscovered: boolean;
+  /** Legacy compatibility field; C++ production is not gated by base discovery. */
+  baseDiscovered?: boolean;
   scenarioProductionItems: ProductionItem[];
   productionQueue: Map<string, { item: ProductionItem; progress: number; queueCount: number; costPaid: number; powerMult: number }>;
   pendingPlacement: ProductionItem | null;
@@ -146,8 +147,6 @@ export function countPlayerBuildings(
 
 /** Get buildable items based on current structures + faction + tech prereqs */
 export function getAvailableItems(ctx: ProductionContext): ProductionItem[] {
-  // No production until player discovers their base
-  if (!ctx.baseDiscovered) return [];
   return ctx.scenarioProductionItems.filter(item => {
     // BuildingTypeClass production requires an active construction yard/factory.
     // Tech prerequisites such as PROC/ATEK unlock specific buildings, but they

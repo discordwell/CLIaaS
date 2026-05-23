@@ -425,11 +425,11 @@ describe('Fog disabled mode', () => {
 });
 
 // ========================================================================
-// 5b. Base discovery gate — C++ All_To_Look(units_only=true)
+// 5b. Legacy baseDiscovered does not gate structure sight
 // ========================================================================
 
-describe('Base discovery fog gate', () => {
-  it('structures do NOT reveal fog when baseDiscovered is false', () => {
+describe('Structure fog sight ignores legacy baseDiscovered', () => {
+  it('structures reveal fog when baseDiscovered is false', () => {
     setPlayerHouses(new Set([House.Greece]));
     const map = createClearMap();
     const s = mockStructure('FACT', 64, 64, House.Greece);
@@ -442,11 +442,10 @@ describe('Base discovery fog gate', () => {
 
     updateFogOfWar(ctx);
 
-    // No cells should be visible — no units and structures gated behind baseDiscovered
-    expect(countVis(map, 2)).toBe(0);
+    expect(countVis(map, 2)).toBeGreaterThan(0);
   });
 
-  it('structures DO reveal fog when baseDiscovered is true', () => {
+  it('baseDiscovered true reveals the same structure sight', () => {
     setPlayerHouses(new Set([House.Greece]));
     const map = createClearMap();
     const s = mockStructure('FACT', 64, 64, House.Greece);
@@ -459,7 +458,6 @@ describe('Base discovery fog gate', () => {
 
     updateFogOfWar(ctx);
 
-    // Structure should reveal cells around it
     expect(countVis(map, 2)).toBeGreaterThan(0);
   });
 
@@ -510,7 +508,7 @@ describe('Cloaked unit visibility', () => {
     expect(CloakState.UNCLOAKING).toBe(3);
   });
 
-  it('updateSubDetection force-uncloaks subs within destroyer sight', () => {
+  it('updateSubDetection force-uncloaks subs adjacent to a scanner', () => {
     setPlayerHouses(new Set([House.Greece]));
     // Destroyer (anti-sub) at position (50,50)
     const dd = new Entity(UnitType.V_DD, House.Greece, 50 * CELL_SIZE, 50 * CELL_SIZE);
@@ -526,10 +524,11 @@ describe('Cloaked unit visibility', () => {
 
     updateSubDetection(ctx);
 
-    // Sub should be forced into UNCLOAKING with sonarPulseTimer set
+    // Scanner adjacency calls Do_Shimmer()/Do_Uncloak; PulseCountDown is only
+    // set by the explicit sonar pulse superweapon.
     expect(sub.cloakState).toBe(CloakState.UNCLOAKING);
     expect(sub.cloakTimer).toBe(CLOAK_TRANSITION_FRAMES);
-    expect(sub.sonarPulseTimer).toBe(SONAR_PULSE_DURATION);
+    expect(sub.sonarPulseTimer).toBe(0);
   });
 
   it('destroyer has isAntiSub flag', () => {
@@ -546,7 +545,7 @@ describe('Cloaked unit visibility', () => {
     expect(sub.cloakTimer).toBe(CLOAK_TRANSITION_FRAMES);
   });
 
-  it('sonarPulseTimer prevents recloak — sub stays UNCLOAKED after detection', () => {
+  it('scanner adjacency does not start the sonar pulse recloak timer', () => {
     setPlayerHouses(new Set([House.Greece]));
     const dd = new Entity(UnitType.V_DD, House.Greece, 50 * CELL_SIZE, 50 * CELL_SIZE);
     const sub = new Entity(UnitType.V_SS, House.USSR, 51 * CELL_SIZE, 50 * CELL_SIZE);
@@ -558,15 +557,9 @@ describe('Cloaked unit visibility', () => {
       entitiesAllied: (a, b) => a.house === b.house,
     });
 
-    // Detect sub
     updateSubDetection(ctx);
-    expect(sub.sonarPulseTimer).toBe(SONAR_PULSE_DURATION);
-    expect(sub.sonarPulseTimer).toBe(225);
-
-    // After uncloaking completes, sonarPulseTimer should still be > 0
-    sub.cloakState = CloakState.UNCLOAKED;
-    sub.cloakTimer = 0;
-    expect(sub.sonarPulseTimer).toBeGreaterThan(0);
+    expect(sub.cloakState).toBe(CloakState.UNCLOAKING);
+    expect(sub.sonarPulseTimer).toBe(0);
   });
 });
 
@@ -583,7 +576,7 @@ describe('Sonar pulse', () => {
     expect(SONAR_REVEAL_TICKS).toBe(225);
   });
 
-  it('updateSubDetection sets sonarPulseTimer = SONAR_PULSE_DURATION on detected subs', () => {
+  it('updateSubDetection does not set sonarPulseTimer for scanner adjacency', () => {
     setPlayerHouses(new Set([House.Greece]));
     const dd = new Entity(UnitType.V_DD, House.Greece, 50 * CELL_SIZE, 50 * CELL_SIZE);
     const sub = new Entity(UnitType.V_SS, House.USSR, 51 * CELL_SIZE, 50 * CELL_SIZE);
@@ -595,7 +588,8 @@ describe('Sonar pulse', () => {
     });
 
     updateSubDetection(ctx);
-    expect(sub.sonarPulseTimer).toBe(SONAR_PULSE_DURATION);
+    expect(sub.cloakState).toBe(CloakState.UNCLOAKING);
+    expect(sub.sonarPulseTimer).toBe(0);
   });
 
   it('SONAR_REVEAL_TICKS constant matches SONAR_PULSE_DURATION (C++ parity)', () => {

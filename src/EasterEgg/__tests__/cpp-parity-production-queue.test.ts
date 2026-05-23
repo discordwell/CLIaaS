@@ -1142,20 +1142,23 @@ describe('C++ parity: queue count limits', () => {
 });
 
 // ============================================================
-// Section 13: Base discovery gate
+// Section 13: Base discovery is not a production gate
 // ============================================================
-describe('C++ parity: base discovery gates production', () => {
+describe('C++ parity: base discovery does not gate production', () => {
 
-  it('no items available before base is discovered', () => {
+  it('items remain available when legacy baseDiscovered is false', () => {
     const ctx = makeContext({ baseDiscovered: false });
     const available = getAvailableItems(ctx);
-    expect(available.length).toBe(0);
+    expect(available.length).toBeGreaterThan(0);
   });
 
-  it('items become available after base discovery', () => {
+  it('baseDiscovered does not change availability', () => {
+    const before = getAvailableItems(makeContext({ baseDiscovered: false, playerTechLevel: 15 }))
+      .map(item => item.type)
+      .sort();
     const ctx = makeContext({ baseDiscovered: true, playerTechLevel: 15 });
-    const available = getAvailableItems(ctx);
-    expect(available.length).toBeGreaterThan(0);
+    const after = getAvailableItems(ctx).map(item => item.type).sort();
+    expect(before).toEqual(after);
   });
 });
 

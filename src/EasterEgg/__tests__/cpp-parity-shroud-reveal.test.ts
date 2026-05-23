@@ -579,8 +579,9 @@ describe('Structure sight ranges (C++ building.cpp SightRange)', () => {
     expect(STRUCTURE_SIGHT['AFLD']).toBe(7);
   });
 
-  it('baseDiscovered=false skips structure sight entirely', () => {
-    // C++ All_To_Look(units_only=true) at init skips buildings
+  it('baseDiscovered=false still allows structure sight during fog update', () => {
+    // C++ All_To_Look(units_only=true) at init skips buildings, but per-tick
+    // building sight is not gated by a separate base-discovery flag.
     const map = new GameMap();
     const structure = makeStructure('DOME', House.Spain, 64, 64);
 
@@ -591,8 +592,7 @@ describe('Structure sight ranges (C++ building.cpp SightRange)', () => {
     });
 
     updateFogOfWar(ctx);
-    // Structures should NOT reveal when base is not discovered
-    expect(map.getVisibility(64, 64)).toBe(0);
+    expect(map.getVisibility(64, 64)).toBe(2);
   });
 });
 

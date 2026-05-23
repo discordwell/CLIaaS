@@ -803,7 +803,7 @@ describe('Scanner adjacency detection (foot.cpp:1373-1386)', () => {
 
     // DD isAntiSub=true, adjacent (1 cell) -> detection triggers
     expect(ss.cloakState).toBe(CloakState.UNCLOAKING);
-    expect(ss.sonarPulseTimer).toBe(SONAR_PULSE_DURATION);
+    expect(ss.sonarPulseTimer).toBe(0);
   });
 
   it('DD at 2-cell range does NOT trigger adjacency detection', () => {
@@ -814,12 +814,9 @@ describe('Scanner adjacency detection (foot.cpp:1373-1386)', () => {
     const ctx = makeFogCtx([dd, ss], House.Spain);
     updateSubDetection(ctx);
 
-    // TS fog.ts uses cellDx/cellDy <= 1 check (adjacency only)
-    // However, TS also has a global sonar sweep fallback — subs NOT within
-    // any scanner's sight range are detected globally.
-    // This behavior may cause the sub to be detected anyway.
-    // C++ does NOT have a global sweep outside of the explicit SPC_SONAR_PULSE.
-    // The TS fog.ts:161 global sweep is non-C++ behavior.
+    // C++ does NOT have a passive global sweep outside of explicit SPC_SONAR_PULSE.
+    expect(ss.cloakState).toBe(CloakState.CLOAKED);
+    expect(ss.sonarPulseTimer).toBe(0);
   });
 
   it('diagonal adjacency (1,1 offset) triggers detection', () => {
@@ -833,7 +830,7 @@ describe('Scanner adjacency detection (foot.cpp:1373-1386)', () => {
     // C++ checks all 8 adjacent cells (FACING_N through FACING_COUNT)
     // Diagonal adjacency qualifies
     expect(ss.cloakState).toBe(CloakState.UNCLOAKING);
-    expect(ss.sonarPulseTimer).toBe(SONAR_PULSE_DURATION);
+    expect(ss.sonarPulseTimer).toBe(0);
   });
 
   it('allied scanner does NOT detect allied sub', () => {
@@ -1048,19 +1045,13 @@ describe('Vehicle cloak (STNK/Phase Transport) shares state machine (techno.cpp)
 });
 
 // =============================================================================
-// 21. TS fog.ts global sonar sweep divergence
+// 21. Passive anti-sub scanners are adjacency-only
 // =============================================================================
 // C++ has two detection mechanisms:
 //   1. Explicit SPC_SONAR_PULSE superweapon — global, no range check
 //   2. Scanner adjacency — per-tick, 1-cell range, only for IsScanner units
-//
-// TS fog.ts:158-163 adds a THIRD mechanism not in C++:
-//   "global sonar sweep — when the player has anti-sub units, enemy subs
-//    NOT in any scanner's detection zone are detected globally."
-// This means TS detects subs at ANY distance whenever the player has a DD,
-// even without firing the sonar pulse superweapon.
 
-describe('TS fog.ts global sonar sweep divergence from C++', () => {
+describe('Passive anti-sub scanners match C++ adjacency rules', () => {
   function makeFogCtx(entities: Entity[]): FogContext {
     const alliances = buildDefaultAlliances();
     return {
@@ -1086,10 +1077,8 @@ describe('TS fog.ts global sonar sweep divergence from C++', () => {
     };
   }
 
-  it('TS detects CLOAKED sub at long range when player has any DD (non-C++ behavior)', () => {
-    // C++ would NOT detect a cloaked sub 50 cells away just because the player has a DD.
+  it('does not detect a CLOAKED sub at long range just because player has a DD', () => {
     // C++ only detects via adjacency (1 cell) or explicit sonar pulse superweapon.
-    // TS fog.ts:161: global sweep detects if sub is NOT within any scanner's sight range.
     const dd = entityAtCell(UnitType.V_DD, House.Spain, 10, 10);
     const ss = entityAtCell(UnitType.V_SS, House.USSR, 60, 60); // 50+ cells away
     ss.cloakState = CloakState.CLOAKED;
@@ -1097,11 +1086,8 @@ describe('TS fog.ts global sonar sweep divergence from C++', () => {
     const ctx = makeFogCtx([dd, ss]);
     updateSubDetection(ctx);
 
-    // TS: sub at long range, not near any scanner -> global sweep detects it
-    // C++ would NOT detect this sub (no adjacency, no sonar pulse fired)
-    // DESIGN NOTE: TS global sonar sweep is more aggressive than C++
-    expect(ss.cloakState).toBe(CloakState.UNCLOAKING); // TS behavior
-    // C++ expected: ss.cloakState would remain CLOAKED
+    expect(ss.cloakState).toBe(CloakState.CLOAKED);
+    expect(ss.sonarPulseTimer).toBe(0);
   });
 });
 
@@ -1109,10 +1095,8 @@ describe('TS fog.ts global sonar sweep divergence from C++', () => {
 // 22. Superweapon SONAR_REVEAL_TICKS vs C++ sonar pulse duration
 // =============================================================================
 // C++ house.cpp:2629: PulseCountDown = 15 * TICKS_PER_SECOND = 225
-// TS types.ts:783: SONAR_REVEAL_TICKS = 450 (30 seconds)
 // TS entity.ts:35: SONAR_PULSE_DURATION = 225 (15 seconds)
-// Two different values: SONAR_REVEAL_TICKS (450) used by superweapon system,
-// SONAR_PULSE_DURATION (225) used by entity/fog for adjacency detection.
+// SONAR_REVEAL_TICKS and SONAR_PULSE_DURATION both model explicit sonar pulse duration.
 
 describe('Sonar reveal duration constants', () => {
   it('SONAR_PULSE_DURATION matches C++ PulseCountDown (225 = 15 * 15)', () => {

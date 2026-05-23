@@ -760,8 +760,9 @@ export class Game {
   structuresBuilt = 0;
   structuresLost = 0;
 
-  // Base discovery — player must find their base before production is available
-  private baseDiscovered = false;
+  // Legacy compatibility flag for older subsystem contexts. C++ has no
+  // distance-based "discover your own base" production/fog gate.
+  private baseDiscovered = true;
 
   // AI autocreate flag — gated by trigger action
   private autocreateEnabled = false;
@@ -2134,7 +2135,7 @@ export class Game {
     this.baseRebuildQueue = [];
     this.baseRebuildCooldown = 0;
     this.autocreateEnabled = false;
-    this.baseDiscovered = false;
+    this.baseDiscovered = true;
     this.playerMappedCells.fill(0);
     this.productionQueue.clear();
     this.pendingPlacement = null;
@@ -3717,9 +3718,6 @@ export class Game {
     // advancement in tickProduction(), and let C++-ported House AI set build
     // selections instead of running this duplicate strategic layer.
     this.updateAIAutocreateTeams();
-
-    // Base discovery — check if a player unit is near any player structure
-    this.checkBaseDiscovery();
 
     // Tick production queue — advance build progress
     this.tickProduction();
@@ -14003,7 +14001,6 @@ export class Game {
       this.markPlayerMappedSight(e.cell.cx, e.cell.cy, e.stats.sight);
     }
     this.markMappedPlayerStructureSight();
-    if (!this.baseDiscovered) return;
     for (const s of this.structures) {
       if (!s.alive || !this.structureRevealsForPlayer(s)) continue;
       this.markPlayerMappedSight(s.cx, s.cy, STRUCTURE_SIGHT[s.type] ?? 5);
@@ -14040,7 +14037,6 @@ export class Game {
       }
     }
 
-    if (!this.baseDiscovered) return false;
     for (const s of this.structures) {
       if (!s.alive || !this.structureRevealsForPlayer(s)) continue;
       if (inSight(s.cx, s.cy, STRUCTURE_SIGHT[s.type] ?? 5)) return true;
@@ -14210,17 +14206,15 @@ export class Game {
       const small = dx > dy ? dy : dx;
       if (big * 2 + small <= sight * 2) return true;
     }
-    if (this.baseDiscovered) {
-      for (const s of this.structures) {
-        if (!s.alive || !this.structureRevealsForPlayer(s)) continue;
-        const sight = STRUCTURE_SIGHT[s.type] ?? 5;
-        if (!sight || sight > 10) continue;
-        const dx = Math.abs(s.cx - cx);
-        const dy = Math.abs(s.cy - cy);
-        const big = dx > dy ? dx : dy;
-        const small = dx > dy ? dy : dx;
-        if (big * 2 + small <= sight * 2) return true;
-      }
+    for (const s of this.structures) {
+      if (!s.alive || !this.structureRevealsForPlayer(s)) continue;
+      const sight = STRUCTURE_SIGHT[s.type] ?? 5;
+      if (!sight || sight > 10) continue;
+      const dx = Math.abs(s.cx - cx);
+      const dy = Math.abs(s.cy - cy);
+      const big = dx > dy ? dx : dy;
+      const small = dx > dy ? dy : dx;
+      if (big * 2 + small <= sight * 2) return true;
     }
     return false;
   }
@@ -15921,56 +15915,6 @@ export class Game {
         this.springDiscoveredTriggerByName(s.triggerName);
       }
     }
-  }
-
-  /** Check if a player unit has discovered the base (enables production) */
-  private checkBaseDiscovery(): void {
-    if (this.baseDiscovered) return;
-    for (const e of this.entities) {
-      if (!e.alive || !e.isPlayerUnit) continue;
-      for (const s of this.structures) {
-        if (!s.alive || !this.isAllied(s.house, this.playerHouse)) continue;
-        const dx = e.pos.x / CELL_SIZE - s.cx;
-        const dy = e.pos.y / CELL_SIZE - s.cy;
-        if (dx * dx + dy * dy < 25) { // 5-cell radius
-          this.baseDiscovered = true;
-          this.audio.play('eva_new_options');
-          this.showEvaMessage(10); // "Construction options available."
-          this.revealAroundCell(s.cx, s.cy, 10);
-          // C++ parity: no garrison spawn on base discovery — C++ has no
-          // equivalent mechanic. Reinforcements come from scenario triggers only.
-          return;
-        }
-      }
-    }
-  }
-
-  /** Spawn reinforcement infantry near barracks when base is first discovered */
-  private spawnBaseReinforcements(): void {
-    const barracks = this.structures.find(b =>
-      b.alive && b.type === 'TENT' && this.isAllied(b.house, this.playerHouse)
-    );
-    if (!barracks) return;
-    const bx = barracks.cx * CELL_SIZE + CELL_SIZE;
-    const by = barracks.cy * CELL_SIZE + CELL_SIZE * 2;
-    const types = [
-      UnitType.I_E1, UnitType.I_E1, UnitType.I_E1, // 3 Rifle soldiers
-      UnitType.I_E2, UnitType.I_E2,                 // 2 Grenadiers
-    ];
-    for (let i = 0; i < types.length; i++) {
-      const rx = bx + ((i % 3) - 1) * CELL_SIZE;
-      const ry = by + Math.floor(i / 3) * CELL_SIZE;
-	      const inf = new Entity(types[i], this.playerHouse, rx, ry);
-	      inf.mission = Mission.GUARD;
-	      this.markEntityCellOccupierDown(inf);
-	      this.entities.push(inf);
-	      this.entityById.set(inf.id, inf);
-      this.effects.push({
-        type: 'marker', x: rx, y: ry,
-        frame: 0, maxFrames: 15, size: 14, markerColor: 'rgba(100,200,255,1)',
-      });
-    }
-    this.audio.play('eva_reinforcements');
   }
 
   /** Handle trigger speech events (EVA voice lines) */

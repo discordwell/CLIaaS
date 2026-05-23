@@ -518,8 +518,9 @@ describe('Radar (DOME) building sight range from INI', () => {
     expect(map.getVisibility(domeCenterCx, 64)).toBe(2);
   });
 
-  it('DOME does NOT reveal when base is NOT discovered', () => {
-    // C++ All_To_Look(units_only=true) at init skips buildings
+  it('DOME reveals even when legacy baseDiscovered is false', () => {
+    // C++ All_To_Look(units_only=true) at init skips buildings, but normal
+    // per-tick building sight has no distance-based base-discovery gate.
     const map = new GameMap();
     const dome = {
       type: 'DOME', alive: true, hp: 256, maxHp: 256,
@@ -528,14 +529,13 @@ describe('Radar (DOME) building sight range from INI', () => {
     const ctx = makeFogContext({
       map,
       structures: [dome as any],
-      baseDiscovered: false, // not yet discovered
+      baseDiscovered: false,
       entities: [],
     });
 
     updateFogOfWar(ctx);
 
-    // No units, base not discovered — no cells should be visible
-    expect(map.getVisibility(64, 64)).toBe(0);
+    expect(map.getVisibility(64, 64)).toBe(2);
   });
 });
 

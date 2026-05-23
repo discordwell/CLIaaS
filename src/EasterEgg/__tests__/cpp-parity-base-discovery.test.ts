@@ -2,7 +2,7 @@
  * C++ Behavioral Parity Tests: Base Discovery
  *
  * Tests the discovery system: when enemy houses are discovered,
- * sight range requirements, flag transitions, and production gating.
+ * sight range requirements, flag transitions, and production availability.
  *
  * C++ Source References:
  *
@@ -43,10 +43,9 @@
  *       Revealed(PlayerPtr);
  *
  * TS Implementation:
- *   - index.ts: checkBaseDiscovery() — distance-based (5-cell radius), sets baseDiscovered flag
  *   - index.ts: checkDiscoveryTriggers() — visibility-based, sets houseDiscovered per-house
- *   - fog.ts: structures only reveal fog AFTER baseDiscovered is true
- *   - production.ts:92: getAvailableItems() returns [] if !baseDiscovered
+ *   - fog.ts: player/allied structures reveal fog during normal per-tick sight
+ *   - production.ts: getAvailableItems() is gated by C++ factories/prereqs, not baseDiscovered
  *   - ai.ts: createAIHouseState() sets isStarted = true by default
  */
 
@@ -421,36 +420,22 @@ describe('IsStarted — production gate (house.h:175)', () => {
 });
 
 // =============================================================================
-// 6. Player base discovery — TS-specific mechanic
-//    TS: checkBaseDiscovery() — distance-based, 5-cell radius
-//    C++ has NO equivalent. Production gated by IsStarted + triggers.
+// 6. Player base discovery — no C++ production gate
+//    C++ production is gated by IsStarted + factories/prereqs.
 // =============================================================================
 
-describe('Player base discovery — TS-specific (no C++ equivalent)', () => {
+describe('Player base discovery is not a production gate', () => {
   /**
    * C++ has no "base discovery" mechanic for the human player.
    * In C++, the player can build as soon as they have a Construction Yard
    * and the Begin_Production trigger fires (or IsStarted is set by MCV deploy).
-   *
-   * TS added checkBaseDiscovery() as a custom gameplay mechanic:
-   *   - Player units must be within 5 cells of a player structure
-   *   - Sets baseDiscovered = true
-   *   - Plays EVA announcement
-   *   - production.ts:92: getAvailableItems() returns [] if !baseDiscovered
-   *
-   * This is an intentional TS divergence, not a bug.
-   * The tests below document the behavior.
    */
 
-  it('DESIGN NOTE: TS gates player production on baseDiscovered; C++ does not', () => {
+  it('legacy baseDiscovered=false does not hide available production', () => {
     // C++ production is gated by IsStarted (house.h:175), which is
     // set by MCV deploy (unit.cpp:1549) or Begin_Production trigger.
     // There is no distance-check to a structure.
-    //
-    // TS production.ts:92: if (!ctx.baseDiscovered) return [];
-    // This blocks ALL production until a player unit is near a structure.
 
-    // Demonstrate: with baseDiscovered=false, no items available
     const map = new GameMap();
     map.setBounds(0, 0, 64, 64);
     const structures: MapStructure[] = [makeStructure('FACT', House.Spain, 30, 30)];
@@ -462,7 +447,7 @@ describe('Player base discovery — TS-specific (no C++ equivalent)', () => {
       playerHouse: House.Spain,
       playerFaction: 'allied',
       playerTechLevel: 10,
-      baseDiscovered: false, // <-- TS gate
+      baseDiscovered: false,
       scenarioProductionItems: PRODUCTION_ITEMS,
       productionQueue: new Map(),
       pendingPlacement: null,
@@ -473,47 +458,20 @@ describe('Player base discovery — TS-specific (no C++ equivalent)', () => {
     } as ProductionContext;
 
     const items = getAvailableItems(productionCtx);
-    expect(items).toHaveLength(0); // blocked by baseDiscovered=false
+    expect(items.length).toBeGreaterThan(0);
 
-    // With baseDiscovered=true, items become available
     productionCtx.baseDiscovered = true;
     const itemsAfter = getAvailableItems(productionCtx);
-    // Should have items (player has FACT = construction yard)
-    expect(itemsAfter.length).toBeGreaterThan(0); // DESIGN NOTE: intentional TS design — C++ would allow immediately
-  });
-
-  it('checkBaseDiscovery uses 5-cell euclidean distance', () => {
-    // TS index.ts:5811-5813:
-    //   const dx = e.pos.x / CELL_SIZE - s.cx;
-    //   const dy = e.pos.y / CELL_SIZE - s.cy;
-    //   if (dx * dx + dy * dy < 25) { // 5-cell radius
-    //
-    // C++ has no equivalent — this is a TS-only mechanic.
-    // The threshold is 25 = 5^2 (strict less-than).
-
-    // Unit at exactly 5 cells away: 5^2 = 25, NOT < 25, so NOT discovered
-    const atExactly5 = 5 * 5; // = 25
-    expect(atExactly5 < 25).toBe(false);
-
-    // Unit at 4.9 cells: 4.9^2 = 24.01, < 25, so discovered
-    const atSlightlyLess = 4.9 * 4.9; // = 24.01
-    expect(atSlightlyLess < 25).toBe(true);
-
-    // Unit at 3 cells diagonal: 3^2 + 3^2 = 18 < 25, discovered
-    expect(3 * 3 + 3 * 3 < 25).toBe(true);
-
-    // Unit at 4 cells diagonal: 4^2 + 4^2 = 32 >= 25, NOT discovered
-    expect(4 * 4 + 4 * 4 < 25).toBe(false);
+    expect(itemsAfter.map(item => item.type).sort()).toEqual(items.map(item => item.type).sort());
   });
 });
 
 // =============================================================================
-// 7. Fog of war — structures only reveal AFTER baseDiscovered
-//    TS fog.ts:85: if (ctx.baseDiscovered) { ... reveal from structures }
+// 7. Fog of war — structures are not gated by baseDiscovered
 //    C++ building.cpp:1137-1142: buildings always can be revealed
 // =============================================================================
 
-describe('Structure fog reveal gated by baseDiscovered — TS fog.ts:85', () => {
+describe('Structure fog reveal ignores legacy baseDiscovered', () => {
   /**
    * C++ building.cpp:1137-1142:
    *   if ((!IsDiscoveredByPlayer && Map[coord].IsVisible) || Session.Type != GAME_NORMAL)
@@ -522,11 +480,10 @@ describe('Structure fog reveal gated by baseDiscovered — TS fog.ts:85', () => 
    * Buildings in C++ are revealed normally — there is no gate on a "base discovered" flag.
    * Buildings provide sight from their SightRange as soon as they exist.
    *
-   * TS fog.ts:85: if (ctx.baseDiscovered) — structures only contribute to fog
-   * reveal AFTER the player has "discovered" their base. This is a TS design choice.
+   * Structures contribute to fog sight during normal per-tick updates.
    */
 
-  it('structures do not reveal fog when baseDiscovered is false', () => {
+  it('structures reveal fog when baseDiscovered is false', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 64, 64);
     const structures: MapStructure[] = [makeStructure('FACT', House.Spain, 30, 30)];
@@ -540,7 +497,7 @@ describe('Structure fog reveal gated by baseDiscovered — TS fog.ts:85', () => 
       playerHouse: House.Spain,
       fogDisabled: false,
       gpsActive: false,
-      baseDiscovered: false, // <-- key difference
+      baseDiscovered: false,
       powerProduced: 100,
       powerConsumed: 0,
       gapGeneratorCells: new Map(),
@@ -549,16 +506,11 @@ describe('Structure fog reveal gated by baseDiscovered — TS fog.ts:85', () => 
     };
 
     updateFogOfWar(ctx);
-    // With baseDiscovered=false, the FACT at (30,30) should NOT reveal its surroundings
-    // (unless a unit is also there providing sight)
-    // The cell at (30,30) itself might not be visible
     const vis = map.getVisibility(30, 30);
-    // DESIGN NOTE: In C++, the building would reveal its own cells.
-    // In TS, it doesn't until baseDiscovered = true. Intentional TS design.
-    expect(vis).toBe(0); // TS behavior: not revealed
+    expect(vis).toBe(2);
   });
 
-  it('structures DO reveal fog when baseDiscovered is true', () => {
+  it('baseDiscovered=true produces the same structure reveal', () => {
     const map = new GameMap();
     map.setBounds(0, 0, 64, 64);
     const structures: MapStructure[] = [makeStructure('FACT', House.Spain, 30, 30)];
@@ -581,7 +533,6 @@ describe('Structure fog reveal gated by baseDiscovered — TS fog.ts:85', () => 
     };
 
     updateFogOfWar(ctx);
-    // With baseDiscovered=true, the FACT reveals around its position
     const vis = map.getVisibility(30, 30);
     expect(vis).toBe(2); // fully visible
   });
