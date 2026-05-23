@@ -488,17 +488,124 @@ describe('damageStructure behavior', () => {
       delay: 0,
       isBrandNew: false,
       attachedStructureIndex: 0,
+      logicIndexHint: 99,
     };
     ctx.logicAnims.push(attachedFire);
+    ctx.effects.push({
+      type: 'explosion',
+      x: attachedFire.x,
+      y: attachedFire.y,
+      frame: 5,
+      maxFrames: 15,
+      size: 8,
+      sprite: 'fire3',
+      spriteStart: 0,
+      logicIndexHint: attachedFire.logicIndexHint,
+      attachedStructureIndex: 0,
+    } as Effect);
     ctx.reserveAnimSlot = () => ctx.logicAnims.length < 100;
+    const originalEffects = ctx.effects;
 
     const destroyed = structureDamage(ctx, s, 100);
 
     expect(destroyed).toBe(true);
     expect(attachedFire.deleteOnNextProcess).toBe(true);
     expect(ctx.logicAnims).toContain(attachedFire);
+    expect(ctx.effects).toBe(originalEffects);
+    expect(ctx.effects.some(e => e.sprite === 'fire3' && e.logicIndexHint === 99)).toBe(false);
     expect(ctx.logicAnims.some(a => a.type === 'fball1')).toBe(false);
     expect(processLogicAnim(attachedFire, ctx.logicAnims, ctx.effects, ctx.map)).toBe(false);
+  });
+
+  it('delete-pending C++ AnimClass stops drawing its linked sprite on its AI pass', () => {
+    const ctx = makeMockCombatContext();
+    const anim: LogicAnim = {
+      type: 'fire_small',
+      x: 5 * CELL_SIZE,
+      y: 5 * CELL_SIZE,
+      stage: 0,
+      timer: 1,
+      loops: 2,
+      delay: 0,
+      isBrandNew: false,
+      attachedStructureIndex: 0,
+      logicIndexHint: 12,
+      deleteOnNextProcess: true,
+    };
+    ctx.logicAnims.push(anim);
+    ctx.effects.push({
+      type: 'explosion',
+      x: anim.x,
+      y: anim.y,
+      frame: 5,
+      maxFrames: 15,
+      size: 8,
+      sprite: 'fire3',
+      spriteStart: 0,
+      logicIndexHint: 12,
+      attachedStructureIndex: 0,
+    } as Effect);
+
+    expect(processLogicAnim(anim, ctx.logicAnims, ctx.effects, ctx.map)).toBe(false);
+    expect(ctx.effects.some(e => e.logicIndexHint === 12)).toBe(false);
+  });
+
+  it('structure removal shifts later attached AnimClass indices like C++ object pointers', () => {
+    const game = Object.create(Game.prototype) as any;
+    const anims: LogicAnim[] = [
+      {
+        type: 'fire_small',
+        x: 0,
+        y: 0,
+        stage: 0,
+        timer: 1,
+        loops: 2,
+        delay: 0,
+        isBrandNew: false,
+        attachedStructureIndex: 0,
+      },
+      {
+        type: 'fire_med',
+        x: CELL_SIZE,
+        y: CELL_SIZE,
+        stage: 0,
+        timer: 1,
+        loops: 3,
+        delay: 0,
+        isBrandNew: false,
+        attachedStructureIndex: 2,
+      },
+    ];
+    const effects: Effect[] = [
+      {
+        type: 'explosion',
+        x: 0,
+        y: 0,
+        frame: 1,
+        maxFrames: 15,
+        size: 8,
+        sprite: 'fire3',
+        attachedStructureIndex: 0,
+      } as Effect,
+      {
+        type: 'explosion',
+        x: CELL_SIZE,
+        y: CELL_SIZE,
+        frame: 1,
+        maxFrames: 15,
+        size: 12,
+        sprite: 'fire2',
+        attachedStructureIndex: 2,
+      } as Effect,
+    ];
+
+    game.shiftAttachedStructureIndicesAfterRemoval(0, anims, effects);
+
+    expect(anims[0].deleteOnNextProcess).toBe(true);
+    expect(anims[1].attachedStructureIndex).toBe(1);
+    expect(effects).toHaveLength(1);
+    expect(effects[0].sprite).toBe('fire2');
+    expect(effects[0].attachedStructureIndex).toBe(1);
   });
 
   it('fire damage uses C++ ON_FIRE and oilfield AnimClass slots for pumps', () => {
@@ -827,14 +934,16 @@ describe('Projectile lifecycle', () => {
     target.leptonX = pixelToLepton(350);
     target.leptonY = pixelToLepton(150);
     target.syncPosFromLeptons();
-    // Frame 1 (after increment to odd) updates DesiredFacing.
+    // C++ bullet.cpp:368 keys this to the global Frame parity, not projectile age.
+    // Frame 0 (even in this mock) updates DesiredFacing.
     updateInflightProjectiles(ctx);
     const afterOddDesired = ctx.inflightProjectiles[0].desiredFacing256;
     expect(afterOddDesired).toBeDefined();
     target.leptonX = pixelToLepton(350);
     target.leptonY = pixelToLepton(200);
     target.syncPosFromLeptons();
-    // Frame 2 (even) skips the Target_Coord refresh, so DesiredFacing is unchanged.
+    ctx.tick = 1;
+    // Frame 1 (odd) skips the Target_Coord refresh, so DesiredFacing is unchanged.
     updateInflightProjectiles(ctx);
     expect(ctx.inflightProjectiles[0].desiredFacing256).toBe(afterOddDesired);
   });

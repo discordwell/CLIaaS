@@ -13,7 +13,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { INFANTRY_SHAPE, INFANTRY_ANIMS, BODY_SHAPE } from '../engine/types';
+import { INFANTRY_HUMAN_SHAPE, INFANTRY_SHAPE, INFANTRY_ANIMS, BODY_SHAPE, AnimState, Dir, House, UnitType } from '../engine/types';
+import { Entity, dir256ToFacing32 } from '../engine/entity';
 
 // ============================================================
 // Section 1: HumanShape[32] — infantry.cpp:90
@@ -35,57 +36,14 @@ describe('HumanShape[32] infantry facing table (infantry.cpp:90)', () => {
     }
   });
 
-  it('TS INFANTRY_SHAPE has 8 entries (simplified from 32)', () => {
-    expect(INFANTRY_SHAPE).toHaveLength(8);
+  it('TS INFANTRY_HUMAN_SHAPE exactly mirrors C++ HumanShape[32]', () => {
+    expect(INFANTRY_HUMAN_SHAPE).toEqual(CPP_HUMAN_SHAPE_32);
   });
 
-  it('TS INFANTRY_SHAPE losslessly represents the C++ 32-entry table', () => {
-    // C++ uses Dir_To_32(facing) to get a 32-step index, then looks up HumanShape[index].
-    // TS uses an 8-direction enum directly: INFANTRY_SHAPE[dir].
-    // For the simplification to be lossless, every group of 4 consecutive C++ entries
-    // (corresponding to one 8-dir facing) must map to the same sprite direction.
-    //
-    // C++ Dir_To_32 maps: facing 0 (N) → indices 0,31 (wraps), facing 1 (NE) → indices ~27-30,
-    // etc. The TS 8-dir enum order is: N(0), NE(1), E(2), SE(3), S(4), SW(5), W(6), NW(7).
-    //
-    // We verify that INFANTRY_SHAPE produces the correct sprite direction for each
-    // of the 8 primary facings by checking the C++ HumanShape value at the center
-    // of each 4-step group.
-
-    // C++ 32-step to 8-dir mapping (center of each 4-step group):
-    // dir 0 (N)  → step 0  → HumanShape[0]  = 0 → sprite dir 0 (N)
-    // dir 1 (NE) → step 4  → HumanShape[28] = 1 → sprite dir 7 (NE in SHP)
-    //   Wait — TS Dir enum NE=1, but SHP order is N,NW,W,SW,S,SE,E,NE
-    //   So NE in TS (dir=1) should map to SHP direction 7.
-    //
-    // TS INFANTRY_SHAPE: [0, 7, 6, 5, 4, 3, 2, 1]
-    //   dir 0 (N)  → 0 (SHP N)
-    //   dir 1 (NE) → 7 (SHP NE)
-    //   dir 2 (E)  → 6 (SHP E)
-    //   dir 3 (SE) → 5 (SHP SE)
-    //   dir 4 (S)  → 4 (SHP S)
-    //   dir 5 (SW) → 3 (SHP SW)
-    //   dir 6 (W)  → 2 (SHP W)
-    //   dir 7 (NW) → 1 (SHP NW)
-    //
-    // C++ 32-step index for each 8-dir:
-    //   N=0, NE=28, E=24, SE=20, S=16, SW=12, W=8, NW=4 (approximate centers)
-    //   HumanShape[0]=0, HumanShape[28]=1, HumanShape[24]=2, HumanShape[20]=3,
-    //   HumanShape[16]=4, HumanShape[12]=5, HumanShape[8]=6, HumanShape[4]=7
-
-    // C++ uses clockwise from N: N=0, NE=4steps, E=8steps, etc.
-    // But HumanShape[0]=0(N), HumanShape[4]=7(NW in SHP)... hmm.
-    // Actually C++ Dir_To_32 starts at N and goes clockwise:
-    //   step  0 → N
-    //   step  4 → NE
-    //   step  8 → E
-    //   step 12 → SE
-    //   step 16 → S
-    //   step 20 → SW
-    //   step 24 → W
-    //   step 28 → NW
-
-    // So: HumanShape[step] for each primary dir:
+  it('TS INFANTRY_SHAPE matches C++ at exact 8-way primary facings only', () => {
+    // The 8-entry table is still useful for tests and exact primary facings:
+    // C++ step 0,4,8,...,28 maps to the same SHP direction as TS Dir N,NE,E,...,NW.
+    // It is not sufficient for renderer parity at intermediate facings.
     const cppPrimary: Record<string, number> = {
       N:  CPP_HUMAN_SHAPE_32[0],   // = 0
       NE: CPP_HUMAN_SHAPE_32[4],   // = 7
@@ -112,6 +70,20 @@ describe('HumanShape[32] infantry facing table (infantry.cpp:90)', () => {
     for (const dir of ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']) {
       expect(tsPrimary[dir], `dir ${dir}: TS=${tsPrimary[dir]} should match C++=${cppPrimary[dir]}`).toBe(cppPrimary[dir]);
     }
+  });
+
+  it('infantry spriteFrame uses C++ 32-step HumanShape for intermediate facings', () => {
+    // C++ infantry.cpp:500 indexes HumanShape[Dir_To_32(PrimaryFacing.Current())].
+    // Facing 14 maps through Facing32 to HumanShape[2] = 7. The old TS 8-way
+    // fallback rounded it to Dir.N and drew shape direction 0 instead.
+    const e1 = new Entity(UnitType.I_E1, House.Greece, 48, 48);
+    e1.facing = Dir.N;
+    e1.bodyFacing256 = 14;
+    e1.bodyFacing32 = dir256ToFacing32(14);
+    e1.animState = AnimState.LIE_DOWN;
+    e1.animFrame = 0;
+
+    expect(e1.spriteFrame).toBe(INFANTRY_ANIMS.E1.lieDown!.frame + CPP_HUMAN_SHAPE_32[2] * INFANTRY_ANIMS.E1.lieDown!.jump);
   });
 
   it('C++ HumanShape sub-steps within each direction agree on sprite direction', () => {
@@ -785,6 +757,14 @@ describe('Facing32 lookup table (const.cpp:512-521)', () => {
 
   it('direction byte 255 wraps to facing 0', () => {
     expect(CPP_FACING32[255]).toBe(0);
+  });
+
+  it('TS dir256ToFacing32 uses the same non-uniform boundary table', () => {
+    // These diagonal boundary values are where the simplified `(dir + 4) >> 3`
+    // formula diverges from C++ and visibly rotates SCG08EA vehicles.
+    for (const dir of [4, 32, 96, 160, 224, 250, 255]) {
+      expect(dir256ToFacing32(dir), `Dir_To_32(${dir})`).toBe(CPP_FACING32[dir]);
+    }
   });
 
   it('non-uniform distribution compensates for 3D Studio distortion', () => {

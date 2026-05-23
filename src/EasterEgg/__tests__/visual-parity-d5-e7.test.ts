@@ -4,15 +4,15 @@
  * D5: C++ anim.cpp — IsScorcher=true animations (napalm, fire) plant SMUDGE_SCORCH on ground.
  *     Verifies that fire/napalm warhead projectile impacts leave scorch decals on the map.
  *
- * E7: C++ building.cpp:1372-1435 — Damaged buildings spawn one-shot fire animations
- *     that expire and randomly respawn. Verifies the renderer tracks per-structure fire
- *     effect lifecycles instead of always-on looping.
+ * E7: C++ building.cpp:1372-1435 — Damaged buildings spawn AnimClass fire objects
+ *     during damage/destruction events. The renderer must not invent structure fire
+ *     sprites solely from current HP.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   UnitType, House, CELL_SIZE, WARHEAD_PROPS,
-  buildDefaultAlliances, WEAPON_STATS,
+  buildDefaultAlliances,
 } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import {
@@ -21,10 +21,11 @@ import {
 } from '../engine/combat';
 import { GameMap, Terrain } from '../engine/map';
 import {
-  type MapStructure, STRUCTURE_MAX_HP, STRUCTURE_SIZE,
+  type MapStructure,
 } from '../engine/scenario';
 import type { Effect } from '../engine/renderer';
 import { Renderer } from '../engine/renderer';
+import { Camera } from '../engine/camera';
 
 beforeEach(() => resetEntityIds());
 
@@ -139,143 +140,91 @@ describe('D5: Fire warhead projectile impacts leave scorch marks', () => {
 });
 
 // =============================================================================
-//  E7: Damage fire one-shot lifecycle
+//  E7: Damage fire lifecycle belongs to AnimClass, not renderer HP shims
 // =============================================================================
 
-describe('E7: Renderer tracks per-structure fire effects with lifecycle', () => {
-
-  // Access private fields for testing via any-cast
-  function getFireEffects(renderer: any): Map<number, any[]> {
-    return renderer.structFireEffects;
+describe('E7: Renderer does not synthesize building fires from HP', () => {
+  function mockCanvas(): { canvas: HTMLCanvasElement; ctx: any } {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      fillRect: vi.fn(),
+      beginPath: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      drawImage: vi.fn(),
+      getImageData: vi.fn(() => ({ data: new Uint8Array(0) })),
+      createLinearGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+      strokeRect: vi.fn(),
+      fillText: vi.fn(),
+      measureText: vi.fn(() => ({ width: 0 })),
+      clearRect: vi.fn(),
+      setTransform: vi.fn(),
+      globalAlpha: 1,
+      globalCompositeOperation: 'source-over',
+      fillStyle: '',
+      strokeStyle: '',
+      lineWidth: 1,
+      font: '',
+      textAlign: 'left',
+      textBaseline: 'top',
+      canvas: { width: 640, height: 480 },
+    };
+    return {
+      canvas: {
+        getContext: () => ctx,
+        width: 640,
+        height: 480,
+      } as unknown as HTMLCanvasElement,
+      ctx,
+    };
   }
 
-  function getFireInitialized(renderer: any): Set<number> {
-    return renderer.structFireInitialized;
-  }
-
-  it('structFireEffects and structFireInitialized are initialized as empty', () => {
-    // Create a minimal canvas mock
-    const canvas = {
-      getContext: () => ({
-        imageSmoothingEnabled: false,
-        fillRect: () => {},
-        beginPath: () => {},
-        fill: () => {},
-        stroke: () => {},
-        save: () => {},
-        restore: () => {},
-        translate: () => {},
-        arc: () => {},
-        ellipse: () => {},
-        drawImage: () => {},
-        getImageData: () => ({ data: new Uint8Array(0) }),
-        createLinearGradient: () => ({ addColorStop: () => {} }),
-        strokeRect: () => {},
-        fillText: () => {},
-        measureText: () => ({ width: 0 }),
-        clearRect: () => {},
-        setTransform: () => {},
-        globalAlpha: 1,
-        globalCompositeOperation: 'source-over',
-        fillStyle: '',
-        strokeStyle: '',
-        lineWidth: 1,
-        font: '',
-        textAlign: 'left',
-        textBaseline: 'top',
-        canvas: { width: 640, height: 480 },
-      }),
-      width: 640,
-      height: 480,
-    } as any;
-
+  it('damaged structures draw only their building frame when no fire AnimClass exists', () => {
+    // C++ building.cpp:1416-1465 creates fire AnimClass instances only when
+    // Take_Damage returns RESULT_HALF/RESULT_MAJOR. A damaged HP ratio alone
+    // is not a renderer rule and must not create BURN-* draws.
+    const { canvas, ctx } = mockCanvas();
     const renderer = new Renderer(canvas);
-    const fires = getFireEffects(renderer);
-    const initialized = getFireInitialized(renderer);
+    const camera = new Camera(0, 0);
+    const map = new GameMap();
+    map.revealAll();
 
-    expect(fires).toBeInstanceOf(Map);
-    expect(fires.size).toBe(0);
-    expect(initialized).toBeInstanceOf(Set);
-    expect(initialized.size).toBe(0);
-  });
-
-  it('fire effect data structure supports one-shot lifecycle fields', () => {
-    // Verify the fire effect shape has the fields needed for lifecycle:
-    // offsetX, offsetY, sprite, startTick, maxFrames
-    const fireEffect = {
-      offsetX: 3.5,
-      offsetY: -2.1,
-      sprite: 'burn-m',
-      startTick: 100,
-      maxFrames: 17,
+    const structure: MapStructure = {
+      type: 'POWR',
+      image: 'powr',
+      house: House.Spain,
+      cx: 5,
+      cy: 5,
+      hp: 96,
+      maxHp: 256,
+      alive: true,
+      rubble: false,
+      attackCooldown: 0,
+      ammo: -1,
+      maxAmmo: -1,
     };
 
-    expect(fireEffect.startTick).toBeDefined();
-    expect(fireEffect.maxFrames).toBeGreaterThan(0);
-    // After maxFrames ticks, the fire should expire
-    const elapsed = fireEffect.maxFrames;
-    const playCount = Math.floor(elapsed / fireEffect.maxFrames);
-    expect(playCount).toBe(1); // exactly one full play
-  });
+    const drawFrame = vi.fn();
+    const assets = {
+      getSheet: vi.fn((name: string) => {
+        if (name === 'powr') return { meta: { frameCount: 8, frameWidth: 48, frameHeight: 48 } };
+        if (name.startsWith('burn-')) return { meta: { frameCount: 67, frameWidth: 48, frameHeight: 48 } };
+        return null;
+      }),
+      getRemappedSheet: vi.fn(() => null),
+      drawFrame,
+      drawFrameFrom: vi.fn(),
+      hasSheet: vi.fn(() => false),
+    };
 
-  it('expired fire has 30% respawn chance (probabilistic check)', () => {
-    // The lifecycle system uses a 0.30 threshold for respawn
-    // This verifies the probability boundary
-    const RESPAWN_CHANCE = 0.30;
+    (renderer as any).renderStructures(camera, map, [structure], assets, 40);
 
-    // A random value < 0.30 should trigger respawn
-    expect(0.15 < RESPAWN_CHANCE).toBe(true);  // should respawn
-    expect(0.29 < RESPAWN_CHANCE).toBe(true);  // should respawn
-    expect(0.31 < RESPAWN_CHANCE).toBe(false); // should NOT respawn
-    expect(0.50 < RESPAWN_CHANCE).toBe(false); // should NOT respawn
-  });
-
-  it('fire tier escalates: 1 fire at <=50% HP, 2 at <50%, 3 at <25%', () => {
-    // C++ building.cpp:1372-1435 escalation tiers
-    const maxHp = 256;
-
-    // At exactly 50% (CONDITION_YELLOW threshold) — 1 fire
-    const hp50 = maxHp * 0.5;
-    const ratio50 = hp50 / maxHp;
-    const fires50 = ratio50 < 0.25 ? 3 : ratio50 < 0.5 ? 2 : 1;
-    expect(fires50).toBe(1);
-
-    // At 40% HP — 2 fires
-    const hp40 = maxHp * 0.4;
-    const ratio40 = hp40 / maxHp;
-    const fires40 = ratio40 < 0.25 ? 3 : ratio40 < 0.5 ? 2 : 1;
-    expect(fires40).toBe(2);
-
-    // At 20% HP — 3 fires
-    const hp20 = maxHp * 0.2;
-    const ratio20 = hp20 / maxHp;
-    const fires20 = ratio20 < 0.25 ? 3 : ratio20 < 0.5 ? 2 : 1;
-    expect(fires20).toBe(3);
-  });
-
-  it('fire sprite tier matches HP ratio: burn-l < 25%, burn-m < 50%, burn-s >= 50%', () => {
-    function tierSprite(hpRatio: number): string {
-      return hpRatio < 0.25 ? 'burn-l' : hpRatio < 0.5 ? 'burn-m' : 'burn-s';
-    }
-
-    expect(tierSprite(0.10)).toBe('burn-l');  // critical damage
-    expect(tierSprite(0.24)).toBe('burn-l');  // just under 25%
-    expect(tierSprite(0.25)).toBe('burn-m');  // exactly 25%
-    expect(tierSprite(0.40)).toBe('burn-m');  // moderate damage
-    expect(tierSprite(0.49)).toBe('burn-m');  // just under 50%
-    expect(tierSprite(0.50)).toBe('burn-s');  // light damage (at CONDITION_YELLOW)
-  });
-
-  it('fire cleanup occurs when structure heals above threshold', () => {
-    // The renderer should clean up fire effects when a structure is repaired
-    // above CONDITION_YELLOW. We verify the logic:
-    // if !(s.hp <= s.maxHp * CONDITION_YELLOW) -> delete fire effects
-    const CONDITION_YELLOW_VAL = 0.5; // from types.ts
-    const maxHp = 256;
-
-    // Structure healed to 60% — should clear fires
-    const healedHp = maxHp * 0.6;
-    const shouldHaveFire = healedHp <= maxHp * CONDITION_YELLOW_VAL;
-    expect(shouldHaveFire).toBe(false);
+    expect(drawFrame).toHaveBeenCalledWith(ctx, 'powr', expect.any(Number), expect.any(Number), expect.any(Number), expect.any(Object));
+    expect(drawFrame.mock.calls.filter((call) => String(call[1]).startsWith('burn-'))).toHaveLength(0);
   });
 });

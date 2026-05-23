@@ -336,32 +336,18 @@ describe('DS7: self-healing threshold — C++ techno.cpp:2354 parity', () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// DS8: Building damage visual effects thresholds
-// TS renderer.ts:1572-1577 uses: <75% → smoke, <50% → fire, <25% → intense fire
-// C++ building.cpp shows fire on RESULT_MAJOR (any significant damage hit)
-// and fire is attached to buildings via ANIM_FIRE_SMALL etc.
+// DS8: Building damage visual effects are event-driven
+// C++ building.cpp spawns fire animations on RESULT_HALF/RESULT_MAJOR and
+// destruction, not from a continuous renderer HP threshold.
 // ══════════════════════════════════════════════════════════════════════════════
 
-describe('DS8: building damage visual effects use correct thresholds', () => {
-  // TS renderer.ts:1573: s.hp < s.maxHp * 0.75 starts showing smoke
-  // TS renderer.ts:1577: hpRatio < 0.25 → 3 fires, < 0.5 → 2 fires, else 1 fire
-  // TS renderer.ts:1583: hpRatio < 0.5 → sprite-based fire (BURN-S/M/L)
-  // TS renderer.ts:1605: hpRatio >= 0.5 → small smoldering fire (BURN-S)
-
-  it('TS starts damage effects at 75%, not at ConditionYellow (50%)', () => {
-    // C++ building damage visual (fire/smoke) is driven by RESULT_MAJOR hits
-    // and attached fire animations — not a continuous threshold render.
-    // TS instead uses continuous thresholds: 75%, 50%, 25%.
-    // The 75% outer threshold has no direct C++ equivalent.
-    const tsDamageEffectStart = 0.75;
-    // C++ building damaged frame uses ConditionYellow (50%)
-    expect(tsDamageEffectStart).not.toBe(INI_CONDITION_YELLOW);
+describe('DS8: building damage visual effects use C++ event thresholds', () => {
+  it('there is no INI-backed 75% building fire threshold', () => {
+    expect(INI_CONDITION_YELLOW).toBe(0.50);
+    expect(INI_CONDITION_RED).toBe(0.25);
   });
 
-  it('fire intensity tiers use correct INI-derived thresholds', () => {
-    // TS renderer.ts:1577: hpRatio < 0.25 → 3 fires, < 0.5 → 2 fires, else → 1 fire
-    // These thresholds should reference ConditionRed (0.25) and ConditionYellow (0.50)
-    // Verify the constants match rules.ini
+  it('damage-frame and health-color constants still match rules.ini', () => {
     expect(INI_CONDITION_RED).toBe(0.25);
     expect(INI_CONDITION_YELLOW).toBe(0.50);
   });

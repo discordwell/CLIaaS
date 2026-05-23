@@ -244,7 +244,7 @@ describe('Infantry sprite frame counts', () => {
   const INFANTRY_SPRITES: [string, number][] = [
     ['e1', 438], ['e2', 566], ['e3', 454], ['e4', 566],
     ['e6', 248], ['dog', 268], ['spy', 342], ['medi', 247],
-    ['shok', 316], ['c1', 198], ['c2', 198],
+    ['e7', 316], ['shok', 316], ['c1', 198], ['c2', 198],
     ['einstein', 165], ['gnrl', 264],
   ];
 
@@ -255,7 +255,7 @@ describe('Infantry sprite frame counts', () => {
   }
 
   // Infantry all share 50x39 frame size (RA SHP standard for infantry)
-  const INFANTRY_50x39 = ['e1', 'e2', 'e3', 'e4', 'e6', 'dog', 'spy', 'medi', 'shok', 'c1', 'c2', 'einstein', 'gnrl'];
+  const INFANTRY_50x39 = ['e1', 'e2', 'e3', 'e4', 'e6', 'dog', 'spy', 'medi', 'e7', 'shok', 'c1', 'c2', 'einstein', 'gnrl'];
 
   for (const sprite of INFANTRY_50x39) {
     it(`${sprite} uses 50x39 infantry frame dimensions`, () => {
@@ -1093,7 +1093,7 @@ describe('Counterstrike/Aftermath expansion unit sprites', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 21. Units sharing sprites (GNRL, CHAN, THF → e1; E7 → e5; MECH → medi; etc.)
+// 21. Units sharing sprites (GNRL, CHAN, THF → e1; E7 → e7; MECH → medi; etc.)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('Unit types that share sprites', () => {
@@ -1105,8 +1105,9 @@ describe('Unit types that share sprites', () => {
     expect(UNIT_STATS.CHAN.image).toBe('e1');
   });
 
-  it('E7 (Tanya) uses e5 sprite', () => {
-    expect(UNIT_STATS.E7.image).toBe('e5');
+  it('E7 (Tanya) uses the C++ E7.SHP sprite', () => {
+    // C++ RA idata.cpp: static InfantryTypeClass const E7(..., "E7", ...).
+    expect(UNIT_STATS.E7.image).toBe('e7');
   });
 
   it('THF (Thief) uses e1 sprite', () => {

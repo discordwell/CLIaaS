@@ -405,10 +405,11 @@ describe('Nuclear Strike — detonateNuke mechanics', () => {
     expect(atomsfx).toBeDefined();
   });
 
-  it('detonateNuke sets screen flash and shake', () => {
+  it('detonateNuke sets white palette fade and shake', () => {
     const ctx = makeMockSuperweaponContext();
     detonateNuke(ctx, { x: 200, y: 200 });
-    expect(ctx.screenFlash).toBe(30);
+    expect(ctx.whitePaletteFade).toBe(45);
+    expect(ctx.screenFlash).toBe(0);
     expect(ctx.screenShake).toBe(3);
   });
 

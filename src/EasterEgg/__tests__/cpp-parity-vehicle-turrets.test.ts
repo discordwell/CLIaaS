@@ -401,10 +401,10 @@ describe('5. Turret rotation rate = ROT+1 per tick (C++ unit.cpp:542)', () => {
     tank.tickTurretRotation();
     expect(tank.turretFacing32, 'tick 1: 256-dir current rounds to visual step 1').toBe(1);
 
-    // Tick 2: current256=12, which rounds to visual step 2.
+    // Tick 2: current256=12, which is still visual step 1 in C++ Facing32.
     tank.turretRotTickedThisFrame = false;
     tank.tickTurretRotation();
-    expect(tank.turretFacing32, 'tick 2: 256-dir current rounds to visual step 2').toBe(2);
+    expect(tank.turretFacing32, 'tick 2: 256-dir current is still visual step 1').toBe(1);
   });
 
   it('turret 90-degree rotation is faster than body for same ROT (all turreted units)', () => {

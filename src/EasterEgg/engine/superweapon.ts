@@ -718,11 +718,9 @@ export function activateSuperweapon(
 export function detonateNuke(ctx: SuperweaponContext, target: WorldPos): void {
   // AU5: Nuke detonation SFX
   ctx.playSound('nuke_explode');
-  // C++ anim.cpp:955,981-983 — Shake_The_Screen(3) + Fade_Palette_To(WhitePalette, 30)
-  //   followed by Fade_Palette_To(GamePalette, 15).
-  // We retain screenFlash for backwards compat (existing tests assert 30),
-  // and additionally trigger whitePaletteFade for the full 45-tick whiteout bloom.
-  ctx.screenFlash = 30;
+  // C++ anim.cpp:1097,1104 — WhitePalette fade + Shake_The_Screen(3).
+  // The palette then fades back to GamePalette; this is not a generic yellow
+  // full-screen explosion flash.
   ctx.screenShake = 3;
   ctx.whitePaletteFade = 45; // 30 fade-in + 15 fade-out
 

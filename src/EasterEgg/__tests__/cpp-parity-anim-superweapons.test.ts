@@ -128,7 +128,7 @@ function addReadySuperweapon(
 }
 
 // =============================================================================
-// 1. Nuke (ATOM_BLAST): full-screen flash + mushroom cloud animation
+// 1. Nuke (ATOM_BLAST): white palette fade + mushroom cloud animation
 //    C++ adata.cpp:48-71 — ANIM_ATOM_BLAST "ATOMSFX", 72px, 19 biggest stage
 //    C++ house.cpp:2636-2677 — nuke launch creates BULLET_NUKE_DOWN
 //    C++ bullet detonation creates ANIM_ATOM_BLAST + screen shake + white flash
@@ -190,14 +190,15 @@ describe('Nuke (ATOM_BLAST) animation — C++ adata.cpp:48-71, house.cpp:2636-26
     expect(mushroom!.y).toBe(target.y);
   });
 
-  it('nuke detonation creates screen flash and screen shake', () => {
+  it('nuke detonation creates white palette fade and screen shake', () => {
     const ctx = makeCtx();
     const target: WorldPos = { x: 50 * CELL_SIZE, y: 50 * CELL_SIZE };
 
     detonateNuke(ctx, target);
 
-    // C++ nuke detonation: White_Count_Down (screen flash) + Shake_The_Screen
-    expect(ctx.screenFlash).toBe(30);
+    // C++ nuke detonation: WhitePalette fade + Shake_The_Screen.
+    expect(ctx.whitePaletteFade).toBe(45);
+    expect(ctx.screenFlash).toBe(0);
     expect(ctx.screenShake).toBe(3);
   });
 

@@ -8,7 +8,7 @@ import {
   Dir, Mission, AnimState, House, UnitType, Stance,
   UNIT_STATS, WEAPON_STATS, CELL_SIZE, MPH_TO_PX,
   SpeedClass,
-  INFANTRY_ANIMS, INFANTRY_SHAPE, BODY_SHAPE, ANT_ANIM, WARHEAD_PROPS,
+  INFANTRY_ANIMS, INFANTRY_HUMAN_SHAPE, BODY_SHAPE, ANT_ANIM, WARHEAD_PROPS,
   WARHEAD_VS_ARMOR, PRONE_DAMAGE_BIAS, CONDITION_RED, CONDITION_YELLOW,
   CIVILIAN_UNIT_TYPES, worldToCell, leptonDist, directionTo, directionToLeptons,
   directionToLeptons256, DIR_DX, DIR_DY,
@@ -168,9 +168,20 @@ export function dir256ToFacing8(dir: number): Dir {
   return ((((dir + 0x10) & 0xff) >> 5) % 8) as Dir;
 }
 
-/** C++ coord.cpp Dir_To_32 equivalent for visual body facing. */
+const FACING32: readonly number[] = [
+  0,0,0,0,0,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,
+  3,4,4,4,4,4,4,5,5,5,5,5,5,5,6,6,6,6,6,6,6,7,7,7,7,7,7,7,8,8,8,8,
+  8,8,8,9,9,9,9,9,9,9,10,10,10,10,10,10,10,11,11,11,11,11,11,11,12,12,12,12,12,12,12,12,
+  13,13,13,13,13,13,13,13,14,14,14,14,14,14,14,14,14,15,15,15,15,15,15,15,15,15,16,16,16,16,16,16,
+  16,16,16,16,16,17,17,17,17,17,17,17,17,17,18,18,18,18,18,18,18,18,18,19,19,19,19,19,19,19,19,19,
+  19,20,20,20,20,20,20,21,21,21,21,21,21,21,22,22,22,22,22,22,22,23,23,23,23,23,23,23,24,24,24,24,
+  24,24,24,25,25,25,25,25,25,25,26,26,26,26,26,26,26,27,27,27,27,27,27,27,28,28,28,28,28,28,28,28,
+  29,29,29,29,29,29,29,29,30,30,30,30,30,30,30,30,30,31,31,31,31,31,31,31,31,31,0,0,0,0,0,0,
+];
+
+/** C++ inline.h:694 Dir_To_32 — lookup through const.cpp Facing32[256]. */
 export function dir256ToFacing32(dir: number): number {
-  return (((dir + 4) & 0xff) >> 3) % 32;
+  return FACING32[dir & 0xff] ?? 0;
 }
 
 export class Entity {
@@ -1355,10 +1366,11 @@ export class Entity {
     }
 
     // --- Infantry: C++ Shape_Number (infantry.cpp:479) ---
-    // frame + INFANTRY_SHAPE[dir] * jump + animFrame % count
+    // frame + HumanShape[Dir_To_32(PrimaryFacing.Current())] * jump + animFrame % count
     if (this.stats.isInfantry) {
       const anim = INFANTRY_ANIMS[this.type] ?? INFANTRY_ANIMS.E1;
-      const sdir = INFANTRY_SHAPE[dir]; // SHP direction index (C++ HumanShape remap)
+      const facing256 = this.bodyFacing256 >= 0 ? this.bodyFacing256 & 0xff : (dir * 32) & 0xff;
+      const sdir = INFANTRY_HUMAN_SHAPE[dir256ToFacing32(facing256)] ?? 0;
       switch (this.animState) {
         case AnimState.WALK: {
           // Prone crawl if isProne and crawl animation exists

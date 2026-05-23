@@ -210,6 +210,8 @@ export function spawnLogicAnim(
       size: type === 'fire_med' || type === 'fire_med2' ? 12 : 8,
       sprite: def.sprite,
       spriteStart: 0,
+      logicIndexHint,
+      attachedStructureIndex,
     } as Effect);
   }
   if (delay === 0) logicAnimStart(anim, logicAnims, effects, undefined, allocateLogicIndex, reserveAnimSlot, createdLogicTick);
@@ -228,6 +230,7 @@ export function processLogicAnim(
   currentTick?: number,
 ): boolean {
   if (anim.deleteOnNextProcess) {
+    removeLinkedRenderEffects(anim, effects);
     fireOutAttachedTree(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot, releaseTerrainLogicSlot);
     return false;
   }
@@ -259,6 +262,7 @@ export function processLogicAnim(
     if (damage > 0) {
       anim.damageAccumRaw -= damage * 256;
       if (damageAttachedStructure?.(anim.attachedStructureIndex, damage)) {
+        removeLinkedRenderEffects(anim, effects);
         return false;
       }
     }
@@ -291,11 +295,21 @@ export function processLogicAnim(
       logicAnimStart(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot, currentTick);
       return true;
     }
+    removeLinkedRenderEffects(anim, effects);
     fireOutAttachedTree(anim, logicAnims, effects, map, allocateLogicIndex, reserveAnimSlot, releaseTerrainLogicSlot);
     return false;
   }
 
   return true;
+}
+
+function removeLinkedRenderEffects(anim: LogicAnim, effects: Effect[]): void {
+  if (anim.logicIndexHint === undefined) return;
+  for (let i = effects.length - 1; i >= 0; i--) {
+    if (effects[i].logicIndexHint === anim.logicIndexHint) {
+      effects.splice(i, 1);
+    }
+  }
 }
 
 function fireOutAttachedTree(

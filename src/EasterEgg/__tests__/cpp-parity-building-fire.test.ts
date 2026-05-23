@@ -1,7 +1,7 @@
 /**
  * Building Fire Effects — C++ Parity Tests
  *
- * Tests C++ building fire behavior against the TS renderer implementation.
+ * Tests C++ building fire behavior against the TS simulation/rendering split.
  * rules.ini is the authoritative source for threshold constants.
  *
  * C++ references:
@@ -18,10 +18,8 @@
  *   rules.cpp:471-472       — INI overrides for ConditionRed/ConditionYellow
  *
  * TS references:
- *   renderer.ts:1572-1628   — Fire overlay rendering (HP-ratio-based, continuous)
- *   renderer.ts:1573        — Fire onset threshold: hp < maxHp * 0.75
- *   renderer.ts:1577        — numFires: <0.25→3, <0.5→2, else→1
- *   renderer.ts:1585        — Sprite: <0.25→'burn-l', <0.5→'burn-m', >=0.5→'burn-s'
+ *   combat.ts / logicAnim.ts — fire AnimClass equivalents are spawned by damage events
+ *   renderer.ts             — draws existing Effect/logic animation sprites only
  *   types.ts:29-30          — CONDITION_RED=0.25, CONDITION_YELLOW=0.5
  */
 
@@ -52,8 +50,7 @@ function iniPercent(section: string, key: string): number {
 //
 //   RESULT_MAJOR fires when: Strength == 1 (one hit from death)
 //
-// TS renderer.ts:1573: shows fire continuously when hp < maxHp * 0.75
-// MISMATCH: TS fires appear at 75% HP, C++ fires only spawn at 50% transition
+// TS parity rule: the renderer must not synthesize fires from HP thresholds.
 // ============================================================
 describe('C++ fire trigger: event-driven RESULT_HALF crossing (object.cpp:1620-1624)', () => {
 
@@ -151,25 +148,17 @@ describe('C++ fire trigger: event-driven RESULT_HALF crossing (object.cpp:1620-1
 });
 
 // ============================================================
-// Section 2: MISMATCH — TS fire onset at 75% vs C++ at 50% transition
+// Section 2: fire onset is event-driven, not an HP render threshold
 //
 // C++: Fires appear on the building ONLY when Take_Damage returns
 //      RESULT_HALF (HP crosses 50% going down) or RESULT_MAJOR (HP == 1).
 //      Before the 50% crossing, buildings show NO fire at all.
 //
-// TS renderer.ts:1573: if (s.hp < s.maxHp * 0.75) → shows fire
-//   This means fire appears at ~74.9% HP in TS.
-//
-// In C++, a building at 74% HP that has never crossed the 50% line
-// has zero fire animations attached. The TS shows fire too early.
+// In C++, a building at 74% HP that has never crossed the 50% line has
+// zero fire animations attached. TS now follows that model by spawning
+// building fires in damage handling, not in renderer HP logic.
 // ============================================================
-describe('MISMATCH: TS fire onset at 75% vs C++ event-driven at 50% crossing', () => {
-
-  /** TS renderer fire onset check (renderer.ts:1573) */
-  function tsShowsFire(hp: number, maxHp: number): boolean {
-    return hp < maxHp * 0.75;
-  }
-
+describe('building fires are spawned by damage events, not current HP alone', () => {
   /**
    * C++ fire presence model (simplified).
    * In C++, fires are animation objects that spawn on RESULT_HALF and RESULT_MAJOR.
@@ -185,44 +174,34 @@ describe('MISMATCH: TS fire onset at 75% vs C++ event-driven at 50% crossing', (
     return true;
   }
 
-  it('TS shows fire at 74% HP — C++ does NOT (never crossed 50%)', () => {
+  it('74% HP alone does not imply fire if no damage event spawned an AnimClass', () => {
     // Building just took a hit from 100% to 74%
     const hp = 190, maxHp = 256;
-    expect(tsShowsFire(hp, maxHp)).toBe(true); // TS: fire at 74%
     expect(cppHasFires(hp, maxHp, false)).toBe(false); // C++: no fires yet
-    // MISMATCH: TS shows fire 25% too early
   });
 
-  it('TS shows fire at 51% HP — C++ does NOT (still above 50% crossing)', () => {
+  it('51% HP alone does not imply fire before crossing ConditionYellow', () => {
     const hp = 131, maxHp = 256; // 51.17%
-    expect(tsShowsFire(hp, maxHp)).toBe(true); // TS: fire shown
     expect(cppHasFires(hp, maxHp, false)).toBe(false); // C++: no fires, hasn't crossed 50%
   });
 
-  it('both show fire just below 50% (C++ has crossed the boundary)', () => {
+  it('just below 50% can have fire only after RESULT_HALF spawned it', () => {
     const hp = 127, maxHp = 256; // 49.6%
-    expect(tsShowsFire(hp, maxHp)).toBe(true);
     expect(cppHasFires(hp, maxHp, true)).toBe(true); // C++ has crossed, fires spawned
   });
 
-  it('at exactly 75% boundary, TS shows NO fire', () => {
-    const hp = 192, maxHp = 256; // exactly 75%
-    expect(tsShowsFire(hp, maxHp)).toBe(false); // hp >= maxHp * 0.75 → no fire
-  });
-
-  it('C++ has no concept of 75% fire threshold', () => {
+  it('there is no C++ 75% fire threshold', () => {
     // The 75% threshold does not exist in C++ building.cpp
     // ConditionYellow (50%) controls damage frame switching
     // ConditionRed (25%) controls health bar color and AI sell-back
     // Neither triggers fire at 75%
     expect(iniPercent('General', 'ConditionYellow')).toBe(0.5);
     expect(iniPercent('General', 'ConditionRed')).toBe(0.25);
-    // 0.75 is a TS-only visual threshold with no C++ equivalent
   });
 });
 
 // ============================================================
-// Section 3: MISMATCH — TS fire count model vs C++ per-cell random model
+// Section 3: C++ per-cell random fire model
 //
 // C++ building.cpp:1383-1434:
 //   Iterates over Occupy_List() cells. For each cell:
@@ -235,11 +214,10 @@ describe('MISMATCH: TS fire onset at 75% vs C++ event-driven at 50% crossing', (
 //   - Non-fire warhead: 50% chance of FIRE_SMALL per cell
 //     (unless source is a renovator/engineer)
 //
-// TS renderer.ts:1577:
-//   numFires = hpRatio < 0.25 ? 3 : hpRatio < 0.5 ? 2 : 1
-//   Fixed fire count based on HP ratio, NOT per-cell random
+// TS damage handling mirrors this per-cell model instead of deriving a fixed
+// fire count from HP ratio in the renderer.
 // ============================================================
-describe('MISMATCH: TS fixed fire count vs C++ per-cell weighted random', () => {
+describe('C++ per-cell weighted random fire creation', () => {
 
   /**
    * C++ fire spawning per cell on RESULT_HALF/RESULT_MAJOR.
@@ -276,11 +254,6 @@ describe('MISMATCH: TS fixed fire count vs C++ per-cell weighted random', () => 
       case 9: return 'ON_FIRE_BIG';
       default: return 'none'; // >9 hits default in switch
     }
-  }
-
-  /** TS fire count (renderer.ts:1577) */
-  function tsFireCount(hpRatio: number): number {
-    return hpRatio < 0.25 ? 3 : hpRatio < 0.5 ? 2 : 1;
   }
 
   it('C++ fire type distribution for WARHEAD_FIRE on a 2x2 building', () => {
@@ -323,50 +296,25 @@ describe('MISMATCH: TS fixed fire count vs C++ per-cell weighted random', () => 
     expect(cppFireTypeForCell(50, false, 2, 2)).toBe('none');
   });
 
-  it('TS fire count is HP-ratio based, not random (renderer.ts:1577)', () => {
-    expect(tsFireCount(0.74)).toBe(1); // light
-    expect(tsFireCount(0.49)).toBe(2); // moderate
-    expect(tsFireCount(0.24)).toBe(3); // heavy
-  });
-
-  it('TS has no concept of warhead type affecting fire visuals', () => {
-    // In C++, WARHEAD_FIRE produces different fire type distributions than other warheads
-    // TS ignores warhead type entirely for visual fires
-    // This is a simplification — the visual effect differs but is acceptable
-    // as TS doesn't model per-damage-event fire spawning at all
-    expect(tsFireCount(0.4)).toBe(2); // Same regardless of warhead
-    expect(tsFireCount(0.4)).toBe(2); // No warhead parameter exists
+  it('fire type comes from warhead and random roll, not HP ratio', () => {
+    expect(cppFireTypeForCell(9, true, 2, 2)).toBe('ON_FIRE_BIG');
+    expect(cppFireTypeForCell(49, false, 2, 2)).toBe('FIRE_SMALL');
+    expect(cppFireTypeForCell(50, false, 2, 2)).toBe('none');
   });
 });
 
 // ============================================================
-// Section 4: MISMATCH — TS sprite selection vs C++ weighted random
+// Section 4: C++ weighted random permits mixed fire sizes
 //
 // C++ building.cpp:1391-1416:
 //   Fire TYPE is randomly chosen per cell per damage event.
 //   A single RESULT_HALF can produce a MIX of small/med/big fires
 //   across the building's cells.
 //
-// TS renderer.ts:1585:
-//   ALL fires on a building use the SAME sprite tier:
-//   <0.25 → all burn-l, <0.5 → all burn-m, >=0.5 → all burn-s
-//   No mixing of fire sizes on a single building.
+// TS should preserve this by rendering the fire AnimClass entries that were
+// actually spawned, not by choosing a single building-wide sprite tier.
 // ============================================================
-describe('MISMATCH: TS uniform sprite tier vs C++ mixed fire sizes', () => {
-
-  /** TS sprite selection (renderer.ts:1585-1607) */
-  function tsBurnSprite(hpRatio: number): string {
-    if (hpRatio < 0.25) return 'burn-l';
-    if (hpRatio < 0.5) return 'burn-m';
-    return 'burn-s';
-  }
-
-  it('TS uses uniform sprite — all fires same size at each HP tier', () => {
-    expect(tsBurnSprite(0.7)).toBe('burn-s');  // 1 fire, all burn-s
-    expect(tsBurnSprite(0.4)).toBe('burn-m');  // 2 fires, all burn-m
-    expect(tsBurnSprite(0.1)).toBe('burn-l');  // 3 fires, all burn-l
-  });
-
+describe('C++ mixed fire sizes from independent cell rolls', () => {
   it('C++ can produce mixed fire sizes on same building at same time', () => {
     // C++ building.cpp:1383-1434: iterates Occupy_List() cells
     // Each cell gets independent Random_Pick → different fire types
@@ -547,9 +495,9 @@ describe('C++ fire animation frame data (adata.cpp:386-391)', () => {
 // ============================================================
 // Section 7: C++ fire positioning uses Coord_Scatter
 // building.cpp:1401, 1407, 1411, 1424 — Coord_Scatter(Cell_Coord(cell), 0x0060)
-// TS renderer.ts:1580-1581 — deterministic seed-based positioning
+// TS damage handling must consume the same scatter RNG when the AnimClass is created.
 // ============================================================
-describe('C++ fire positioning: Coord_Scatter vs TS deterministic seed', () => {
+describe('C++ fire positioning uses Coord_Scatter at spawn time', () => {
 
   it('C++ uses scatter radius 0x0060 = 96 leptons for all fire types', () => {
     // building.cpp:1401: Coord_Scatter(Cell_Coord(cell), 0x0060) — ON_FIRE_SMALL
@@ -561,17 +509,11 @@ describe('C++ fire positioning: Coord_Scatter vs TS deterministic seed', () => {
     // All fire types use the same scatter radius
   });
 
-  it('C++ fire positions are random per spawn (non-deterministic)', () => {
+  it('C++ fire positions are random per spawn, not a renderer seed', () => {
     // Each fire animation's position is Coord_Scatter(cell_center, 96_leptons)
     // This is random at spawn time — different each damage event
-    // TS uses deterministic seed: (s.cx * 31 + s.cy * 17) | 0
-    // This means TS fires are always in the same position for a given building
-    const cx = 15, cy = 20;
-    const tsSeed = (cx * 31 + cy * 17) | 0;
-    // Same building always gets same seed
-    expect(tsSeed).toBe(15 * 31 + 20 * 17); // 465 + 340 = 805
-    expect((cx * 31 + cy * 17) | 0).toBe(tsSeed);
-    // C++ would produce different positions each time — TS is deterministic
+    const scatterRadius = 0x0060;
+    expect(scatterRadius).toBe(96);
   });
 
   it('C++ destruction fires use LARGER scatter: 0x0080 and 0x0040', () => {
@@ -665,15 +607,10 @@ describe('TS constants vs rules.ini (authoritative)', () => {
     expect(CONDITION_YELLOW).toBe(0.5);
   });
 
-  it('TS 75% fire threshold has NO rules.ini backing', () => {
-    // TS renderer.ts:1573 uses 0.75 as fire onset threshold
-    // rules.ini defines only ConditionRed=25% and ConditionYellow=50%
-    // There is no 75% threshold in rules.ini
-    // C++ rules.cpp:470 (ConditionGreen=1) is always 1.0, never 0.75
-    const tsFireOnset = 0.75;
-    expect(tsFireOnset).not.toBe(CONDITION_RED);
-    expect(tsFireOnset).not.toBe(CONDITION_YELLOW);
-    // This is an invented TS threshold with no C++ or INI origin
+  it('rules.ini has no intermediate fire-onset threshold between yellow and full health', () => {
+    // C++ fire creation is tied to RESULT_HALF/RESULT_MAJOR, not a third HP ratio.
+    expect(CONDITION_YELLOW).toBe(0.5);
+    expect(CONDITION_RED).toBe(0.25);
   });
 });
 

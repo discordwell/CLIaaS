@@ -2179,12 +2179,39 @@ char* agent_get_cell_info(int cx, int cy, int infantry_id)
 
 	buf_cat("{\"cx\":%d,\"cy\":%d,\"cell\":%d,\"ttype\":%d,\"ticon\":%d,"
 		"\"overlay\":%d,\"overlayData\":%d,"
-		"\"land\":%d,\"footZero\":%s,\"inRadar\":%s,\"canEnter\":%d,"
+		"\"land\":%d,\"mapped\":%s,\"visible\":%s,\"footZero\":%s,\"inRadar\":%s,\"canEnter\":%d,"
 		"\"flag\":%d,\"infType\":%d}",
 		cx, cy, (int)cell, (int)cellptr->TType, (int)cellptr->TIcon,
 		(int)cellptr->Overlay, (int)cellptr->OverlayData,
-		(int)land, foot_zero ? "true" : "false", in_radar ? "true" : "false",
+		(int)land, cellptr->IsMapped ? "true" : "false", cellptr->IsVisible ? "true" : "false",
+		foot_zero ? "true" : "false", in_radar ? "true" : "false",
 		can_enter, (int)cellptr->Flag.Composite, (int)cellptr->InfType);
+	return s_cmd_buf;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+char* agent_get_radar_info(void)
+{
+	buf_init(s_cmd_buf, CMD_BUF_SIZE);
+
+	CELL radar = Map.Radar_Position();
+	CELL tactical = Coord_Cell(Map.TacticalCoord);
+	int radar_px = 0;
+	int radar_py = 0;
+	Map.Cell_XY_To_Radar_Pixel(Cell_X(radar), Cell_Y(radar), radar_px, radar_py);
+
+	buf_cat("{\"radarCell\":%d,\"radarX\":%d,\"radarY\":%d,"
+		"\"tacticalCell\":%d,\"tacticalX\":%d,\"tacticalY\":%d,"
+		"\"radarPx\":%d,\"radarPy\":%d,\"isZoomed\":%d,"
+		"\"radX\":%d,\"radY\":%d,\"radOffX\":%d,\"radOffY\":%d,"
+		"\"radIWidth\":%d,\"radIHeight\":%d,\"radWidth\":%d,\"radHeight\":%d}",
+		(int)radar, Cell_X(radar), Cell_Y(radar),
+		(int)tactical, Cell_X(tactical), Cell_Y(tactical),
+		radar_px, radar_py, Map.Is_Zoomed() ? 1 : 0,
+		Map.RadX, Map.RadY, Map.RadOffX, Map.RadOffY,
+		Map.RadIWidth, Map.RadIHeight, Map.RadWidth, Map.RadHeight);
 	return s_cmd_buf;
 }
 

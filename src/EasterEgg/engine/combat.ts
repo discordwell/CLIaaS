@@ -644,6 +644,7 @@ function submitBuildingFireSmall(
     );
     return;
   }
+  const logicIndexHint = ctx.logicIndexHintForNewObject?.();
   logicAnims.push({
     type: 'fire_small',
     x,
@@ -653,7 +654,7 @@ function submitBuildingFireSmall(
     loops: Math.max(1, loop) * 2,
     delay,
     isBrandNew: ctx.logicAnimsAlreadyProcessed !== true,
-    logicIndexHint: ctx.logicIndexHintForNewObject?.(),
+    logicIndexHint,
     attachedStructureIndex,
     createdLogicTick: ctx.tick,
   });
@@ -666,6 +667,8 @@ function submitBuildingFireSmall(
     size: 8,
     sprite: 'fire3',
     spriteStart: 0,
+    logicIndexHint,
+    attachedStructureIndex,
   } as Effect);
 }
 
@@ -695,6 +698,7 @@ function submitBuildingFireMedium(
     );
     return;
   }
+  const logicIndexHint = ctx.logicIndexHintForNewObject?.();
   logicAnims.push({
     type: 'fire_med',
     x,
@@ -704,14 +708,23 @@ function submitBuildingFireMedium(
     loops: Math.max(1, loop) * 3,
     delay,
     isBrandNew: ctx.logicAnimsAlreadyProcessed !== true,
-    logicIndexHint: ctx.logicIndexHintForNewObject?.(),
+    logicIndexHint,
     attachedStructureIndex,
     createdLogicTick: ctx.tick,
   });
-  submitBuildingFireEffect(ctx, 'fire2', x, y, delay, 12);
+  submitBuildingFireEffect(ctx, 'fire2', x, y, delay, 12, logicIndexHint, attachedStructureIndex);
 }
 
-function submitBuildingFireEffect(ctx: CombatContext, sprite: string, x: number, y: number, delay: number, size: number): void {
+function submitBuildingFireEffect(
+  ctx: CombatContext,
+  sprite: string,
+  x: number,
+  y: number,
+  delay: number,
+  size: number,
+  logicIndexHint?: number,
+  attachedStructureIndex?: number,
+): void {
   ctx.effects.push({
     type: 'explosion',
     x,
@@ -721,6 +734,8 @@ function submitBuildingFireEffect(ctx: CombatContext, sprite: string, x: number,
     size,
     sprite,
     spriteStart: 0,
+    logicIndexHint,
+    attachedStructureIndex,
   } as Effect);
 }
 
@@ -766,6 +781,7 @@ function submitOilfieldBurn(
   // coordinate this is +0x0130 leptons X and +0x0040 leptons Y.
   const x = s.cx * CELL_SIZE + 0x0130 * CELL_SIZE / LEPTON_SIZE;
   const y = s.cy * CELL_SIZE + 0x0040 * CELL_SIZE / LEPTON_SIZE;
+  const logicIndexHint = ctx.logicIndexHintForNewObject?.();
   logicAnims.push({
     type: 'oilfield_burn',
     x,
@@ -775,7 +791,7 @@ function submitOilfieldBurn(
     loops: 255,
     delay: 1,
     isBrandNew: ctx.logicAnimsAlreadyProcessed !== true,
-    logicIndexHint: ctx.logicIndexHintForNewObject?.(),
+    logicIndexHint,
     attachedStructureIndex,
     createdLogicTick: ctx.tick,
   });
@@ -788,6 +804,8 @@ function submitOilfieldBurn(
     size: 16,
     sprite: 'flmspt',
     spriteStart: 0,
+    logicIndexHint,
+    attachedStructureIndex,
   } as Effect);
 }
 
@@ -860,9 +878,22 @@ function runBuildingDamageStateEffects(ctx: CombatContext, s: MapStructure, warh
 function detachStructureAttachedAnims(ctx: CombatContext, s: MapStructure): void {
   const attachedStructureIndex = ctx.structures.indexOf(s);
   if (attachedStructureIndex < 0) return;
+  const detachedLogicHints = new Set<number>();
   for (const anim of ctx.logicAnims ?? []) {
     if (anim.attachedStructureIndex === attachedStructureIndex) {
       anim.deleteOnNextProcess = true;
+      if (anim.logicIndexHint !== undefined) detachedLogicHints.add(anim.logicIndexHint);
+    }
+  }
+  // C++ AnimClass::Detach(target, all=true) removes the attached animation from
+  // the map display layer immediately, while the Logic slot is deleted on its
+  // next AI pass. Keep the LogicAnim for heap/ordering parity, but stop drawing
+  // its linked sprite now.
+  for (let i = ctx.effects.length - 1; i >= 0; i--) {
+    const effect = ctx.effects[i];
+    if (effect.attachedStructureIndex === attachedStructureIndex ||
+        (effect.logicIndexHint !== undefined && detachedLogicHints.has(effect.logicIndexHint))) {
+      ctx.effects.splice(i, 1);
     }
   }
 }
@@ -4855,7 +4886,6 @@ export function structureDamage(
     if (shakeIntensity > 0) {
       ctx.screenShake = Math.max(ctx.screenShake, shakeIntensity);
     }
-    ctx.screenFlash = Math.max(ctx.screenFlash, Math.min(8, fw * 2));
     ctx.playSoundAt('building_explode', wx, wy);
     // Per-side building casualty tracking (C++ score.cpp:548-560)
     const bFaction = HOUSE_FACTION[s.house] ?? 'allied';

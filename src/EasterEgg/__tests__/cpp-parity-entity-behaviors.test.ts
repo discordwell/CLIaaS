@@ -229,9 +229,9 @@ describe('Turret rotation — C++ unit.cpp:507-564', () => {
     tank.turretRotTickedThisFrame = false;
     tank.tickTurretRotation();
 
-    // Should go counter-clockwise: 0 → 31 (mod 32)
-    // diff32 = (28 - 0 + 32) % 32 = 28, which is > 16, so CCW
-    expect(tank.turretFacing32).toBe(31);
+    // C++ steps in 256-dir space first: 0 → 250. Facing32[250] still maps to
+    // visual step 0, so no sprite-frame change occurs on this first tick.
+    expect(tank.turretFacing32).toBe(0);
   });
 
   it('turret snaps to body when idle with no target (C++ unit.cpp:554-560)', () => {

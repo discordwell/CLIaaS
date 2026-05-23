@@ -13,7 +13,7 @@
  *   - combat.ts:629-647: IsFlameEquipped flame trail toggle
  *   - combat.ts:1281-1286: Structure fire muzzle effect
  *   - missionAI.ts:486-491: Unit fire muzzle flash with warhead color
- *   - renderer.ts:1573-1629: Damaged building smoke/fire rendering
+ *   - logicAnim.ts: damaged building fire/smoke AnimClass equivalents
  *   - renderer.ts:2138-2152: Damaged vehicle smoke trail
  *   - types.ts: WeaponStats, WEAPONS, EXPLOSION_FRAMES
  */
@@ -539,72 +539,15 @@ describe('muzzle flash spawning (techno.cpp:3127-3152)', () => {
 });
 
 // ============================================================
-// Section 4: Building damage smoke/fire tiers
-// C++ renderer.ts:1573-1629 — damage-based visual effects
+// Section 4: Building damage smoke/fire animations
+// C++ building.cpp + adata.cpp — event-spawned AnimClass entries
 // ============================================================
-describe('damaged building smoke/fire tiers (renderer.ts:1573-1629)', () => {
-  it('damage effects start at <75% HP (C++ CONDITION_YELLOW region)', () => {
-    // C++ building.cpp and RA rendering: buildings show damage at yellow/red health
-    // TS renderer.ts:1574: s.hp < s.maxHp * 0.75
-    const threshold = 0.75;
-    expect(threshold).toBe(0.75);
-  });
-
-  it('light smoke only at 50-75% HP (1 fire point)', () => {
-    // TS renderer.ts:1578: numFires = hpRatio < 0.25 ? 3 : hpRatio < 0.5 ? 2 : 1
-    // At 50-75%: 1 fire point, using burn-s sprite (BURN-S.SHP)
-    const hpRatio = 0.6;
-    const numFires = hpRatio < 0.25 ? 3 : hpRatio < 0.5 ? 2 : 1;
-    expect(numFires).toBe(1);
-  });
-
-  it('fire + smoke at 25-50% HP (2 fire points, burn-m sprite)', () => {
-    // TS renderer.ts:1578,1586: burn-m at hpRatio < 0.5
-    const hpRatio = 0.35;
-    const numFires = hpRatio < 0.25 ? 3 : hpRatio < 0.5 ? 2 : 1;
-    const burnSprite = hpRatio < 0.25 ? 'burn-l' : 'burn-m';
-    expect(numFires).toBe(2);
-    expect(burnSprite).toBe('burn-m');
-  });
-
-  it('intense fire at <25% HP (3 fire points, burn-l sprite)', () => {
-    // TS renderer.ts:1578,1586: burn-l at hpRatio < 0.25
-    const hpRatio = 0.15;
-    const numFires = hpRatio < 0.25 ? 3 : hpRatio < 0.5 ? 2 : 1;
-    const burnSprite = hpRatio < 0.25 ? 'burn-l' : 'burn-m';
-    expect(numFires).toBe(3);
-    expect(burnSprite).toBe('burn-l');
-  });
-
-  it('smoke parameters scale with damage tier', () => {
-    // TS renderer.ts:1618-1620 — smoke properties by damage tier
-    // Heavy damage (<25%): smokeSpeed=0.6, smokeSize=4, smokeBase=0.35
-    // Medium damage (<50%): smokeSpeed=0.4, smokeSize=3, smokeBase=0.35
-    // Light damage (>=50%): smokeSpeed=0.25, smokeSize=2, smokeBase=0.2
-
-    for (const [hpRatio, expectedSpeed, expectedSize, expectedBase] of [
-      [0.15, 0.6, 4, 0.35],
-      [0.35, 0.4, 3, 0.35],
-      [0.6, 0.25, 2, 0.2],
-    ] as [number, number, number, number][]) {
-      const smokeSpeed = hpRatio < 0.25 ? 0.6 : hpRatio < 0.5 ? 0.4 : 0.25;
-      const smokeSize = hpRatio < 0.25 ? 4 : hpRatio < 0.5 ? 3 : 2;
-      const smokeBase = hpRatio < 0.5 ? 0.35 : 0.2;
-
-      expect(smokeSpeed, `smokeSpeed at ${hpRatio}`).toBe(expectedSpeed);
-      expect(smokeSize, `smokeSize at ${hpRatio}`).toBe(expectedSize);
-      expect(smokeBase, `smokeBase at ${hpRatio}`).toBe(expectedBase);
-    }
-  });
-
+describe('damaged building smoke/fire animation chain', () => {
   it('C++ building fire uses BURN-S → follow-up SMOKE_M chain (adata.cpp:468-470)', () => {
     // C++ ANIM_ON_FIRE_SMALL: sprite=BURN-S, followUp=ANIM_SMOKE_M
     // C++ ANIM_ON_FIRE_MED:  sprite=BURN-M, followUp=ANIM_ON_FIRE_SMALL
     // This creates a chain: ON_FIRE_MED → ON_FIRE_SMALL → SMOKE_M
     // The fire gradually dies down to smoke.
-
-    // TS Effect interface supports this via followUp field (renderer.ts:173)
-    // TS renderer handles it procedurally via damage tier rendering
     const chain = ['ANIM_ON_FIRE_MED', 'ANIM_ON_FIRE_SMALL', 'ANIM_SMOKE_M'];
     expect(chain).toHaveLength(3);
     expect(chain[0]).toBe('ANIM_ON_FIRE_MED');

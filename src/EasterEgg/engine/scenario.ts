@@ -2275,7 +2275,9 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
 
   // Set up map
   const map = new GameMap();
-  map.setBounds(data.mapBounds.x, data.mapBounds.y, data.mapBounds.w, data.mapBounds.h);
+  // C++ scenario.cpp marks the perimeter ring after initial object unlimbo
+  // Look() calls. Game.start() applies the ring after applyScenarioInitLook().
+  map.setBounds(data.mapBounds.x, data.mapBounds.y, data.mapBounds.w, data.mapBounds.h, false);
   map.initDefault();
 
   // Decode MapPack for terrain data (pass tileset metadata for per-icon classification)

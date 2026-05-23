@@ -33,7 +33,8 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, it, expect, vi } from 'vitest';
-import { HOUSE_FACTION, RESFACTOR } from '../engine/types';
+import { CELL_SIZE, House, HOUSE_FACTION, RESFACTOR, UnitType } from '../engine/types';
+import { Entity } from '../engine/entity';
 import { Renderer } from '../engine/renderer';
 import {
   MAX_RADAR_FRAMES,
@@ -44,36 +45,41 @@ import {
   radarDisplayFrame,
   updateRadarAvailability,
 } from '../engine/radar';
+import { Terrain } from '../engine/map';
 
 // ─── Canvas mock ────────────────────────────────────────
 
 /** Minimal canvas mock sufficient for Renderer construction */
-function mockCanvas(): HTMLCanvasElement {
+function mockCanvas(width = 800, height = 600, ctxOverride?: Record<string, unknown>): HTMLCanvasElement {
+  const ctx = {
+    fillRect: () => {},
+    strokeRect: () => {},
+    clearRect: () => {},
+    beginPath: () => {},
+    closePath: () => {},
+    moveTo: () => {},
+    lineTo: () => {},
+    rect: () => {},
+    clip: () => {},
+    arc: () => {},
+    fill: () => {},
+    stroke: () => {},
+    fillText: () => {},
+    measureText: () => ({ width: 0 }),
+    createRadialGradient: () => ({ addColorStop: () => {} }),
+    save: () => {},
+    restore: () => {},
+    translate: () => {},
+    drawImage: () => {},
+    getImageData: () => ({ data: new Uint8ClampedArray(0) }),
+    putImageData: () => {},
+    canvas: { width, height },
+    ...ctxOverride,
+  };
   return {
-    width: 800,
-    height: 600,
-    getContext: () => ({
-      fillRect: () => {},
-      strokeRect: () => {},
-      clearRect: () => {},
-      beginPath: () => {},
-      closePath: () => {},
-      moveTo: () => {},
-      lineTo: () => {},
-      arc: () => {},
-      fill: () => {},
-      stroke: () => {},
-      fillText: () => {},
-      measureText: () => ({ width: 0 }),
-      createRadialGradient: () => ({ addColorStop: () => {} }),
-      save: () => {},
-      restore: () => {},
-      translate: () => {},
-      drawImage: () => {},
-      getImageData: () => ({ data: new Uint8ClampedArray(0) }),
-      putImageData: () => {},
-      canvas: { width: 800, height: 600 },
-    }),
+    width,
+    height,
+    getContext: () => ctx,
   } as unknown as HTMLCanvasElement;
 }
 
@@ -399,6 +405,167 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
         expect.any(Number),
         expect.any(Number),
       );
+    });
+  });
+
+  describe('active radar map geometry (radar.cpp:480-570)', () => {
+    it('uses the C++ initial zoomed radar viewport instead of stretching the whole map', () => {
+      const r = new Renderer(mockCanvas(640, 400));
+      const camera = { x: 23 * CELL_SIZE, y: 57 * CELL_SIZE };
+      const layout = (r as any).getActiveRadarLayout({
+        boundsX: 23,
+        boundsY: 57,
+        boundsW: 87,
+        boundsH: 54,
+      }, camera);
+
+      expect(layout).toEqual({
+        x: 640 - 80 * RESFACTOR + 6 + 1,
+        y: 7 * RESFACTOR + 7,
+        w: 48 * 3,
+        h: 43 * 3,
+        cellPx: 3,
+        ox: 23,
+        oy: 57,
+        cellsW: 48,
+        cellsH: 43,
+      });
+    });
+
+    it('plots every mapped radar cell once and does not dim mapped fog cells', () => {
+      const fills: Array<{ x: number; y: number; w: number; h: number; style: string }> = [];
+      const ctx = {
+        fillStyle: '',
+        fillRect(x: number, y: number, w: number, h: number) {
+          fills.push({ x, y, w, h, style: this.fillStyle });
+        },
+      };
+      const r = new Renderer(mockCanvas(640, 400, ctx));
+      r.hasRadar = true;
+
+      const map = {
+        boundsX: 10,
+        boundsY: 20,
+        boundsW: 4,
+        boundsH: 3,
+        overlay: new Uint8Array(128 * 128),
+        getDisplayVisibility: () => 1,
+        getTerrain: () => Terrain.CLEAR,
+        getTreeType: () => null,
+      };
+
+      (r as any).renderMinimap(map, [], [], { x: 10 * 16, y: 20 * 16, viewWidth: 16, viewHeight: 16 }, undefined);
+
+      const layout = (r as any).getActiveRadarLayout(map, { x: 10 * 16, y: 20 * 16 });
+      const terrainFills = fills.filter(f => f.w === layout.cellPx && f.h === layout.cellPx);
+      const fogOverlays = fills.filter(f => f.style.includes('rgba(0,0,0'));
+      expect(terrainFills).toHaveLength(12);
+      expect(fogOverlays).toHaveLength(0);
+    });
+
+    it('blacks jammed radar terrain even when the cell is mapped', () => {
+      const fills: Array<{ x: number; y: number; w: number; h: number; style: string }> = [];
+      const ctx = {
+        fillStyle: '',
+        fillRect(x: number, y: number, w: number, h: number) {
+          fills.push({ x, y, w, h, style: this.fillStyle });
+        },
+      };
+      const r = new Renderer(mockCanvas(640, 400, ctx));
+      r.hasRadar = true;
+      const idx = 20 * 128 + 10;
+      const map = {
+        boundsX: 10,
+        boundsY: 20,
+        boundsW: 1,
+        boundsH: 1,
+        overlay: new Uint8Array(128 * 128),
+        jammedCells: new Map([[idx, 1]]),
+        getDisplayVisibility: () => 1,
+        getTerrain: () => Terrain.CLEAR,
+        getTreeType: () => null,
+      };
+
+      (r as any).renderMinimap(map, [], [], { x: 10 * CELL_SIZE, y: 20 * CELL_SIZE, viewWidth: 16, viewHeight: 16 }, undefined);
+
+      const layout = (r as any).getActiveRadarLayout(map, { x: 10 * CELL_SIZE, y: 20 * CELL_SIZE });
+      expect(fills).toContainEqual(expect.objectContaining({
+        x: layout.x,
+        y: layout.y,
+        w: layout.cellPx,
+        h: layout.cellPx,
+        style: '#000',
+      }));
+    });
+
+    it('draws unit blips with the exact C++ ColorRemaps[pcolor].Bar color', () => {
+      const fills: Array<{ x: number; y: number; w: number; h: number; style: string }> = [];
+      const ctx = {
+        fillStyle: '',
+        fillRect(x: number, y: number, w: number, h: number) {
+          fills.push({ x, y, w, h, style: this.fillStyle });
+        },
+      };
+      const r = new Renderer(mockCanvas(640, 400, ctx));
+      r.hasRadar = true;
+      const map = {
+        boundsX: 10,
+        boundsY: 20,
+        boundsW: 1,
+        boundsH: 1,
+        overlay: new Uint8Array(128 * 128),
+        getDisplayVisibility: () => 2,
+        getTerrain: () => Terrain.CLEAR,
+        getTreeType: () => null,
+      };
+      const unit = new Entity(
+        UnitType.V_1TNK,
+        House.Greece,
+        10 * CELL_SIZE + CELL_SIZE / 2,
+        20 * CELL_SIZE + CELL_SIZE / 2,
+      );
+
+      (r as any).renderMinimap(map, [unit], [], { x: 10 * CELL_SIZE, y: 20 * CELL_SIZE, viewWidth: 16, viewHeight: 16 }, undefined);
+
+      const layout = (r as any).getActiveRadarLayout(map, { x: 10 * CELL_SIZE, y: 20 * CELL_SIZE });
+      expect(fills).toContainEqual(expect.objectContaining({
+        x: layout.x,
+        y: layout.y,
+        w: layout.cellPx,
+        h: layout.cellPx,
+        style: 'rgb(104,116,160)',
+      }));
+    });
+
+    it('draws the viewport as C++ LTGREEN corner brackets, not a white rectangle', () => {
+      const strokeRect = vi.fn();
+      const cursorFills: Array<{ w: number; h: number; style: string }> = [];
+      const fillRect = vi.fn(function (this: { fillStyle?: string }, _x: number, _y: number, w: number, h: number) {
+        if (this.fillStyle === 'rgb(84,252,84)') cursorFills.push({ w, h, style: this.fillStyle });
+      });
+      const lineTo = vi.fn();
+      const moveTo = vi.fn();
+      const ctx = { strokeRect, fillRect, lineTo, moveTo };
+      const r = new Renderer(mockCanvas(640, 400, ctx));
+      r.hasRadar = true;
+      const map = {
+        boundsX: 10,
+        boundsY: 20,
+        boundsW: 4,
+        boundsH: 3,
+        overlay: new Uint8Array(128 * 128),
+        getDisplayVisibility: () => 0,
+        getTerrain: () => Terrain.CLEAR,
+        getTreeType: () => null,
+      };
+
+      (r as any).renderMinimap(map, [], [], { x: 10 * 16, y: 20 * 16, viewWidth: 16, viewHeight: 16 }, undefined);
+
+      expect(strokeRect).not.toHaveBeenCalled();
+      expect(moveTo).not.toHaveBeenCalled();
+      expect(lineTo).not.toHaveBeenCalled();
+      expect(cursorFills).toHaveLength(8);
+      expect(cursorFills.every(f => f.w === 1 || f.h === 1)).toBe(true);
     });
   });
 });

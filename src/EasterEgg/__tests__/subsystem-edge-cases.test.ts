@@ -105,6 +105,8 @@ function makeMockMap() {
     clearWallType: (_cx: number, _cy: number) => {},
     getWallType: (_cx: number, _cy: number) => '',
     getOccupancy: (_cx: number, _cy: number) => 0,
+    occupyClaimedSubCell: (_cellIdx: number, _id: number, _spot: number) => true,
+    vacateSubCell: (_cx: number, _cy: number, _id: number) => {},
     inBounds: (_cx: number, _cy: number) => true,
     overlay: new Uint8Array(128 * 128).fill(0xFF),
     boundsX: 0, boundsY: 0, boundsW: 128, boundsH: 128,
@@ -375,7 +377,7 @@ describe('Nuke detonation during low power', () => {
     expect(damageTaken).toBeGreaterThanOrEqual(1);
   });
 
-  it('nuke screen effects fire even at zero power', () => {
+  it('nuke palette and shake effects fire even at zero power', () => {
     const ctx = makeSuperweaponContext({
       powerProduced: 0,
       powerConsumed: 500,
@@ -383,7 +385,8 @@ describe('Nuke detonation during low power', () => {
 
     detonateNuke(ctx, { x: 500, y: 500 });
 
-    expect(ctx.screenFlash).toBe(30);
+    expect(ctx.whitePaletteFade).toBe(45);
+    expect(ctx.screenFlash).toBe(0);
     expect(ctx.screenShake).toBe(3);
     // Mushroom cloud + 6 secondary blasts
     expect(ctx.effects.length).toBeGreaterThanOrEqual(7);

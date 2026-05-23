@@ -127,18 +127,15 @@ describe('Iron Curtain color (C++ FadingRed palette remap)', () => {
 });
 
 describe('Building fire sprite tiers (C++ ANIM_ON_FIRE_SMALL/MED/BIG)', () => {
-  const FIRE_TIERS: [string, string, number][] = [
-    // [hpRange, sprite, numSources]
-    ['<25% HP (critical)', 'burn-l', 3],
-    ['<50% HP (heavy)', 'burn-m', 2],
-    ['<75% HP (light)', 'burn-s', 1],
+  const FIRE_TIERS: [string, string][] = [
+    ['ON_FIRE_BIG', 'burn-l'],
+    ['ON_FIRE_MED', 'burn-m'],
+    ['ON_FIRE_SMALL', 'burn-s'],
   ];
 
-  for (const [range, sprite, sources] of FIRE_TIERS) {
-    it(`${range}: uses ${sprite} with ${sources} source(s)`, () => {
+  for (const [anim, sprite] of FIRE_TIERS) {
+    it(`${anim}: uses ${sprite}`, () => {
       expect(sprite).toMatch(/^burn-[sml]$/);
-      expect(sources).toBeGreaterThan(0);
-      expect(sources).toBeLessThanOrEqual(3);
     });
   }
 });

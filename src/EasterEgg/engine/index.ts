@@ -9,7 +9,7 @@ import {
   type AllianceTable, buildDefaultAlliances, buildAlliancesFromINI,
 	  CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC, MPH_TO_PX, LEPTON_SIZE, RESFACTOR,
 	  MAX_DAMAGE, REPAIR_STEP, CONDITION_RED, CONDITION_YELLOW, RULE_GRAVITY,
-		  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell, pixelToLepton, leptonToPixel, leptonDist, directionToLeptons, directionToLeptons256, cellTargetToLepton, DIR_DX, DIR_DY, COS_TABLE_256, SIN_TABLE_256,
+		  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell, pixelToLepton, leptonToPixel, leptonDist, cellDist, radiusCellOffsets, directionToLeptons, directionToLeptons256, cellTargetToLepton, DIR_DX, DIR_DY, COS_TABLE_256, SIN_TABLE_256,
 	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex, EXPLOSION_FRAMES,
   MISSION_CONTROL,
   type ProductionItem, CursorType, type StripType, getStripSide, getFactoryType,
@@ -183,6 +183,7 @@ import {
   revealAroundCell as _revealAroundCell,
   revealZoneFloodFill as _revealZoneFloodFill,
   updateGapGenerators as _updateGapGenerators,
+  structureLookCell,
   GAP_RADIUS, GAP_UPDATE_INTERVAL, DEFENSE_TYPES as FOG_DEFENSE_TYPES,
   STRUCTURE_SIGHT,
 } from './fog';
@@ -489,6 +490,43 @@ const CPP_ANIM_MAX = 100;
 const CPP_CORPSE_ANIM_SLOT_TICKS = 30;
 type AIFactoryKind = 'building' | 'infantry' | 'unit' | 'vessel';
 
+export interface CreditDisplayState {
+  current: number;
+  countdown: number;
+}
+
+/** C++ CreditClass::AI display counter update (credits.cpp:190-244). */
+export function advanceCreditDisplayParity(
+  state: CreditDisplayState,
+  credits: number,
+  forced = false,
+): CreditDisplayState {
+  const target = Math.max(0, Math.floor(credits));
+  let { current, countdown } = state;
+  current = Math.floor(current);
+  countdown = Math.max(0, Math.floor(countdown));
+
+  if (current === target) return { current, countdown };
+  if (forced) return { current: target, countdown };
+
+  if (countdown > 0) {
+    countdown--;
+    if (countdown > 0) return { current, countdown };
+  }
+
+  let adder = target - current;
+  countdown = adder > 0 ? 1 : 3;
+  adder = Math.abs(adder) >> 3;
+  adder = Math.max(1, Math.min(143, adder));
+  if (current > target) adder = -adder;
+
+  current += adder;
+  if ((adder > 0 && current > target) || (adder < 0 && current < target)) {
+    current = target;
+  }
+  return { current, countdown };
+}
+
 export class Game {
   // Core systems
   assets: AssetManager;
@@ -556,6 +594,7 @@ export class Game {
   // Economy
   credits = 0;
   displayCredits = 0; // animated counter shown in sidebar (ticks toward credits)
+  private displayCreditsCountdown = 0;
   /** Cached silo storage capacity (PROC=2000, SILO=1500 each per rules.ini Storage=) — recalculated on structure change */
   siloCapacity = 0;
   /** Tick when last EVA "silos needed" warning played (throttle to 30s = 450 ticks) */
@@ -755,6 +794,8 @@ export class Game {
   private discoveredEntityIds = new Set<number>();
   /** Structure indices that have been discovered by the player */
   private discoveredStructureIds = new Set<number>();
+  /** Player-owned structures whose TechnoClass::IsDiscoveredByPlayer is set. */
+  private playerDiscoveredStructureIds = new Set<number>();
   // C++ parity (#21): per-house discovery tracking (TEVENT_HOUSE_DISCOVERED)
   /** RA house indices whose IsDiscovered flag has been set (any unit of house first seen) */
   private houseDiscovered = new Map<number, boolean>();
@@ -786,11 +827,12 @@ export class Game {
   // driven only by explicit step() calls, like the C++ agent harness.
   comparisonMode = false;
   private radarVisual: RadarVisualState = createRadarVisualState();
-  private radarVisualLastAdvancedTick = -1;
   /** When true, fog of war is disabled (all cells visible) */
   fogDisabled = false;
   /** C++ RulesClass::IsAllyReveal after scenario [General] overrides. */
   private allyReveal = true;
+  /** C++ HouseClass::IsToLook starts true and PlayerPtr consumes it in first HouseClass::AI. */
+  private playerHouseIsToLook = true;
   // fogReEnableTick removed — C++ RadarSpied is permanent, no re-enable timer (infantry.cpp:660-662)
   /** C++ CellClass::IsMapped for PlayerPtr. Kept separate from display fog
    *  because agent/compare modes reveal the whole TS map for inspection. */
@@ -1060,6 +1102,30 @@ export class Game {
     for (const corpse of this.corpses) {
       if (corpse.logicIndexHint !== undefined && corpse.logicIndexHint > deletedHint) {
         corpse.logicIndexHint--;
+      }
+    }
+  }
+
+  private shiftAttachedStructureIndicesAfterRemoval(
+    removedStructureIndex: number,
+    logicAnims = this.logicAnims,
+    effects = this.effects,
+  ): void {
+    for (const anim of logicAnims) {
+      if (anim.attachedStructureIndex === undefined) continue;
+      if (anim.attachedStructureIndex === removedStructureIndex) {
+        anim.deleteOnNextProcess = true;
+      } else if (anim.attachedStructureIndex > removedStructureIndex) {
+        anim.attachedStructureIndex--;
+      }
+    }
+    for (let i = effects.length - 1; i >= 0; i--) {
+      const attachedIndex = effects[i].attachedStructureIndex;
+      if (attachedIndex === undefined) continue;
+      if (attachedIndex === removedStructureIndex) {
+        effects.splice(i, 1);
+      } else if (attachedIndex > removedStructureIndex) {
+        effects[i].attachedStructureIndex = attachedIndex - 1;
       }
     }
   }
@@ -1474,6 +1540,7 @@ export class Game {
       gapGeneratorCells: this.gapGeneratorCells,
       isAllied: (a, b) => this.isAllied(a, b),
       entitiesAllied: (a, b) => this.entitiesAllied(a, b),
+      structureRevealsForPlayer: (s) => this.structureRevealsForPlayer(s),
     };
   }
 
@@ -2079,7 +2146,6 @@ export class Game {
     this.stopped = false;
     this.tick = 0;
     this.radarVisual = createRadarVisualState();
-    this.radarVisualLastAdvancedTick = -1;
     this.scenarioId = scenarioId;
     this.difficulty = difficulty;
     this.onStateChange?.('loading');
@@ -2208,6 +2274,10 @@ export class Game {
     this.lossCount = 0;
     this.pointTotal = 0;
     this.destroyedTriggerNames.clear();
+    this.discoveredEntityIds.clear();
+    this.discoveredStructureIds.clear();
+    this.playerDiscoveredStructureIds.clear();
+    this.houseDiscovered.clear();
     // Reset game loop accumulator — prevents turbo-speed carryover from previous
     // mission causing a burst of 60+ ticks on the first frame of the new mission,
     // which would blow past the tick<45 victory-check guard.
@@ -2235,6 +2305,7 @@ export class Game {
     this.builtUnitTypes.clear();
     this.builtInfantryTypes.clear();
     this.builtAircraftTypes.clear();
+    this.playerHouseIsToLook = true;
     // Initialize trigger timers to game tick 0 (start of mission)
     for (const t of this.triggers) t.timerTick = 0;
 
@@ -2285,9 +2356,11 @@ export class Game {
     // C++ scenario.cpp:646 calls Map.All_To_Look(true) after scenario load.
     // display.cpp:4448-4452 skips buildings for that pass; buildings only
     // cascade sight if a player unit maps their footprint and Revealed()
-    // calls Look(). The normal per-frame pass below includes buildings.
+    // calls Look().
     this.applyScenarioInitLook();
-    this.markCurrentPlayerSightMapped();
+    // C++ scenario.cpp:588-599 marks the scenario perimeter ring after
+    // scenario objects have unlimboed and performed their initial Look().
+    this.map.markDisplayShroudRing();
 
     // H5: Clamp camera to playable bounds, not full 128x128 map
     this.camera.setPlayableBounds(this.map.boundsX, this.map.boundsY, this.map.boundsW, this.map.boundsH);
@@ -2540,6 +2613,7 @@ export class Game {
       // C++ Main_Loop renders the current HidPage before Logic.AI advances the
       // frame. Agent screenshots read that back buffer after agent_step(), so
       // the visible frame is the state before the final stepped logic tick.
+      this.advanceCreditDisplay();
       if (i === n - 1) {
         this.renderer.interpolationAlpha = 1;
         this.render();
@@ -2558,6 +2632,16 @@ export class Game {
   consumeInitRNG(): void {
     // Set debug log start so gameplay calls are captured (not init calls)
     ScenarioRandom.debugLogStart = ScenarioRandom.callCount;
+  }
+
+  private advanceCreditDisplay(forced = false): void {
+    const next = advanceCreditDisplayParity(
+      { current: this.displayCredits, countdown: this.displayCreditsCountdown },
+      this.credits,
+      forced,
+    );
+    this.displayCredits = next.current;
+    this.displayCreditsCountdown = next.countdown;
   }
 
   /** Disable fog of war (reveal entire map) */
@@ -2605,6 +2689,7 @@ export class Game {
     let ticksThisFrame = 0;
     while (this.accumulator >= this.tickInterval && ticksThisFrame < maxTicksPerFrame) {
       this.accumulator -= this.tickInterval;
+      this.advanceCreditDisplay();
       this.update();
       ticksThisFrame++;
       if (this.state !== 'playing') break;
@@ -2701,7 +2786,6 @@ export class Game {
 
     // Update fog of war
     this.updateFogOfWar();
-    this.markCurrentPlayerSightMapped();
     // C++ DisplayClass::Map_Cell calls TechnoClass::Revealed(PlayerPtr)
     // while player sight is mapped. Object DISCOVERED triggers therefore spring
     // before Logic's Team AI pass can recruit/update newly created teams.
@@ -3156,6 +3240,11 @@ export class Game {
             if (structureIndex < this._scenarioStructureCount) {
               this._scenarioStructureCount = Math.max(0, this._scenarioStructureCount - 1);
             }
+            this.shiftAttachedStructureIndicesAfterRemoval(
+              structureIndex,
+              ctx.logicAnims,
+              ctx.effects,
+            );
             this.structures.splice(structureIndex, 1);
             structureIndex--;
             logicIdx--;
@@ -3736,6 +3825,7 @@ export class Game {
     // C++ House::AI() per-tick RNG parity — AI_Building/AI_Unit/AI_Vessel/AI_Infantry/AI_Aircraft
     // plus timer-gated sections (AlertTime, TeamTime). Must run EVERY tick in C++ house enum order.
     this._runAI(ctx => _aiPerTick(ctx));
+    this.runPlayerHouseAllToLook();
 
     // Legacy strategic helpers that still model non-RNG house bookkeeping.
     // C++ structure selection/placement runs through HouseClass::AI_Building
@@ -3815,14 +3905,6 @@ export class Game {
       });
     }
 
-    // Animate displayed credits toward actual credits
-    if (this.displayCredits !== this.credits) {
-      const diff = this.credits - this.displayCredits;
-      const step = Math.max(1, Math.abs(diff) >> 2); // tick 25% per frame
-      if (diff > 0) this.displayCredits = Math.min(this.credits, this.displayCredits + step);
-      else this.displayCredits = Math.max(this.credits, this.displayCredits - step);
-    }
-
     // Calculate power balance
     const powerGrid = _calculatePowerGrid(
       this.structures,
@@ -3831,7 +3913,17 @@ export class Game {
     );
     this.powerProduced = powerGrid.produced;
     this.powerConsumed = powerGrid.consumed;
+    this.renderer.sidebarPowerProduced = this.powerProduced;
+    this.renderer.sidebarPowerConsumed = this.powerConsumed;
+    // C++ PowerClass::AI advances power-bar animation once per game frame.
+    // Keep it in the logic tick so agent-step screenshots do not depend on
+    // how many times the TS renderer happened to run between captured frames.
+    this.renderer.updatePowerAnimation();
     this.updatePlayerRadarAvailability();
+    // C++ RadarClass::AI advances the natoradr/ussrradr cover animation once
+    // per game frame. Advancing it from render makes batched agent-step visual
+    // captures lag far behind the original.
+    advanceRadarAnimation(this.radarVisual);
 
     // Low power warning (every 10 seconds when power demand exceeds supply)
     if (this.powerConsumed > this.powerProduced && this.powerProduced > 0 &&
@@ -4008,6 +4100,14 @@ export class Game {
 
   /** Update fog of war — delegates to fog.ts */
   private updateFogOfWar(): void {
+    // C++ does not rebuild player sight from every active object each frame.
+    // DisplayClass::All_To_Look runs at scenario init / reshroud events, and
+    // mobile objects reveal via TechnoClass::Look() at cell-boundary call sites.
+    // Keep the legacy full rebuild only for explicit reveal-all states.
+    if (!this.fogDisabled && !this.gpsActive) {
+      this.updateSubDetection();
+      return;
+    }
     _updateFogOfWar(this._fogCtx);
   }
 
@@ -4016,10 +4116,32 @@ export class Game {
     _updateSubDetection(this._fogCtx);
   }
 
-  private revealSightForPlayer(cx: number, cy: number, radius: number): void {
+  private revealSightForPlayer(cx: number, cy: number, radius: number, incremental = false): void {
+    if (!this.map.inBounds(cx, cy)) return;
     if (!radius || radius > 10) return;
-    _revealAroundCell(this.map, cx, cy, radius);
-    this.markPlayerMappedSight(cx, cy, radius);
+    _revealAroundCell(this.map, cx, cy, radius, incremental);
+    this.markPlayerMappedSight(cx, cy, radius, incremental);
+  }
+
+  private revealStructureSightForPlayer(structure: MapStructure): void {
+    const look = structureLookCell(structure);
+    this.revealSightForPlayer(look.cx, look.cy, STRUCTURE_SIGHT[structure.type] ?? 5);
+  }
+
+  private revealMappedPlayerStructures(): void {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let i = 0; i < this.structures.length; i++) {
+        if (this.playerDiscoveredStructureIds.has(i)) continue;
+        const s = this.structures[i];
+        if (!s.alive || s.house !== this.playerHouse) continue;
+        if (!this.isStructureFootprintMappedForPlayer(s)) continue;
+        this.playerDiscoveredStructureIds.add(i);
+        this.revealStructureSightForPlayer(s);
+        changed = true;
+      }
+    }
   }
 
   private applyScenarioInitLook(): void {
@@ -4034,20 +4156,7 @@ export class Game {
       this.revealSightForPlayer(e.cell.cx, e.cell.cy, e.stats.sight);
     }
 
-    const lookedStructures = new Set<number>();
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (let i = 0; i < this.structures.length; i++) {
-        if (lookedStructures.has(i)) continue;
-        const s = this.structures[i];
-        if (!s.alive || s.house !== this.playerHouse) continue;
-        if (!this.isStructureFootprintMappedForPlayer(s)) continue;
-        lookedStructures.add(i);
-        this.revealSightForPlayer(s.cx, s.cy, STRUCTURE_SIGHT[s.type] ?? 5);
-        changed = true;
-      }
-    }
+    this.revealMappedPlayerStructures();
     this.updateSubDetection();
   }
 
@@ -13604,12 +13713,8 @@ export class Game {
           this.releaseDriveTrackReservation(entity, cellIdx);
         }
         this.runUnitCrusherPerCellProcess(entity);
-        // Fog reveal around the mid-cell position (C++ Look() equivalent)
-        const midCx = Math.floor(entity.pos.x / CELL_SIZE);
-        const midCy = Math.floor(entity.pos.y / CELL_SIZE);
-        if (entity.isPlayerUnit) {
-          this.revealAroundCell(midCx, midCy, entity.stats.sight);
-        }
+        // C++ PCP_DURING handles crushing/overlays only. Sight updates are issued
+        // by UnitClass::Per_Cell_Process(PCP_END) after the track completes.
         if (!entity.alive) return false; // C++ drive.cpp:724-726: if (!IsActive) return false
       }
 
@@ -14022,34 +14127,22 @@ export class Game {
     return true;
   }
 
-  private markPlayerMappedSight(cx: number, cy: number, radius: number): boolean {
+  private markPlayerMappedSight(cx: number, cy: number, radius: number, incremental = false): boolean {
     if (!this.map.inBounds(cx, cy)) return false;
     if (!radius || radius > 10) return false;
     let changed = false;
-    const threshold = radius * 2;
-    for (let dy = -radius; dy <= radius; dy++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        const rx = cx + dx;
-        const ry = cy + dy;
-        if (rx < 0 || rx >= MAP_CELLS || ry < 0 || ry >= MAP_CELLS) continue;
-        const adx = Math.abs(dx);
-        const ady = Math.abs(dy);
-        const big = adx > ady ? adx : ady;
-        const small = adx > ady ? ady : adx;
-        if (big * 2 + small <= threshold) {
-          changed = this.markPlayerMappedCell(rx, ry) || changed;
-        }
-      }
+    for (const { dx, dy } of radiusCellOffsets(radius, incremental)) {
+      const rx = cx + dx;
+      const ry = cy + dy;
+      if (rx < 0 || rx >= MAP_CELLS || ry < 0 || ry >= MAP_CELLS) continue;
+      changed = this.markPlayerMappedCell(rx, ry) || changed;
     }
     return changed;
   }
 
   private isStructureFootprintMappedForPlayer(structure: MapStructure): boolean {
-    const [sw, sh] = STRUCTURE_SIZE[structure.type] ?? [1, 1];
-    for (let y = 0; y < sh; y++) {
-      for (let x = 0; x < sw; x++) {
-        if (this.isCellMappedForPlayer(structure.cx + x, structure.cy + y)) return true;
-      }
+    for (const cell of getStructureOccupyCells(structure.type, structure.cx, structure.cy)) {
+      if (this.isCellMappedForPlayer(cell.cx, cell.cy)) return true;
     }
     return false;
   }
@@ -14065,7 +14158,8 @@ export class Game {
       for (const s of this.structures) {
         if (!s.alive || s.house !== this.playerHouse) continue;
         if (!this.isStructureFootprintMappedForPlayer(s)) continue;
-        changed = this.markPlayerMappedSight(s.cx, s.cy, STRUCTURE_SIGHT[s.type] ?? 5) || changed;
+        const look = structureLookCell(s);
+        changed = this.markPlayerMappedSight(look.cx, look.cy, STRUCTURE_SIGHT[s.type] ?? 5) || changed;
       }
     }
   }
@@ -14078,12 +14172,13 @@ export class Game {
     this.markMappedPlayerStructureSight();
     for (const s of this.structures) {
       if (!s.alive || !this.structureRevealsForPlayer(s)) continue;
-      this.markPlayerMappedSight(s.cx, s.cy, STRUCTURE_SIGHT[s.type] ?? 5);
+      const look = structureLookCell(s);
+      this.markPlayerMappedSight(look.cx, look.cy, STRUCTURE_SIGHT[s.type] ?? 5);
     }
   }
 
   private structureRevealsForPlayer(s: MapStructure): boolean {
-    if (s.house === this.playerHouse) return true;
+    if (s.house === this.playerHouse) return this.isStructureFootprintMappedForPlayer(s);
     if (!this.allyReveal) return false;
     return this.isAllied(s.house, this.playerHouse);
   }
@@ -14098,11 +14193,7 @@ export class Game {
 
     const inSight = (sx: number, sy: number, sight: number): boolean => {
       if (!sight || sight > 10) return false;
-      const dx = Math.abs(sx - cx);
-      const dy = Math.abs(sy - cy);
-      const big = dx > dy ? dx : dy;
-      const small = dx > dy ? dy : dx;
-      return big * 2 + small <= sight * 2;
+      return cellDist(sx - cx, sy - cy) <= sight;
     };
 
     for (const e of this.entities) {
@@ -14114,7 +14205,8 @@ export class Game {
 
     for (const s of this.structures) {
       if (!s.alive || !this.structureRevealsForPlayer(s)) continue;
-      if (inSight(s.cx, s.cy, STRUCTURE_SIGHT[s.type] ?? 5)) return true;
+      const look = structureLookCell(s);
+      if (inSight(look.cx, look.cy, STRUCTURE_SIGHT[s.type] ?? 5)) return true;
     }
     return false;
   }
@@ -14270,26 +14362,18 @@ export class Game {
     // Look pass (display.cpp:4448-4464). Map_Cell can remap allied house sight to
     // PlayerPtr, but only if that allied techno actually Look()s; AI ally units do not.
     // SCG07EA t45: England JEEP sight must not set IsDiscoveredByPlayer on USSR E4.
-    // Uses octagonal distance matching coord.cpp Distance() (big*2 + small <= sight*2).
+    // Uses coord.cpp Distance(): max + floor(min / 2).
     for (const e of this.entities) {
       if (!e.alive || e.house !== this.playerHouse) continue;
       const sight = e.stats.sight;
       if (!sight || sight > 10) continue;
-      const dx = Math.abs(e.cell.cx - cx);
-      const dy = Math.abs(e.cell.cy - cy);
-      const big = dx > dy ? dx : dy;
-      const small = dx > dy ? dy : dx;
-      if (big * 2 + small <= sight * 2) return true;
+      if (cellDist(e.cell.cx - cx, e.cell.cy - cy) <= sight) return true;
     }
     for (const s of this.structures) {
       if (!s.alive || !this.structureRevealsForPlayer(s)) continue;
       const sight = STRUCTURE_SIGHT[s.type] ?? 5;
       if (!sight || sight > 10) continue;
-      const dx = Math.abs(s.cx - cx);
-      const dy = Math.abs(s.cy - cy);
-      const big = dx > dy ? dx : dy;
-      const small = dx > dy ? dy : dx;
-      if (big * 2 + small <= sight * 2) return true;
+      if (cellDist(s.cx - cx, s.cy - cy) <= sight) return true;
     }
     return false;
   }
@@ -14487,7 +14571,8 @@ export class Game {
       if (!set) { set = new Set(); this._houseRevealed.set(hi, set); }
       const sight = STRUCTURE_SIGHT[s.type] ?? 5;
       if (!sight || sight > 10) continue;
-      this._addOctagonalCells(set, s.cx, s.cy, sight);
+      const look = structureLookCell(s);
+      this._addOctagonalCells(set, look.cx, look.cy, sight);
     }
     // C++ parity: allied houses share vision (house.cpp:1265 — IsAllied checks).
     // If house A is allied with house B, A's units reveal cells for B and vice versa.
@@ -14514,30 +14599,10 @@ export class Game {
   /** Add cells within octagonal sight radius to a set.
    *  C++ coord.cpp:124-136 — Distance() uses max(|dy|,|dx|) + min(|dy|,|dx|)/2. */
   private _addOctagonalCells(set: Set<number>, cx: number, cy: number, radius: number): void {
-    if (radius === 1) {
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const rx = cx + dx, ry = cy + dy;
-          if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
-            set.add(ry * MAP_CELLS + rx);
-          }
-        }
-      }
-      return;
-    }
-    const threshold = radius * 2;
-    for (let dy = -radius; dy <= radius; dy++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        const adx = Math.abs(dx);
-        const ady = Math.abs(dy);
-        const big = adx > ady ? adx : ady;
-        const small = adx > ady ? ady : adx;
-        if (big * 2 + small <= threshold) {
-          const rx = cx + dx, ry = cy + dy;
-          if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
-            set.add(ry * MAP_CELLS + rx);
-          }
-        }
+    for (const { dx, dy } of radiusCellOffsets(radius)) {
+      const rx = cx + dx, ry = cy + dy;
+      if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
+        set.add(ry * MAP_CELLS + rx);
       }
     }
   }
@@ -15820,8 +15885,8 @@ export class Game {
   }
 
   /** Reveal map around a specific cell — delegates to fog.ts */
-  private revealAroundCell(cx: number, cy: number, radius: number): void {
-    _revealAroundCell(this.map, cx, cy, radius);
+  private revealAroundCell(cx: number, cy: number, radius: number, incremental = false): void {
+    _revealAroundCell(this.map, cx, cy, radius, incremental);
   }
 
   /** C++ TechnoClass::Fire_At (techno.cpp:3263-3265):
@@ -15846,10 +15911,12 @@ export class Game {
 
   /** C++ MapClass::Sight_From(..., PlayerPtr): map cells and run Map_Cell's
    *  object discovery side effect for the same sight radius. */
-  private revealSightFromPlayer(cx: number, cy: number, radius: number): void {
-    this.revealAroundCell(cx, cy, radius);
-    this.markPlayerMappedSight(cx, cy, radius);
-    this.markObjectsRevealedToPlayer(cx, cy, radius);
+  private revealSightFromPlayer(cx: number, cy: number, radius: number, incremental = false): void {
+    if (!this.map.inBounds(cx, cy)) return;
+    this.revealAroundCell(cx, cy, radius, incremental);
+    this.markPlayerMappedSight(cx, cy, radius, incremental);
+    this.revealMappedPlayerStructures();
+    this.markObjectsRevealedToPlayer(cx, cy, radius, incremental);
   }
 
   /** C++ mobile TechnoClass::Look() remapped to PlayerPtr for player-allied houses.
@@ -15860,19 +15927,45 @@ export class Game {
     if (entity.house !== this.playerHouse && !this.isAllied(entity.house, this.playerHouse)) return;
     const sight = entity.stats.sight;
     if (!sight || sight > 10) return;
-    this.revealSightFromPlayer(entity.cell.cx, entity.cell.cy, sight);
+    this.revealSightFromPlayer(entity.cell.cx, entity.cell.cy, sight, true);
     this.markEntityDiscoveredByPlayer(entity);
+  }
+
+  private runPlayerHouseAllToLook(): void {
+    if (!this.playerHouseIsToLook) return;
+    this.playerHouseIsToLook = false;
+
+    // C++ house.cpp:1380 + display.cpp:4444-4462. HouseClass::IsToLook starts
+    // true, and PlayerPtr consumes it on the first HouseClass::AI frame with a
+    // full All_To_Look() pass. This is not a per-frame sight rebuild.
+    for (const entity of this.entities) {
+      if (!entity.alive || entity.inLimbo || entity.isAirUnit) continue;
+      if (!this.isHouseHumanOrPlayerControl(entity.house)) continue;
+      const sight = entity.stats.sight;
+      if (!sight || sight > 10) continue;
+      this.revealSightFromPlayer(entity.cell.cx, entity.cell.cy, sight);
+    }
+
+    for (let i = 0; i < this.structures.length; i++) {
+      const s = this.structures[i];
+      if (!s.alive) continue;
+      if (s.house === this.playerHouse) {
+        if (!this.playerDiscoveredStructureIds.has(i)) continue;
+        this.revealStructureSightForPlayer(s);
+        this.revealMappedPlayerStructures();
+      } else if (this.allyReveal && this.isAllied(s.house, this.playerHouse)) {
+        this.revealStructureSightForPlayer(s);
+        this.revealMappedPlayerStructures();
+      }
+    }
   }
 
   /** Mirror DisplayClass::Map_Cell's `tech->Revealed(PlayerPtr)` side effect
    *  for cells exposed by a non-standard reveal path such as Fire_At. */
-  private markObjectsRevealedToPlayer(cx: number, cy: number, radius: number): void {
+  private markObjectsRevealedToPlayer(cx: number, cy: number, radius: number, incremental = false): void {
+    const offsets = new Set(radiusCellOffsets(radius, incremental).map(({ dx, dy }) => `${dx},${dy}`));
     const inSight = (x: number, y: number): boolean => {
-      const dx = Math.abs(x - cx);
-      const dy = Math.abs(y - cy);
-      const big = dx > dy ? dx : dy;
-      const small = dx > dy ? dy : dx;
-      return big * 2 + small <= radius * 2;
+      return offsets.has(`${x - cx},${y - cy}`);
     };
 
     const revealEntity = (e: Entity): void => {
@@ -16164,15 +16257,6 @@ export class Game {
       hasFullPower: this.hasFullPlayerPower(),
       isGpsActive: this.gpsActive,
     });
-  }
-
-  private updateRadarVisualFrameForRender(): void {
-    // C++ Main_Loop runs Map.Input/RadarClass::AI before Map.Render. Advance the
-    // opening/closing cover animation once per stepped frame, not once per canvas
-    // paint in the interpolated browser loop.
-    if (this.radarVisualLastAdvancedTick === this.tick) return;
-    this.radarVisualLastAdvancedTick = this.tick;
-    advanceRadarAnimation(this.radarVisual);
   }
 
   /** Calculate total silo storage capacity from alive player structures.
@@ -17159,10 +17243,10 @@ export class Game {
 
   /** Render the current frame */
   private render(): void {
-    this.updateRadarVisualFrameForRender();
     this.renderer.attackMoveMode = this.attackMoveMode;
     this.renderer.sellMode = this.sellMode;
     this.renderer.repairMode = this.repairMode;
+    this.renderer.suppressScreenShake = this.comparisonMode;
     this.renderer.repairingStructures = this.repairingStructures;
     this.renderer.corpses = this.corpses;
     // Sidebar data
@@ -17175,8 +17259,6 @@ export class Game {
     this.renderer.sidebarW = Game.SIDEBAR_W;
     this.renderer.leftStripScroll = this.stripScrollPositions.left;
     this.renderer.rightStripScroll = this.stripScrollPositions.right;
-    // Power bar bounce animation (C++ PowerClass::AI — runs each tick)
-    this.renderer.updatePowerAnimation();
     this.renderer.doesRadarExist = isRadarExisting(this.radarVisual, this.gpsActive);
     this.renderer.hasRadar = isRadarActive(this.radarVisual, this.gpsActive);
     this.renderer.radarCoverFrame = radarDisplayFrame(this.radarVisual);
@@ -18246,6 +18328,11 @@ export class Game {
       _structIdx++;
       if (!s.alive) {
         if (_tickDestroyedStructureDebris(combatCtx, s)) {
+          this.shiftAttachedStructureIndicesAfterRemoval(
+            structureIndex,
+            combatCtx.logicAnims,
+            combatCtx.effects,
+          );
           this.structures.splice(structureIndex, 1);
           structureIndex--;
           _structIdx--;

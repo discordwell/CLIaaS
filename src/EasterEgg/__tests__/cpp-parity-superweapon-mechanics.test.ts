@@ -655,14 +655,15 @@ describe('Nuke launch sequence (C++ house.cpp nuke mechanics)', () => {
     expect(mushroomCloud).toBeDefined();
   });
 
-  it('nuke causes screen shake and flash', () => {
+  it('nuke causes screen shake and white palette fade', () => {
     const ctx = makeSuperweaponCtx(SuperweaponType.NUKE, House.Spain);
     const target = { x: 20 * CELL_SIZE, y: 20 * CELL_SIZE };
 
     detonateNuke(ctx, target);
 
     expect(ctx.screenShake).toBeGreaterThan(0);
-    expect(ctx.screenFlash).toBeGreaterThan(0);
+    expect(ctx.whitePaletteFade).toBeGreaterThan(0);
+    expect(ctx.screenFlash).toBe(0);
   });
 
   it('nuke scorches earth at ground zero (sets terrain to ROCK)', () => {

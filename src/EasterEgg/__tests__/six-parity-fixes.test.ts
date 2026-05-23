@@ -77,17 +77,15 @@ describe('sell survivor parity constants', () => {
 });
 
 describe('credits display', () => {
-  it('Math.floor prevents fractional display', () => {
-    // Simulates the displayCredits animation step
+  it('C++ credit display counter remains integral', async () => {
+    const { advanceCreditDisplayParity } = await import('../engine');
     const credits = 1500;
-    let displayCredits = 0;
+    let state = { current: 0, countdown: 0 };
     for (let i = 0; i < 100; i++) {
-      const diff = credits - displayCredits;
-      if (diff === 0) break;
-      const step = Math.max(1, Math.abs(diff) >> 2);
-      displayCredits = Math.min(credits, displayCredits + step);
+      state = advanceCreditDisplayParity(state, credits);
+      if (state.current === credits) break;
     }
-    expect(Math.floor(displayCredits)).toBe(displayCredits);
-    expect(displayCredits).toBe(credits);
+    expect(Math.floor(state.current)).toBe(state.current);
+    expect(state.current).toBe(credits);
   });
 });

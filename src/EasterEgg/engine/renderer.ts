@@ -4,7 +4,7 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, RESFACTOR, House, Stance, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, CONDITION_YELLOW, leptonToPixel, type Faction } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, RESFACTOR, House, Stance, UnitType, BODY_SHAPE, INFANTRY_ANIMS, ANT_ANIM, UNIT_STATS, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, leptonToPixel, type Faction, COS_TABLE_256, SIN_TABLE_256 } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type TilesetMeta } from './assets';
 import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
@@ -25,6 +25,43 @@ function lerpFacing32(prev: number, curr: number, alpha: number): number {
   return ((Math.round(result) % 32) + 32) % 32;
 }
 
+function dir256ToFacing16(dir: number): number {
+  return (((dir + 8) & 0xff) >> 4) & 0x0f;
+}
+
+function vesselBodyFrame(entity: Entity, fallbackFacing32: number, frameCount: number): number {
+  // C++ VesselClass::Shape_Number uses 16-facing ship bodies:
+  // UnitClass::BodyShape[Dir_To_16(PrimaryFacing) * 2] >> 1.
+  // Applying the 32-frame UnitClass mapping and wrapping with % 16 rotates
+  // ships by a quadrant on e.g. SCG07EA's east-facing PT boats.
+  let frame: number;
+  if (entity.type === UnitType.V_LST || entity.type === UnitType.V_CARR) {
+    frame = 0;
+  } else {
+    const primaryFacing256 = entity.bodyFacing256 >= 0
+      ? entity.bodyFacing256 & 0xff
+      : (fallbackFacing32 * 8) & 0xff;
+    frame = (BODY_SHAPE[dir256ToFacing16(primaryFacing256) * 2] ?? 0) >> 1;
+  }
+  return frameCount > 0 ? frame % frameCount : frame;
+}
+
+function normalMovePointOffset(dir: number, distance: number): { dx: number; dy: number } {
+  const facing = dir & 0xff;
+  const dx = (COS_TABLE_256[facing] * distance) >> 7;
+  const halfSin = Math.trunc(SIN_TABLE_256[facing] / 2);
+  const dy = -((halfSin * distance) >> 7);
+  return { dx, dy };
+}
+
+function structureDrawCenter(s: MapStructure, screenX: number, screenY: number): { x: number; y: number } {
+  const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
+  return {
+    x: screenX + fw * CELL_SIZE / 2,
+    y: screenY + fh * CELL_SIZE / 2,
+  };
+}
+
 // House colors are applied via palette index remapping (getRemappedSheet),
 // matching C++ SHAPE_FADING remap tables. No tint overlay fallback.
 
@@ -35,21 +72,31 @@ const HARVESTER_DUMP_LIST: readonly number[] = [
   0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 6, 5, 4, 3, 2, 1, 0,
 ];
 const HARVESTER_LOAD_LIST: readonly number[] = [0, 1, 2, 3, 4, 5, 6, 7, 0];
+const DIR_S_256 = 128;
 
-// Minimap blip colors per faction (C++ parity — each house has a unique radar color)
-const HOUSE_MINIMAP_COLOR: Record<string, string> = {
-  [House.Spain]:   '#FFD700', // gold
-  [House.USSR]:    '#FF3030', // red
-  [House.Greece]:  '#4080FF', // blue
-  [House.England]: '#40C040', // green
-  [House.France]:  '#2040C0', // dark blue (C++ hdata.cpp:75 PCOLOR_BLUE)
-  [House.Ukraine]: '#E07020', // orange (C++ hdata.cpp:85 PCOLOR_ORANGE)
-  [House.Germany]: '#A0A0A0', // gray
-  [House.Turkey]:  '#A06830', // brown (C++ hdata.cpp:115 PCOLOR_BROWN)
-  [House.GoodGuy]: '#60B0FF', // light blue (C++ hdata.cpp:135 PCOLOR_LTBLUE)
-  [House.BadGuy]:  '#FF4040', // red
-  [House.Neutral]: '#FFD700', // gold (C++ hdata.cpp:155 PCOLOR_GOLD)
-  [House.Special]: '#FFFFFF', // white (C++ HOUSE_SPECIAL — reinforcements/scripted)
+// Radar blip colors: C++ radar.cpp uses ColorRemaps[house->RemapColor].Bar.
+// init.cpp fills Bar from PALETTE.CPS column 6; RGBClass exposes 6-bit VGA as value*4.
+export const HOUSE_MINIMAP_COLOR: Record<string, string> = {
+  [House.Spain]: 'rgb(144,136,76)',    // PCOLOR_GOLD
+  [House.USSR]: 'rgb(176,0,0)',        // PCOLOR_RED
+  [House.Greece]: 'rgb(104,116,160)',  // PCOLOR_LTBLUE
+  [House.England]: 'rgb(120,152,100)', // PCOLOR_GREEN
+  [House.France]: 'rgb(64,132,116)',   // PCOLOR_BLUE
+  [House.Ukraine]: 'rgb(212,120,16)',  // PCOLOR_ORANGE
+  [House.Germany]: 'rgb(148,124,112)', // PCOLOR_GREY
+  [House.Turkey]: 'rgb(152,76,56)',    // PCOLOR_BROWN
+  [House.GoodGuy]: 'rgb(104,116,160)', // PCOLOR_LTBLUE
+  [House.BadGuy]: 'rgb(176,0,0)',      // PCOLOR_RED
+  [House.Neutral]: 'rgb(144,136,76)',  // PCOLOR_GOLD
+  [House.Special]: 'rgb(144,136,76)',  // PCOLOR_GOLD
+  [House.Multi1]: 'rgb(144,136,76)',   // PCOLOR_GOLD
+  [House.Multi2]: 'rgb(104,116,160)',  // PCOLOR_LTBLUE
+  [House.Multi3]: 'rgb(176,0,0)',      // PCOLOR_RED
+  [House.Multi4]: 'rgb(120,152,100)',  // PCOLOR_GREEN
+  [House.Multi5]: 'rgb(212,120,16)',   // PCOLOR_ORANGE
+  [House.Multi6]: 'rgb(148,124,112)',  // PCOLOR_GREY
+  [House.Multi7]: 'rgb(64,132,116)',   // PCOLOR_BLUE
+  [House.Multi8]: 'rgb(152,76,56)',    // PCOLOR_BROWN
 };
 
 // C++ TACTION_TEXT_TRIGGER: PCOLOR_GREEN with TPF_6PT_GRAD|TPF_USE_GRAD_PAL.
@@ -97,6 +144,53 @@ const PAL_DIRT_START = 80;    // indices 80-95: sand/dirt ramp (gold→dark brow
 const PAL_DIRT_COUNT = 16;
 const PAL_GREEN_HP = 120;     // bright green [0,255,0]
 const PAL_RED_HP = 104;       // red [190,0,0]
+const RADAR_CURSOR_LTGREEN = 'rgb(84,252,84)';
+// C++ const.cpp GroundColor/SnowColor[LAND_COUNT], consumed by
+// CellClass::Cell_Color(false) for radar terrain pixels.
+const RADAR_LAND_COLOR = [
+  141, // LAND_CLEAR
+  141, // LAND_ROAD
+  172, // LAND_WATER
+  21,  // LAND_ROCK
+  21,  // LAND_WALL
+  158, // LAND_TIBERIUM
+  141, // LAND_BEACH
+  141, // LAND_ROUGH
+  174, // LAND_RIVER
+  141, // TREE extension: TerrainClass over clear land
+] as const;
+const RADAR_TERRAIN_OBJECT_COLOR = 21; // C++ Render_Terrain(size==1)
+
+export function waterPaletteCycleShift(tick: number): number {
+  // C++ conquer.cpp:1667-1677 rotates CYCLE_COLOR_START..+6 every
+  // TIMER_SECOND/4. At the default 15 game ticks/sec this lands every 4 ticks.
+  const ticksPerShift = Math.max(1, Math.round(GAME_TICKS_PER_SEC / 4));
+  return Math.floor(Math.max(0, tick) / ticksPerShift) % PAL_WATER_COUNT;
+}
+
+export function applyWaterPaletteCycle(
+  data: Uint8ClampedArray | Uint8Array,
+  palette: number[][] | null,
+  shift: number,
+): void {
+  if (!palette || shift % PAL_WATER_COUNT === 0) return;
+  const colorMap = new Map<string, number[]>();
+  for (let i = 0; i < PAL_WATER_COUNT; i++) {
+    const src = palette[PAL_WATER_START + i];
+    const dst = palette[PAL_WATER_START + ((i - shift + PAL_WATER_COUNT) % PAL_WATER_COUNT)];
+    if (src && dst) colorMap.set(`${src[0]},${src[1]},${src[2]}`, dst);
+  }
+  if (colorMap.size === 0) return;
+
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] === 0) continue;
+    const dst = colorMap.get(`${data[i]},${data[i + 1]},${data[i + 2]}`);
+    if (!dst) continue;
+    data[i] = dst[0];
+    data[i + 1] = dst[1];
+    data[i + 2] = dst[2];
+  }
+}
 
 // Building frame layout table — maps structure type to idle/damage frame info.
 // Prevents generic halfFrames cycling from treating construction/fill-level frames as animation.
@@ -254,6 +348,7 @@ export interface Effect {
   // BulletClass scheduling and allocation failure behavior.
   cppLogicSlot?: boolean;
   logicIndexHint?: number;
+  attachedStructureIndex?: number;
 }
 
 // Pseudo-random hash for terrain variation
@@ -271,7 +366,12 @@ export class Renderer {
   private pal: number[][] | null = null;
   private palTheatre = ''; // which theatre the current palette is for
   screenShake = 0;      // remaining shake ticks
-  screenFlash = 0;      // remaining flash ticks (yellowish flash on big explosions)
+  /** C++ WASM agent harness returns immediately from Shake_The_Screen. */
+  suppressScreenShake = false;
+  private screenShakeLastOffset = 0;
+  /** Legacy state retained for older subsystem contexts. C++ does not have a
+   *  generic yellow full-screen explosion flash; nukes use whitePaletteFade. */
+  screenFlash = 0;
   /** Palette whiteout countdown for nuke detonation.
    *  C++ anim.cpp:955,983 — Fade_Palette_To(WhitePalette, 30) then Fade_Palette_To(GamePalette, 15).
    *  We emulate with a full-screen white overlay that ramps in over 30 ticks, holds briefly,
@@ -348,6 +448,7 @@ export class Renderer {
   private tilesetMeta: TilesetMeta | null = null;
   private tilesetReady = false;
   private tilesetTheatre = ''; // which theatre the cached tileset is for
+  private cycledTilesetCache = new Map<string, HTMLCanvasElement>();
   placementValid = false;
   placementCells: boolean[] | null = null; // per-cell passability for placement preview
   // Dynamic player houses (set by game on start, used for sidebar filtering)
@@ -359,19 +460,6 @@ export class Renderer {
   superweaponCursorMode: SuperweaponType | null = null;
   chronoTankTargeting = false;
 
-  // E7: Per-structure attached fire effects (C++ building.cpp:1372-1435 parity).
-  // Each structure can have 1-3 one-shot fire animations that expire and randomly respawn,
-  // creating organic, varied fire instead of uniform always-on burning.
-  private structFireEffects = new Map<number, Array<{
-    offsetX: number;  // random pixel offset within footprint
-    offsetY: number;
-    sprite: string;   // 'burn-s', 'burn-m', or 'burn-l'
-    startTick: number; // game tick when this fire was spawned
-    maxFrames: number; // total frames in this sprite's animation
-  }>>();
-  // Track which structures have been initialized for fire effects (to detect HP threshold crossings)
-  private structFireInitialized = new Set<number>();
-
   // Pause menu state (set by Game each frame)
   pauseMenuOpen = false;
   pauseMenuHighlight = 0; // keyboard nav index (0-5)
@@ -380,8 +468,8 @@ export class Renderer {
   pauseMenuGameSpeed = 2;
 
   // Power bar animation state (C++ power.cpp parity)
-  private powerHeight = 0;          // current animated height (px)
-  private drainHeight = 0;          // current animated height (px)
+  private powerHeight = 0;          // current animated POWER_HEIGHT units
+  private drainHeight = 0;          // current animated POWER_HEIGHT units
   private desiredPowerHeight = 0;   // target height
   private desiredDrainHeight = 0;   // target height
   private powerDir = 0;             // animation direction: -1, 0, 1
@@ -399,8 +487,8 @@ export class Renderer {
     this.ctx.imageSmoothingEnabled = false;
   }
 
-  /** C++ Power_Height() → Draw_It rescaling (power.cpp:394-417, 229) */
-  static powerBarHeight(value: number): number {
+  /** C++ Power_Height() raw value (power.cpp:394-417) */
+  static powerBarRawHeight(value: number): number {
     const POWER_HEIGHT = Renderer.POWER_HEIGHT; // 110 (C++ power.h)
     const STEP_LEVEL = Renderer.POWER_STEP_LEVEL;
     const STEP_FACTOR = Renderer.POWER_STEP_FACTOR;
@@ -417,9 +505,15 @@ export class Renderer {
       );
     }
     retval = Math.max(0, Math.min(POWER_HEIGHT - 2, retval));
+    return retval;
+  }
+
+  /** C++ Power_Height() → Draw_It rescaling (power.cpp:394-417, 229) */
+  static powerBarHeight(value: number): number {
+    const rawHeight = Renderer.powerBarRawHeight(value);
     // C++ Draw_It HIRES rescaling (power.cpp:229): (raw * 153) / 107
     // At LORES (RESFACTOR=1), raw pixel height is used directly (no rescaling).
-    return (RESFACTOR as number) === 1 ? retval : Math.floor(retval * 153 / 107);
+    return (RESFACTOR as number) === 1 ? rawHeight : Math.floor(rawHeight * 153 / 107);
   }
 
   /** Update power bar bounce animation — call once per game tick (C++ PowerClass::AI) */
@@ -429,7 +523,7 @@ export class Renderer {
 
     // Detect power change
     if (produced !== this.recordedPower) {
-      this.desiredPowerHeight = Renderer.powerBarHeight(produced);
+      this.desiredPowerHeight = Renderer.powerBarRawHeight(produced);
       this.recordedPower = produced;
       this.powerBounce = 12;
       if (this.powerHeight > this.desiredPowerHeight) this.powerDir = -1;
@@ -439,7 +533,7 @@ export class Renderer {
 
     // Detect drain change
     if (consumed !== this.recordedDrain) {
-      this.desiredDrainHeight = Renderer.powerBarHeight(consumed);
+      this.desiredDrainHeight = Renderer.powerBarRawHeight(consumed);
       this.recordedDrain = consumed;
       this.drainBounce = 12;
       if (this.drainHeight > this.desiredDrainHeight) this.drainDir = -1;
@@ -504,6 +598,29 @@ export class Renderer {
     return `rgb(${r},${g},${b})`;
   }
 
+  private beginScreenShake(ctx: CanvasRenderingContext2D): boolean {
+    if (this.screenShake <= 0) return false;
+    if (this.suppressScreenShake) {
+      this.screenShake = 0;
+      this.screenShakeLastOffset = 0;
+      return false;
+    }
+
+    // C++ conquer.cpp:5523-5561 uses Sim_Random_Pick(0,2)-1 and blits the
+    // seen page up/down by exactly two pixels. There is no horizontal offset.
+    let nextOffset = this.screenShakeLastOffset;
+    do {
+      nextOffset = NonCriticalRandom.nextInRange(0, 2) - 1;
+    } while (nextOffset === this.screenShakeLastOffset);
+    this.screenShakeLastOffset = nextOffset;
+
+    ctx.save();
+    ctx.translate(0, nextOffset * 2);
+    this.screenShake--;
+    if (this.screenShake <= 0) this.screenShakeLastOffset = 0;
+    return true;
+  }
+
   render(
     camera: Camera,
     map: GameMap,
@@ -540,21 +657,11 @@ export class Renderer {
       }
     }
 
-    // Apply screen shake
-    let shaking = false;
-    if (this.screenShake > 0) {
-      shaking = true;
-      const intensity = Math.min(this.screenShake, 6);
-      const sx = (NonCriticalRandom.float() - 0.5) * intensity * 2;
-      const sy = (NonCriticalRandom.float() - 0.5) * intensity * 2;
-      ctx.save();
-      ctx.translate(sx, sy);
-      this.screenShake--;
-    }
+    const shaking = this.beginScreenShake(ctx);
 
     this._cachedAssets = assets; // cache for helpers that lack the param
     this.renderTerrain(camera, map, tick, assets);
-    this.renderDecals(camera, map);
+    this.renderDecals(camera, map, assets);
     this.renderOverlays(camera, map, tick, assets);
     this.renderStructures(camera, map, structures, assets, tick);
     this.renderCrates(camera, map, tick);
@@ -569,21 +676,11 @@ export class Renderer {
       ctx.restore();
     }
 
-    // Screen flash overlay (big explosions — rapid decay curve for nuke-strength flash)
-    if (this.screenFlash > 0) {
-      // Quadratic decay: initial burst fades quickly, lingering tail
-      const t = this.screenFlash / 30; // normalize to 0-1 range (max 30 ticks)
-      const flashAlpha = Math.min(0.8, t * t * 0.8);
-      ctx.fillStyle = `rgba(255,255,220,${flashAlpha})`;
-      ctx.fillRect(0, 0, this.width, this.height);
-      this.screenFlash--;
-    }
-
     // Nuke palette whiteout overlay — C++ Fade_Palette_To(WhitePalette, 30) → GamePalette(15).
     // Ramp-in phase (first 30 ticks of the countdown, elapsed 0..29):
     //   whiteAlpha ramps from 0 → 1 linearly.
     // Ramp-out phase (elapsed 30..44): whiteAlpha ramps 1 → 0 over 15 ticks.
-    // Produces a bloom-and-fade whiteout distinct from the yellow screenFlash.
+    // Produces the source-backed bloom-and-fade whiteout.
     if (this.whitePaletteFade > 0) {
       const fadeIn = 30;
       const holdOut = 15;
@@ -681,7 +778,7 @@ export class Renderer {
         break;
       case 'full-no-ui':
         this.renderTerrain(camera, map, tick, assets);
-        this.renderDecals(camera, map);
+        this.renderDecals(camera, map, assets);
         this.renderOverlays(camera, map, tick, assets);
         this.renderStructures(camera, map, structures, assets, tick);
         this.renderCrates(camera, map, tick);
@@ -1173,17 +1270,46 @@ export class Renderer {
     icon: number,
     sx: number,
     sy: number,
+    sourceImage?: CanvasImageSource | null,
+    dw = CELL_SIZE,
+    dh = CELL_SIZE,
   ): boolean {
-    if (!this.tilesetImage || !this.tilesetMeta) return false;
+    const image = sourceImage ?? this.tilesetImage;
+    if (!image || !this.tilesetMeta) return false;
     const key = `${tmpl},${icon}`;
     const entry = this.tilesetMeta.tiles[key];
     if (!entry || entry.ax === undefined || entry.ay === undefined) return false;
     ctx.drawImage(
-      this.tilesetImage,
+      image,
       entry.ax, entry.ay, this.tilesetMeta.tileW, this.tilesetMeta.tileH,
-      sx, sy, CELL_SIZE, CELL_SIZE,
+      sx, sy, dw, dh,
     );
     return true;
+  }
+
+  private getPaletteCycledTilesetImage(tick: number): CanvasImageSource | null {
+    if (!this.tilesetImage || !this.tilesetMeta) return null;
+    const shift = waterPaletteCycleShift(tick);
+    if (shift === 0 || !this.pal) return this.tilesetImage;
+
+    const width = this.tilesetImage.naturalWidth || this.tilesetImage.width || this.tilesetMeta.atlasW;
+    const height = this.tilesetImage.naturalHeight || this.tilesetImage.height || this.tilesetMeta.atlasH;
+    const key = `${this.tilesetTheatre}:${shift}:${width}x${height}`;
+    const cached = this.cycledTilesetCache.get(key);
+    if (cached) return cached;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const octx = canvas.getContext('2d');
+    if (!octx) return this.tilesetImage;
+
+    octx.drawImage(this.tilesetImage, 0, 0);
+    const imageData = octx.getImageData(0, 0, width, height);
+    applyWaterPaletteCycle(imageData.data, this.pal, shift);
+    octx.putImageData(imageData, 0, 0);
+    this.cycledTilesetCache.set(key, canvas);
+    return canvas;
   }
 
   private renderTerrain(camera: Camera, map: GameMap, tick: number, assets: AssetManager): void {
@@ -1195,6 +1321,7 @@ export class Renderer {
 
     // Can we use the real tileset? Available for any theatre with extracted tiles.
     const useTileset = this.tilesetReady && this.tilesetTheatre === this.theatre;
+    const tilesetSource = useTileset ? this.getPaletteCycledTilesetImage(tick) : null;
 
     // Deferred tree sprite draws — rendered after all ground tiles to prevent
     // clump sprites (TC01-TC05, 72-96px wide) from being overwritten by
@@ -1228,7 +1355,7 @@ export class Renderer {
         // For TREE terrain, draw ground from atlas but still render tree overlay on top
         let atlasDrawn = false;
         if (useTileset && tmpl > 0 && tmpl !== 0xFFFF && tmpl !== 255) {
-          if (this.drawTileFromAtlas(ctx, tmpl, icon, screen.x, screen.y)) {
+          if (this.drawTileFromAtlas(ctx, tmpl, icon, screen.x, screen.y, tilesetSource)) {
             if (terrain !== Terrain.TREE && !treeType) continue; // Tile drawn from atlas, skip procedural
             atlasDrawn = true; // Fall through to TREE case below
           } else {
@@ -1243,7 +1370,7 @@ export class Renderer {
         // TEMPLATE_CLEAR1 with Clear_Icon() = (cx&3)|((cy&3)<<2).
         if (useTileset && (tmpl === 0 || tmpl === 0xFFFF || tmpl === 255)) {
           const clearIcon = (cx & 3) | ((cy & 3) << 2);
-          if (this.drawTileFromAtlas(ctx, 255, clearIcon, screen.x, screen.y)) {
+          if (this.drawTileFromAtlas(ctx, 255, clearIcon, screen.x, screen.y, tilesetSource)) {
             atlasDrawn = true;
             if (terrain !== Terrain.TREE && !treeType) continue;
           }
@@ -1467,7 +1594,7 @@ export class Renderer {
             } else if (useTileset) {
               // Use CLEAR1 tileset tile (template 255) — matches surrounding terrain
               const clearIcon = (cx & 3) | ((cy & 3) << 2);
-              if (!this.drawTileFromAtlas(ctx, 255, clearIcon, screen.x, screen.y)) {
+              if (!this.drawTileFromAtlas(ctx, 255, clearIcon, screen.x, screen.y, tilesetSource)) {
                 this.renderGrassCell(ctx, screen.x, screen.y, cx, cy, h, tmpl, icon);
               }
             } else {
@@ -1496,40 +1623,30 @@ export class Renderer {
 
   // ─── Terrain Decals (scorch marks, craters) ────────────
 
-  private renderDecals(camera: Camera, map: GameMap): void {
+  private renderDecals(camera: Camera, map: GameMap, assets: AssetManager): void {
     const ctx = this.ctx;
     // Render pre-placed smudge marks from scenario INI
     for (const s of map.smudges) {
-      const screen = camera.worldToScreen(s.cx * CELL_SIZE + CELL_SIZE / 2, s.cy * CELL_SIZE + CELL_SIZE / 2);
+      const screen = camera.worldToScreen(s.cx * CELL_SIZE, s.cy * CELL_SIZE);
       if (screen.x < -CELL_SIZE || screen.x > this.width + CELL_SIZE ||
           screen.y < -CELL_SIZE || screen.y > this.height + CELL_SIZE) continue;
-      // SC = scorch marks (darker, smaller), CR = craters (larger, round)
-      const isCrater = s.type.startsWith('CR');
-      const size = isCrater ? 10 : 7;
-      const alpha = isCrater ? 0.4 : 0.3;
-      ctx.fillStyle = `rgba(20,15,10,${alpha})`;
-      ctx.beginPath();
-      ctx.ellipse(screen.x, screen.y, size, size * 0.7, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = `rgba(10,5,0,${alpha * 0.6})`;
-      ctx.beginPath();
-      ctx.ellipse(screen.x, screen.y, size * 0.5, size * 0.35, 0, 0, Math.PI * 2);
-      ctx.fill();
+      const sheetName = this.theatreSheetName(assets, s.type.toLowerCase());
+      if (assets.hasSheet(sheetName)) {
+        // C++ SmudgeTypeClass::Draw_It draws the theatre-specific smudge at
+        // the cell icon's upper-left. Read_INI-created smudges start at frame 0.
+        assets.drawFrame(ctx, sheetName, 0, screen.x, screen.y);
+      }
     }
     // Render dynamic decals (from combat)
     for (const d of map.decals) {
-      const screen = camera.worldToScreen(d.cx * CELL_SIZE + CELL_SIZE / 2, d.cy * CELL_SIZE + CELL_SIZE / 2);
+      const screen = camera.worldToScreen(d.cx * CELL_SIZE, d.cy * CELL_SIZE);
       if (screen.x < -d.size * 2 || screen.x > this.width + d.size * 2 ||
           screen.y < -d.size * 2 || screen.y > this.height + d.size * 2) continue;
-      ctx.fillStyle = `rgba(20,15,10,${d.alpha})`;
-      ctx.beginPath();
-      ctx.ellipse(screen.x, screen.y, d.size, d.size * 0.7, 0, 0, Math.PI * 2);
-      ctx.fill();
-      // Darker center
-      ctx.fillStyle = `rgba(10,5,0,${d.alpha * 0.6})`;
-      ctx.beginPath();
-      ctx.ellipse(screen.x, screen.y, d.size * 0.5, d.size * 0.35, 0, 0, Math.PI * 2);
-      ctx.fill();
+      const baseName = d.size >= 10 ? 'cr1' : 'sc1';
+      const sheetName = this.theatreSheetName(assets, baseName);
+      if (assets.hasSheet(sheetName)) {
+        assets.drawFrame(ctx, sheetName, 0, screen.x, screen.y);
+      }
     }
   }
 
@@ -1852,11 +1969,12 @@ export class Renderer {
         const bldgRemapped = WALL_SPRITE_TYPES.has(s.type)
           ? null
           : assets.getRemappedSheet(useSheet, s.house);
+        const drawCenter = structureDrawCenter(s, screenX, screenY);
         if (bldgRemapped) {
           assets.drawFrameFrom(ctx, bldgRemapped, useSheet, useFrame % useTotalFrames,
-            screenX + dfw / 2, screenY + dfh / 2, { centerX: true, centerY: true });
+            drawCenter.x, drawCenter.y, { centerX: true, centerY: true });
         } else {
-          assets.drawFrame(ctx, useSheet, useFrame % useTotalFrames, screenX + dfw / 2, screenY + dfh / 2, {
+          assets.drawFrame(ctx, useSheet, useFrame % useTotalFrames, drawCenter.x, drawCenter.y, {
             centerX: true,
             centerY: true,
           });
@@ -1875,7 +1993,7 @@ export class Renderer {
             // Animate door closing: decrement by 1 per tick down to 0
             if (s.doorFrame > 0) s.doorFrame = Math.max(0, s.doorFrame - 1);
           }
-          assets.drawFrame(ctx, 'weap2', s.doorFrame, screenX + dfw / 2, screenY + dfh / 2, {
+          assets.drawFrame(ctx, 'weap2', s.doorFrame, drawCenter.x, drawCenter.y, {
             centerX: true, centerY: true,
           });
         }
@@ -1930,113 +2048,6 @@ export class Renderer {
         const barX = screenX + (fw * CELL_SIZE) / 2;
         const barY = screenY - 2;
         this.renderHealthBar(barX, barY, cppBarW, s.hp / s.maxHp, false);
-      }
-
-      // E7: Damage fire one-shot lifecycle (C++ building.cpp:1372-1435 parity).
-      // When buildings take damage (RESULT_HALF), C++ spawns attached AnimClass instances
-      // (ANIM_FIRE_SMALL, ANIM_ON_FIRE_SMALL/MED/BIG) that play once and expire.
-      // New ones spawn randomly, creating organic, varied fire.
-      if (s.alive && s.hp <= s.maxHp * CONDITION_YELLOW && vis >= 1 && !isConstructing && !isSelling) {
-        const hpRatio = s.hp / s.maxHp;
-        const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-
-        // Determine desired fire count and sprite based on damage tier
-        const desiredFires = hpRatio < 0.25 ? 3 : hpRatio < 0.5 ? 2 : 1;
-        const tierSprite = hpRatio < 0.25 ? 'burn-l' : hpRatio < 0.5 ? 'burn-m' : 'burn-s';
-
-        // Get or initialize fire effects for this structure
-        let fires = this.structFireEffects.get(structIdx);
-        if (!this.structFireInitialized.has(structIdx)) {
-          // First time crossing damage threshold — spawn initial fire effects
-          fires = [];
-          for (let f = 0; f < desiredFires; f++) {
-            fires.push({
-              offsetX: (NonCriticalRandom.float() - 0.3) * fw * CELL_SIZE * 0.7,
-              offsetY: (NonCriticalRandom.float() - 0.2) * fh * CELL_SIZE * 0.5,
-              sprite: tierSprite,
-              startTick: tick - Math.floor(NonCriticalRandom.float() * 10), // stagger start frames
-              maxFrames: assets.getSheet(tierSprite)?.meta.frameCount ?? 17,
-            });
-          }
-          this.structFireEffects.set(structIdx, fires);
-          this.structFireInitialized.add(structIdx);
-        }
-        if (!fires) fires = [];
-
-        // Process each fire effect: draw if alive, expire and maybe respawn
-        const survivingFires: typeof fires = [];
-        for (const fire of fires) {
-          const elapsed = tick - fire.startTick;
-          const frame = elapsed % fire.maxFrames;
-          const playCount = Math.floor(elapsed / fire.maxFrames);
-
-          // Each fire plays through once, then has a ~30% chance to respawn at a new offset
-          if (playCount >= 1) {
-            // C++ building.cpp:1435 — expired fire has random chance to respawn at different offset
-            if (NonCriticalRandom.float() < 0.30) {
-              survivingFires.push({
-                offsetX: (NonCriticalRandom.float() - 0.3) * fw * CELL_SIZE * 0.7,
-                offsetY: (NonCriticalRandom.float() - 0.2) * fh * CELL_SIZE * 0.5,
-                sprite: tierSprite,
-                startTick: tick,
-                maxFrames: assets.getSheet(tierSprite)?.meta.frameCount ?? 17,
-              });
-            }
-            continue; // this fire has expired
-          }
-
-          // Draw the fire sprite
-          const fx = screenX + fw * CELL_SIZE * 0.4 + fire.offsetX;
-          const fy = screenY + fh * CELL_SIZE * 0.3 + fire.offsetY;
-          const burnSheet = assets.getSheet(fire.sprite);
-          if (burnSheet) {
-            ctx.globalCompositeOperation = 'screen';
-            assets.drawFrame(ctx, fire.sprite, frame, fx, fy - 4, { centerX: true, centerY: true });
-            ctx.globalCompositeOperation = 'source-over';
-          } else {
-            // Procedural fallback if sprite not loaded
-            const flicker = Math.sin(tick * 0.5 + fire.offsetX * 0.3) * 0.3;
-            const intensity = hpRatio < 0.25 ? 1.4 : 1.0;
-            const fireH = (6 + Math.sin(tick * 0.7 + fire.offsetY * 0.2) * 3) * intensity;
-            ctx.fillStyle = `rgba(255,${100 + flicker * 60},${hpRatio < 0.25 ? 10 : 30},${(0.5 + flicker * 0.2) * intensity})`;
-            ctx.beginPath();
-            ctx.ellipse(fx, fy - fireH * 0.5, 3 * intensity, fireH * 0.5, 0, 0, Math.PI * 2);
-            ctx.fill();
-          }
-          survivingFires.push(fire);
-
-          // Smoke rising from each fire point (all damage tiers, heavier when more damaged)
-          const smokeSpeed = hpRatio < 0.25 ? 0.6 : hpRatio < 0.5 ? 0.4 : 0.25;
-          const smokeSize = hpRatio < 0.25 ? 4 : hpRatio < 0.5 ? 3 : 2;
-          const smokeBase = hpRatio < 0.5 ? 0.35 : 0.2;
-          const smokePhase = (tick * smokeSpeed + fire.offsetX * 0.1) % 12;
-          const smokeY = fy - 8 - smokePhase;
-          const smokeAlpha = smokeBase - smokePhase / 30;
-          if (smokeAlpha > 0) {
-            ctx.fillStyle = `rgba(40,40,40,${smokeAlpha.toFixed(2)})`;
-            ctx.beginPath();
-            ctx.arc(fx + Math.sin(tick * 0.15 + fire.offsetX * 0.05) * 2, smokeY, smokeSize, 0, Math.PI * 2);
-            ctx.fill();
-          }
-        }
-
-        // Ensure we maintain at least the desired fire count (C++ spawns replacements)
-        while (survivingFires.length < desiredFires) {
-          survivingFires.push({
-            offsetX: (NonCriticalRandom.float() - 0.3) * fw * CELL_SIZE * 0.7,
-            offsetY: (NonCriticalRandom.float() - 0.2) * fh * CELL_SIZE * 0.5,
-            sprite: tierSprite,
-            startTick: tick,
-            maxFrames: assets.getSheet(tierSprite)?.meta.frameCount ?? 17,
-          });
-        }
-        this.structFireEffects.set(structIdx, survivingFires);
-      } else {
-        // Structure healed above threshold or dead — clean up fire effects
-        if (this.structFireInitialized.has(structIdx)) {
-          this.structFireEffects.delete(structIdx);
-          this.structFireInitialized.delete(structIdx);
-        }
       }
 
       // Selection highlight — white border when structure is selected
@@ -2171,6 +2182,65 @@ export class Renderer {
   }
 
   // ─── Entities ────────────────────────────────────────────
+
+  private drawVesselTurretFrame(
+    ctx: CanvasRenderingContext2D,
+    assets: AssetManager,
+    entity: Entity,
+    sheetName: string,
+    frame: number,
+    x: number,
+    y: number,
+  ): void {
+    if (!assets.getSheet(sheetName)) return;
+    const remapped = assets.getRemappedSheet(sheetName, entity.house);
+    if (remapped) {
+      assets.drawFrameFrom(ctx, remapped, sheetName, frame, x, y, { centerX: true, centerY: true });
+    } else {
+      assets.drawFrame(ctx, sheetName, frame, x, y, { centerX: true, centerY: true });
+    }
+  }
+
+  private renderVesselTurrets(
+    ctx: CanvasRenderingContext2D,
+    assets: AssetManager,
+    entity: Entity,
+    screen: { x: number; y: number },
+  ): void {
+    if (!entity.hasTurret) return;
+
+    const primaryFacing256 = entity.bodyFacing256 >= 0
+      ? entity.bodyFacing256 & 0xff
+      : (entity.bodyFacing32 * 8) & 0xff;
+    const turretFacing32 = lerpFacing32(
+      entity.prevTurretFacing32,
+      entity.turretFacing32,
+      this.interpolationAlpha,
+    );
+    const turretFrame = BODY_SHAPE[turretFacing32] ?? 0;
+    const bodyTurretDir = (dir256ToFacing16(primaryFacing256) * 16) & 0xff;
+
+    switch (entity.type) {
+      case UnitType.V_PT: {
+        const offset = normalMovePointOffset(bodyTurretDir, 14);
+        this.drawVesselTurretFrame(ctx, assets, entity, 'mgun', turretFrame, screen.x + offset.dx, screen.y + offset.dy + 1);
+        break;
+      }
+      case UnitType.V_DD: {
+        const offset = normalMovePointOffset(bodyTurretDir + DIR_S_256, 8);
+        this.drawVesselTurretFrame(ctx, assets, entity, 'ssam', turretFrame, screen.x + offset.dx, screen.y + offset.dy - 4);
+        break;
+      }
+      case UnitType.V_CA: {
+        const front = normalMovePointOffset(bodyTurretDir, 22);
+        this.drawVesselTurretFrame(ctx, assets, entity, 'turr', turretFrame, screen.x + front.dx, screen.y + front.dy - 4);
+        const rearDir = (dir256ToFacing16(primaryFacing256 + DIR_S_256) * 16) & 0xff;
+        const rear = normalMovePointOffset(rearDir, 22);
+        this.drawVesselTurretFrame(ctx, assets, entity, 'turr', turretFrame, screen.x + rear.dx, screen.y + rear.dy - 4);
+        break;
+      }
+    }
+  }
 
   private renderEntities(
     camera: Camera,
@@ -2337,7 +2407,9 @@ export class Renderer {
         let frame: number;
         if (!entity.stats.isInfantry && !entity.isAnt) {
           const interpBody = lerpFacing32(entity.prevBodyFacing32, entity.bodyFacing32, alpha);
-          frame = (BODY_SHAPE[interpBody] ?? 0) % sheet.meta.frameCount;
+          frame = entity.stats.isVessel
+            ? vesselBodyFrame(entity, interpBody, sheet.meta.frameCount)
+            : (BODY_SHAPE[interpBody] ?? 0) % sheet.meta.frameCount;
           // Harvester dump/load animation overlay (C++ unit.cpp:1902-1975 Shape_Number)
           // HARV sheet layout: 0-31 body rotation, 32-95 scoop anim, 96-110 dump anim.
           if (entity.type === UnitType.V_HARV && sheet.meta.frameCount >= 96) {
@@ -2373,8 +2445,10 @@ export class Renderer {
           assets.drawFrame(ctx, entity.stats.image, frame,
             screen.x, screen.y, { centerX: true, centerY: true });
         }
+        if (entity.stats.isVessel) {
+          this.renderVesselTurrets(ctx, assets, entity, screen);
         // Draw turret layer for turreted vehicles (frames 32-63)
-        if (entity.hasTurret && sheet.meta.frameCount >= 64) {
+        } else if (entity.hasTurret && sheet.meta.frameCount >= 64) {
           const interpTurret = lerpFacing32(entity.prevTurretFacing32, entity.turretFacing32, alpha);
           const turretFrame = (32 + (BODY_SHAPE[interpTurret] ?? 0)) % sheet.meta.frameCount;
           // JEEP turret y-offset (C++ udata.cpp Turret_Adjust)
@@ -3165,6 +3239,9 @@ export class Renderer {
    *  Uses SHADOW.SHP frames + 256-entry lookup table for shroud edge shapes. */
   private renderFogOfWar(camera: Camera, map: GameMap, assets: AssetManager): void {
     const ctx = this.ctx;
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.filter = 'none';
     const startCX = Math.floor(camera.x / CELL_SIZE);
     const startCY = Math.floor(camera.y / CELL_SIZE);
     const endCX = Math.ceil((camera.x + camera.viewWidth) / CELL_SIZE);
@@ -3235,10 +3312,12 @@ export class Renderer {
 
   private renderMinimap(map: GameMap, entities: Entity[], structures: MapStructure[], camera: Camera, assets?: AssetManager): void {
     const ctx = this.ctx;
-    const { x: mmX, y: mmY, size: mmSize } = this.getMinimapBounds();
-    const scale = mmSize / Math.max(map.boundsW, map.boundsH);
-    const ox = map.boundsX;
-    const oy = map.boundsY;
+    const cover = this.getMinimapBounds();
+    const radar = this.getActiveRadarLayout(map, camera);
+    const { x: mmX, y: mmY, w: mmW, h: mmH, cellPx, ox, oy, cellsW, cellsH } = radar;
+    const tilesetSource = this.tilesetReady && this.tilesetTheatre === this.theatre
+      ? this.getPaletteCycledTilesetImage(0)
+      : null;
 
     // C++ radar.cpp Draw_It: radar panel uses natoradr.shp/ussrradr.shp for the cover plate
     // and the sidebar background (side1na/side1us) provides the metallic frame border.
@@ -3247,19 +3326,19 @@ export class Renderer {
     // Radar jammed (GAP generator): show static/snow noise over the cover plate
     if (this.isRadarJammed) {
       // Draw cover plate background first (C++ Radar_Anim draws RadarAnim frame)
-      this.drawRadarCoverPlate(ctx, mmX, mmY, mmSize, assets);
+      this.drawRadarCoverPlate(ctx, cover.x, cover.y, cover.size, assets);
       this.radarStaticCounter = (this.radarStaticCounter ?? 0) + 1;
       if (!this.radarStaticData || this.radarStaticCounter % 10 === 0) {
-        const cells = Math.ceil(mmSize / 3);
+        const cells = Math.ceil(cover.size / 3);
         this.radarStaticData = new Uint8Array(cells * cells);
         for (let i = 0; i < this.radarStaticData.length; i++) {
           this.radarStaticData[i] = NonCriticalRandom.nextInRange(0, 39);
         }
       }
-      const cells = Math.ceil(mmSize / 3);
+      const cells = Math.ceil(cover.size / 3);
       for (let i = 0; i < this.radarStaticData!.length; i++) {
-        const px = mmX + (i % cells) * 3;
-        const py = mmY + Math.floor(i / cells) * 3;
+        const px = cover.x + (i % cells) * 3;
+        const py = cover.y + Math.floor(i / cells) * 3;
         const v = this.radarStaticData![i];
         ctx.fillStyle = `rgb(${v},${v + 5},${v})`;
         ctx.fillRect(px, py, 3, 3);
@@ -3272,58 +3351,58 @@ export class Renderer {
     //   - !DoesRadarExist (no DOME): frame 0 — ornate radar panel with faction emblem
     //   - DoesRadarExist but inactive (no power): frame 41 (MAX_RADAR_FRAMES) — dark cover plate
     if (!this.hasRadar) {
-      this.drawRadarCoverPlate(ctx, mmX, mmY, mmSize, assets);
+      this.drawRadarCoverPlate(ctx, cover.x, cover.y, cover.size, assets);
       return;
     }
 
     // Active radar: dark interior background (C++ radar.cpp:542 draws RadarFrame then
     // fills interior with BLACK before rendering terrain pixels on top)
-    ctx.fillStyle = '#000';
-    ctx.fillRect(mmX, mmY, mmSize, mmSize);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(mmX, mmY, mmW, mmH);
+    ctx.clip();
 
-    // Terrain (with fog awareness)
-    for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy += 2) {
-      for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx += 2) {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(mmX, mmY, mmW, mmH);
+
+    // C++ radar.cpp Plot_Radar_Pixel renders one radar pixel per mapped cell.
+    // It does not stretch the scenario rectangle into a square and it keys off
+    // IsMapped rather than current IsVisible, so explored fog remains drawn.
+    for (let cy = oy; cy < oy + cellsH; cy++) {
+      for (let cx = ox; cx < ox + cellsW; cx++) {
         const vis = this.renderVisibility(map, cx, cy);
         if (vis === 0) continue; // Don't show shrouded areas
 
         const terrain = map.getTerrain(cx, cy);
-        const px = mmX + (cx - ox) * scale;
-        const py = mmY + (cy - oy) * scale;
-        const ps = Math.max(scale * 2, 1);
+        const px = mmX + (cx - ox) * cellPx;
+        const py = mmY + (cy - oy) * cellPx;
+        const ps = cellPx;
+        const idx = cy * 128 + cx;
+
+        if (map.jammedCells?.has(idx)) {
+          ctx.fillStyle = '#000';
+          ctx.fillRect(px, py, ps, ps);
+          continue;
+        }
 
         const treeType = map.getTreeType(cx, cy);
-        if (terrain === Terrain.WATER) {
-          ctx.fillStyle = this.palColor(PAL_WATER_START + 2, vis === 2 ? 0 : -50);
-        } else if (terrain === Terrain.TREE || treeType) {
-          ctx.fillStyle = this.palColor(PAL_GRASS_START + 9, vis === 2 ? 0 : -40);
-        } else if (terrain === Terrain.ROCK || terrain === Terrain.WALL) {
-          ctx.fillStyle = this.palColor(PAL_ROCK_START + 8, vis === 2 ? 0 : -40);
-        } else {
-          // Check for ore/gem overlay
-          const ovl = map.overlay[cy * 128 + cx];
-          if (ovl >= 5 && ovl <= 8) {
-            ctx.fillStyle = vis === 2 ? '#c8a030' : '#806020'; // gold ore dot
-          } else if (ovl >= 9 && ovl <= 12) {
-            ctx.fillStyle = vis === 2 ? '#3090d0' : '#205880'; // blue gem dot
+        let drewRadarTile = false;
+        if (cellPx > 1 && tilesetSource) {
+          const tmpl = map.templateType[idx] || 0;
+          const icon = map.templateIcon[idx] || 0;
+          if (tmpl > 0 && tmpl !== 0xFFFF && tmpl !== 255) {
+            drewRadarTile = this.drawTileFromAtlas(ctx, tmpl, icon, px, py, tilesetSource, ps, ps);
           } else {
-            ctx.fillStyle = this.palColor(PAL_GRASS_START + 6, vis === 2 ? 0 : -40);
+            const clearIcon = (cx & 3) | ((cy & 3) << 2);
+            drewRadarTile = this.drawTileFromAtlas(ctx, 255, clearIcon, px, py, tilesetSource, ps, ps);
           }
         }
-        ctx.fillRect(px, py, ps, ps);
-      }
-    }
+        if (drewRadarTile) continue;
 
-    // R18: Minimap shroud/fog overlay — darken explored-but-unseen areas (C++ parity)
-    for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy += 2) {
-      for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx += 2) {
-        const vis = this.renderVisibility(map, cx, cy);
-        if (vis >= 2) continue; // fully visible — no overlay
-        const px = mmX + (cx - ox) * scale;
-        const py = mmY + (cy - oy) * scale;
-        const ps = Math.max(scale * 2, 1);
-        // Shroud (0) = near-black overlay, fog (1) = dim overlay
-        ctx.fillStyle = vis === 0 ? 'rgba(0,0,0,0.9)' : 'rgba(0,0,0,0.4)';
+        const palIndex = (terrain === Terrain.TREE || treeType)
+          ? RADAR_TERRAIN_OBJECT_COLOR
+          : RADAR_LAND_COLOR[terrain] ?? RADAR_LAND_COLOR[Terrain.CLEAR];
+        ctx.fillStyle = this.palColor(palIndex);
         ctx.fillRect(px, py, ps, ps);
       }
     }
@@ -3333,13 +3412,12 @@ export class Renderer {
       if (!s.alive) continue;
       const vis = this.renderVisibility(map, s.cx, s.cy);
       if (vis === 0) continue;
-      const isPlayer = s.house === 'Spain' || s.house === 'Greece';
       const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-      const sx = mmX + (s.cx - ox) * scale;
-      const sy = mmY + (s.cy - oy) * scale;
-      const sw = Math.max(fw * scale, 2);
-      const sh = Math.max(fh * scale, 2);
-      ctx.fillStyle = isPlayer ? 'rgba(80,220,255,0.85)' : 'rgba(220,50,50,0.85)';
+      const sx = mmX + (s.cx - ox) * cellPx;
+      const sy = mmY + (s.cy - oy) * cellPx;
+      const sw = fw * cellPx;
+      const sh = fh * cellPx;
+      ctx.fillStyle = HOUSE_MINIMAP_COLOR[s.house] ?? '#FFFFFF';
       ctx.fillRect(sx, sy, sw, sh);
     }
 
@@ -3364,23 +3442,15 @@ export class Renderer {
         // R17: Per-faction minimap color
         ctx.fillStyle = HOUSE_MINIMAP_COLOR[e.house] ?? '#FFFFFF';
       }
-      const dotSize = Math.max(scale, 2);
+      const dotSize = cellPx;
       ctx.fillRect(
-        mmX + (ecx - ox) * scale,
-        mmY + (ecy - oy) * scale,
+        mmX + (ecx - ox) * cellPx,
+        mmY + (ecy - oy) * cellPx,
         dotSize, dotSize,
       );
     }
 
-    // Camera viewport
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(
-      mmX + (camera.x / CELL_SIZE - ox) * scale,
-      mmY + (camera.y / CELL_SIZE - oy) * scale,
-      (camera.viewWidth / CELL_SIZE) * scale,
-      (camera.viewHeight / CELL_SIZE) * scale,
-    );
+    this.renderRadarCursor(camera, radar);
 
     // Alert flashes (pulsing red dots for EVA alerts)
     const now = Date.now();
@@ -3390,12 +3460,81 @@ export class Renderer {
       if (age > 3000) { this.minimapAlerts.splice(i, 1); continue; }
       const alpha = (Math.sin(age * 0.01) * 0.5 + 0.5) * (1 - age / 3000);
       ctx.fillStyle = `rgba(255,60,60,${alpha})`;
-      const ax = mmX + (alert.cx - ox) * scale;
-      const ay = mmY + (alert.cy - oy) * scale;
+      const ax = mmX + (alert.cx - ox) * cellPx;
+      const ay = mmY + (alert.cy - oy) * cellPx;
       ctx.beginPath();
       ctx.arc(ax, ay, 4, 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.restore();
+  }
+
+  private getActiveRadarLayout(map: Pick<GameMap, 'boundsX' | 'boundsY' | 'boundsW' | 'boundsH'>, camera: Pick<Camera, 'x' | 'y'> = { x: map.boundsX * CELL_SIZE, y: map.boundsY * CELL_SIZE }): {
+    x: number; y: number; w: number; h: number; cellPx: number;
+    ox: number; oy: number; cellsW: number; cellsH: number;
+  } {
+    // C++ WIN32 RadarClass starts active radar in zoomed mode. Zoom_Mode()
+    // fixes ZoomFactor=3, then Set_Radar_Position() uses the tactical
+    // viewport's upper-left cell and confines it to MapCell bounds.
+    const cellPx = 3;
+    const cellsW = Math.min(map.boundsW, Math.floor(Renderer.RADAR_INNER_W / cellPx), 62 * RESFACTOR);
+    const cellsH = Math.min(map.boundsH, Math.floor(Renderer.RADAR_INNER_H / cellPx), 62 * RESFACTOR);
+    const baseX = Math.floor((Renderer.RADAR_INNER_W - cellsW * cellPx) / 2);
+    const baseY = Math.floor((Renderer.RADAR_INNER_H - cellsH * cellPx) / 2);
+    const maxOx = map.boundsX + Math.max(0, map.boundsW - cellsW);
+    const maxOy = map.boundsY + Math.max(0, map.boundsH - cellsH);
+    const cameraCellX = Math.floor(camera.x / CELL_SIZE);
+    const cameraCellY = Math.floor(camera.y / CELL_SIZE);
+    const ox = Math.max(map.boundsX, Math.min(maxOx, cameraCellX));
+    const oy = Math.max(map.boundsY, Math.min(maxOy, cameraCellY));
+    return {
+      x: this.width - this.sidebarW + Renderer.RADAR_INNER_X_OFFSET + baseX,
+      y: Renderer.RADAR_COVER_Y + Renderer.RADAR_INNER_Y_OFFSET + baseY,
+      w: cellsW * cellPx,
+      h: cellsH * cellPx,
+      cellPx,
+      ox,
+      oy,
+      cellsW,
+      cellsH,
+    };
+  }
+
+  private renderRadarCursor(
+    camera: Camera,
+    radar: { x: number; y: number; w: number; h: number; cellPx: number; ox: number; oy: number },
+  ): void {
+    const ctx = this.ctx;
+    const x1 = radar.x + (Math.floor(camera.x / CELL_SIZE) - radar.ox) * radar.cellPx;
+    const y1 = radar.y + (Math.floor(camera.y / CELL_SIZE) - radar.oy) * radar.cellPx;
+    const x2 = x1 + Math.floor(camera.viewWidth / CELL_SIZE) * radar.cellPx - 1;
+    const y2 = y1 + Math.floor(camera.viewHeight / CELL_SIZE) * radar.cellPx - 1;
+    const minX = radar.x;
+    const minY = radar.y;
+    const maxX = radar.x + radar.w - 1;
+    const maxY = radar.y + radar.h - 1;
+    const lx1 = Math.round(Math.max(minX, Math.min(maxX, x1)));
+    const ly1 = Math.round(Math.max(minY, Math.min(maxY, y1)));
+    const lx2 = Math.round(Math.max(minX, Math.min(maxX, x2)));
+    const ly2 = Math.round(Math.max(minY, Math.min(maxY, y2)));
+    const barLen = 6;
+
+    const horizontal = (xStart: number, xEnd: number, y: number) => {
+      ctx.fillRect(xStart, y, Math.max(1, xEnd - xStart + 1), 1);
+    };
+    const vertical = (x: number, yStart: number, yEnd: number) => {
+      ctx.fillRect(x, yStart, 1, Math.max(1, yEnd - yStart + 1));
+    };
+
+    ctx.fillStyle = RADAR_CURSOR_LTGREEN;
+    horizontal(lx1, Math.min(lx1 + barLen, lx2), ly1);
+    vertical(lx1, ly1, Math.min(ly1 + barLen, ly2));
+    horizontal(Math.max(lx2 - barLen, lx1), lx2, ly1);
+    vertical(lx2, ly1, Math.min(ly1 + barLen, ly2));
+    vertical(lx1, Math.max(ly2 - barLen, ly1), ly2);
+    horizontal(lx1, Math.min(lx1 + barLen, lx2), ly2);
+    vertical(lx2, Math.max(ly2 - barLen, ly1), ly2);
+    horizontal(Math.max(lx2 - barLen, lx1), lx2, ly2);
   }
 
   /**
@@ -3978,6 +4117,10 @@ export class Renderer {
   static readonly RADAR_COVER_DRAW_Y = 8 * RESFACTOR; // C++ CC_Draw_Shape(RadarAnim, ..., RadY + 1*RESFACTOR)
   static readonly RADAR_SIZE = 70 * RESFACTOR;    // square radar minimap (custom, 70 LORES / 140 HIRES)
   static readonly RADAR_Y = 2 * RESFACTOR;        // top margin (custom)
+  static readonly RADAR_INNER_X_OFFSET = 6;        // C++ RESFACTOR==2 RadOffX
+  static readonly RADAR_INNER_Y_OFFSET = 7;        // C++ RESFACTOR==2 RadOffY
+  static readonly RADAR_INNER_W = 128 + 18;        // C++ RESFACTOR==2 RadIWidth
+  static readonly RADAR_INNER_H = 128 + 2;         // C++ RESFACTOR==2 RadIHeight
 
   // Button row — C++ SidebarClass::Init_IO shape button coordinates.
   // The extracted HIRES REPAIR/SELL/MAP shapes are already 34×28 pixels,
@@ -4027,9 +4170,9 @@ export class Renderer {
   static readonly SIDEBAR_BG_BOT_Y = 138 * RESFACTOR;  // side3na/us
 
   // Power bar color palette indices (C++ power.cpp)
-  static readonly POWER_COLOR_NORMAL: [string, string] = ['#004400', '#008800'];  // pal[3]/[4] green
-  static readonly POWER_COLOR_LOW: [string, string] = ['#CC8800', '#AA6600'];     // pal[214]/[211] orange
-  static readonly POWER_COLOR_CRITICAL: [string, string] = ['#CC0000', '#880000']; // pal[235]/[230] red
+  static readonly POWER_COLOR_NORMAL: [string, string] = ['rgb(0,168,0)', 'rgb(84,252,84)'];      // pal[3]/[4]
+  static readonly POWER_COLOR_LOW: [string, string] = ['rgb(212,120,16)', 'rgb(236,172,84)'];     // pal[214]/[211]
+  static readonly POWER_COLOR_CRITICAL: [string, string] = ['rgb(176,0,0)', 'rgb(252,0,0)'];      // pal[235]/[230]
 
   // Bounce animation modtable (C++ power.cpp:166)
   static readonly POWER_MODTABLE = [0, -1, 0, 1, 0, -1, -2, -1, 0, 1, 2, 1, 0];
@@ -4207,6 +4350,13 @@ export class Renderer {
     }
     if (this.drainBounce > 0 && dh === this.desiredDrainHeight) {
       dh += modtable[this.drainBounce] * this.drainDir;
+    }
+    ph = Math.max(0, Math.min(Renderer.POWER_HEIGHT - 2, ph));
+    dh = Math.max(0, Math.min(Renderer.POWER_HEIGHT - 2, dh));
+
+    if ((RESFACTOR as number) !== 1) {
+      ph = Math.floor(ph * 153 / 107);
+      dh = Math.floor(dh * 153 / 107);
     }
     ph = Math.max(0, Math.min(pwrH - 2, ph));
     dh = Math.max(0, Math.min(pwrH - 2, dh));

@@ -6,7 +6,7 @@
  * NEVER hardcode C++ values in assertions — always derive from INI.
  *
  * Key C++ source files:
- *   map.cpp:286-344      — Sight_From: sightrange capped at 10, circular reveal
+ *   map.cpp:286-344      — Sight_From: sightrange capped at 10, RadiusOffset reveal
  *   map.cpp:296           — if (!sightrange || sightrange > 10) return;
  *   map.cpp:68-83         — RadiusOffset[] and RadiusCount[11] tables
  *   display.cpp:4157-4163 — Shroud_Cell: GPS active prevents shrouding
@@ -28,7 +28,7 @@ import {
   STRUCTURE_SIGHT,
   type FogContext,
 } from '../engine/fog';
-import { CELL_SIZE, MAP_CELLS, UNIT_STATS, House } from '../engine/types';
+import { CELL_SIZE, MAP_CELLS, UNIT_STATS, House, cellDist } from '../engine/types';
 import { CloakState } from '../engine/entity';
 import type { Entity } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
@@ -289,7 +289,7 @@ describe('GAP_RADIUS matches C++ GapShroudRadius=10 (rules.cpp:222)', () => {
 
 // =============================================================================
 // Section 4: Gap generator shrouds enemy view within radius
-// C++ map.cpp:437-486 — Jam_From uses circular pattern
+// C++ map.cpp:437-486 — Jam_From uses coord.cpp Distance pattern
 // C++ building.cpp:990-1006 — GAP AI: Power_Fraction >= 1 required
 // =============================================================================
 
@@ -316,13 +316,15 @@ describe('Gap generator shrouds enemy view within radius', () => {
     const cx = entry.cx;
     const cy = entry.cy;
 
-    // Axis cell at distance 10 — octagonal: max(10,0)*2+min(10,0) = 20 <= 20 — jammed
+    // Axis cell at distance 10 — coord.cpp Distance=10 — jammed
     expect(map.jammedCells.has(cy * MAP_CELLS + (cx + 10))).toBe(true);
-    // Axis cell at distance 11 — octagonal: max(11,0)*2+min(11,0) = 22 > 20 — NOT jammed
+    // Axis cell at distance 11 — coord.cpp Distance=11 — NOT jammed
     expect(map.jammedCells.has(cy * MAP_CELLS + (cx + 11))).toBe(false);
-    // Diagonal (7,7) — octagonal: max(7,7)*2+min(7,7) = 21 > 20 — NOT jammed
+    // Diagonal (7,7) — coord.cpp Distance=7+7/2=10.5 — NOT jammed
     expect(map.jammedCells.has((cy + 7) * MAP_CELLS + (cx + 7))).toBe(false);
-    // (6,7) — octagonal: max(7,6)*2+min(7,6) = 20 <= 20 — jammed
+    // (8,7) — coord.cpp Distance=8+7/2=11.5 — NOT jammed
+    expect(map.jammedCells.has((cy + 7) * MAP_CELLS + (cx + 8))).toBe(false);
+    // (6,7) — coord.cpp Distance=7+6/2=10 — jammed
     expect(map.jammedCells.has((cy + 7) * MAP_CELLS + (cx + 6))).toBe(true);
   });
 
@@ -620,7 +622,7 @@ describe('GPS satellite permanently reveals map (house.cpp:1265)', () => {
 describe('Spy plane reveals area around target', () => {
   it('revealAroundCell with radius=10 reveals cells within octagonal distance', () => {
     // C++ map.cpp:286-344: Sight_From reveals using RadiusOffset table
-    // TS uses octagonal distance: max*2+min <= radius*2
+    // TS uses coord.cpp Distance over Cell_Coord centers: max + min/2 <= radius
     const map = new GameMap();
     revealAroundCell(map, 64, 64, 10);
 
@@ -883,10 +885,10 @@ describe('Sight reveal uses octagonal distance (coord.cpp:124-136)', () => {
     // Cell (2,2) — octagonal: max(2,2)*2+min(2,2) = 6 <= 6 — revealed
     expect(map.getVisibility(66, 66)).toBe(2);
 
-    // Cell (3,1) — octagonal: max(3,1)*2+min(3,1) = 7 > 6 — NOT revealed
+    // Cell (3,1) — coord.cpp Distance=3+1/2=3.5 — NOT revealed
     expect(map.getVisibility(67, 65)).not.toBe(2);
 
-    // Cell (2,3) — octagonal: max(3,2)*2+min(3,2) = 8 > 6 — NOT revealed
+    // Cell (2,3) — coord.cpp Distance=3+2/2=4 — NOT revealed
     expect(map.getVisibility(66, 67)).not.toBe(2);
   });
 });
@@ -1023,11 +1025,7 @@ describe('Overlapping gap generators use jam count tracking', () => {
 
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
-        const adx = Math.abs(dx);
-        const ady = Math.abs(dy);
-        const big = adx > ady ? adx : ady;
-        const small = adx > ady ? ady : adx;
-        if (big * 2 + small <= r * 2) {
+        if (cellDist(dx, dy) <= r) {
           map.jamCell(gap1cx + dx, cy + dy);
           map.jamCell(gap2cx + dx, cy + dy);
         }
@@ -1040,11 +1038,7 @@ describe('Overlapping gap generators use jam count tracking', () => {
     // Destroy first GAP — unjam its radius
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
-        const adx = Math.abs(dx);
-        const ady = Math.abs(dy);
-        const big = adx > ady ? adx : ady;
-        const small = adx > ady ? ady : adx;
-        if (big * 2 + small <= r * 2) {
+        if (cellDist(dx, dy) <= r) {
           map.unjamCell(gap1cx + dx, cy + dy);
         }
       }

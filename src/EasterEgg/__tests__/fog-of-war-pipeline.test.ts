@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { GameMap, Terrain } from '../engine/map';
 import { Entity, CloakState, CLOAK_TRANSITION_FRAMES, SONAR_PULSE_DURATION, setPlayerHouses } from '../engine/entity';
-import { CELL_SIZE, MAP_CELLS, CONDITION_RED, House, UnitType, UNIT_STATS, SONAR_REVEAL_TICKS } from '../engine/types';
+import { CELL_SIZE, MAP_CELLS, CONDITION_RED, House, UnitType, UNIT_STATS, SONAR_REVEAL_TICKS, cellDist } from '../engine/types';
 import {
   updateFogOfWar,
   updateSubDetection,
@@ -229,7 +229,7 @@ describe('updateFogOfWar full cycle', () => {
 });
 
 // ========================================================================
-// 3. Sight range geometry — circular reveal
+// 3. Sight range geometry — C++ coord.cpp Distance reveal
 // ========================================================================
 
 describe('Sight range geometry', () => {
@@ -241,28 +241,26 @@ describe('Sight range geometry', () => {
     expect(countVis(map, 2)).toBe(1);
   });
 
-  it('sight=1 reveals a small cross pattern (at most 5 cells)', () => {
+  it('sight=1 reveals the C++ accepted cardinal pattern', () => {
     const map = createClearMap();
     map.updateFogOfWar([unit(64, 64, 1)]);
-    // radius^2 = 1 => only dx*dx+dy*dy <= 1 => center + 4 cardinals
     const vis = countVis(map, 2);
-    expect(vis).toBe(5); // (0,0),(1,0),(-1,0),(0,1),(0,-1)
+    expect(vis).toBe(5);
   });
 
   it('sight=5 reveals cells within radius 5 (C++ octagonal, not Euclidean)', () => {
     const map = createClearMap();
     map.updateFogOfWar([unit(64, 64, 5)]);
 
-    // C++ coord.cpp:124-136 octagonal distance: max(|dx|,|dy|)*2 + min(|dx|,|dy|) <= radius*2
-    // Cell at exact distance 5 (e.g., (5,0)) should be visible: big=5,small=0 => 10+0=10 <= 10
+    // C++ coord.cpp over Cell_Coord centers: Distance=max + min/2.
     expect(map.getVisibility(69, 64)).toBe(2);
-    // Cell at (4,3): big=4,small=3 => 8+3=11 > 10 — NOT visible (octagonal excludes this)
+    // Cell at (4,3): 4+3/2=5.5 — NOT visible.
     expect(map.getVisibility(68, 67)).toBe(0);
-    // Cell at (5,1): big=5,small=1 => 10+1=11 > 10 — NOT visible
+    // Cell at (5,1): 5+1/2=5.5 — NOT visible.
     expect(map.getVisibility(69, 65)).toBe(0);
-    // Cell at (4,4): big=4,small=4 => 8+4=12 > 10 — NOT visible
+    // Cell at (4,4): 4+4/2=6 — NOT visible.
     expect(map.getVisibility(68, 68)).toBe(0);
-    // Cell at (3,3): big=3,small=3 => 6+3=9 <= 10 — visible
+    // Cell at (3,3): 3+3/2=4.5 — visible.
     expect(map.getVisibility(67, 67)).toBe(2);
   });
 
@@ -755,8 +753,8 @@ describe('Gap generators', () => {
     // GAP is 1x2 at (64,64), center = (64, 65) — cy + floor(2/2)
     // Cell at exact distance GAP_RADIUS along axis from center should be jammed
     expect(map.getVisibility(64 + GAP_RADIUS, 65)).toBe(0);
-    // Cell at diagonal distance from center should NOT be jammed
-    expect(map.getVisibility(64 + GAP_RADIUS, 66)).toBe(2); // just outside circle
+    // Cell just outside coord.cpp Distance radius should NOT be jammed.
+    expect(map.getVisibility(64 + GAP_RADIUS, 67)).toBe(2);
   });
 });
 
@@ -792,16 +790,12 @@ describe('Spy plane reveal', () => {
     const map = createClearMap();
     revealAroundCell(map, 64, 64, 10);
     const vis = countVis(map, 2);
-    // Should match C++ octagonal distance area for r=10
-    // C++ coord.cpp:124-136: max(|dx|,|dy|)*2 + min(|dx|,|dy|) <= radius*2
+    // Should match C++ Sight_From accepted offsets after RadiusOffset candidates
+    // are filtered by coord.cpp Distance.
     let expected = 0;
     for (let dy = -10; dy <= 10; dy++) {
       for (let dx = -10; dx <= 10; dx++) {
-        const adx = Math.abs(dx);
-        const ady = Math.abs(dy);
-        const big = adx > ady ? adx : ady;
-        const small = adx > ady ? ady : adx;
-        if (big * 2 + small <= 20) expected++;
+        if (cellDist(dx, dy) <= 10) expected++;
       }
     }
     expect(vis).toBe(expected);
@@ -810,14 +804,13 @@ describe('Spy plane reveal', () => {
   it('revealAroundCell uses C++ octagonal geometry (not square)', () => {
     const map = createClearMap();
     revealAroundCell(map, 64, 64, 10);
-    // C++ coord.cpp:124-136 octagonal: max*2+min <= radius*2
-    // (10,0): big=10,small=0 => 20+0=20 <= 20 — included
+    // C++ coord.cpp over Cell_Coord centers: Distance=max + min/2.
     expect(map.getVisibility(74, 64)).toBe(2);
-    // (8,7): big=8,small=7 => 16+7=23 > 20 — excluded
+    // (8,7): 8+7/2=11.5 — excluded.
     expect(map.getVisibility(72, 71)).toBe(0);
-    // (7,7): big=7,small=7 => 14+7=21 > 20 — excluded (octagonal clips diagonals)
+    // (7,7): 7+7/2=10.5 — excluded.
     expect(map.getVisibility(71, 71)).toBe(0);
-    // (7,6): big=7,small=6 => 14+6=20 <= 20 — included
+    // (7,6): 7+6/2=10 — included.
     expect(map.getVisibility(71, 70)).toBe(2);
   });
 
@@ -956,17 +949,16 @@ describe('Unit death and fog recalculation', () => {
 // ========================================================================
 
 describe('revealAroundCell', () => {
-  it('revealAroundCell uses C++ octagonal distance (max*2+min <= r*2)', () => {
+  it('revealAroundCell uses C++ coord.cpp Distance', () => {
     const map = createClearMap();
     revealAroundCell(map, 64, 64, 5);
-    // C++ coord.cpp:124-136 octagonal: max(|dx|,|dy|)*2 + min(|dx|,|dy|) <= radius*2
-    // (5,0): big=5,small=0 => 10+0=10 <= 10 — included
+    // C++ coord.cpp over Cell_Coord centers: Distance=max + min/2.
     expect(map.getVisibility(69, 64)).toBe(2);
-    // (4,3): big=4,small=3 => 8+3=11 > 10 — excluded (octagonal clips this)
+    // (4,3): 4+3/2=5.5 — excluded.
     expect(map.getVisibility(68, 67)).toBe(0);
-    // (5,1): big=5,small=1 => 10+1=11 > 10 — excluded
+    // (5,1): 5+1/2=5.5 — excluded.
     expect(map.getVisibility(69, 65)).toBe(0);
-    // (3,3): big=3,small=3 => 6+3=9 <= 10 — included
+    // (3,3): 3+3/2=4.5 — included.
     expect(map.getVisibility(67, 67)).toBe(2);
   });
 
@@ -982,28 +974,16 @@ describe('revealAroundCell', () => {
   it('revealAroundCell checks bounds — no crash at map edge', () => {
     const map = createClearMap();
     // Reveal at corner with large radius — should clip, not crash
-    revealAroundCell(map, 0, 0, 15);
+    revealAroundCell(map, 0, 0, 10);
     expect(map.getVisibility(0, 0)).toBe(2);
     expect(map.getVisibility(10, 0)).toBe(2);
     // No cells outside map bounds should cause errors
   });
 
-  it('revealAroundCell with radius=15 reveals correct area (initial player reveal)', () => {
+  it('revealAroundCell with radius > 10 is capped like C++ Sight_From', () => {
     const map = createClearMap();
     revealAroundCell(map, 64, 64, 15);
-    const vis = countVis(map, 2);
-    // C++ coord.cpp:124-136 octagonal distance: max*2+min <= radius*2
-    let expected = 0;
-    for (let dy = -15; dy <= 15; dy++) {
-      for (let dx = -15; dx <= 15; dx++) {
-        const adx = Math.abs(dx);
-        const ady = Math.abs(dy);
-        const big = adx > ady ? adx : ady;
-        const small = adx > ady ? ady : adx;
-        if (big * 2 + small <= 30) expected++;
-      }
-    }
-    expect(vis).toBe(expected);
+    expect(countVis(map, 2)).toBe(0);
   });
 
   it('setVisibility directly on map works for programmatic reveal', () => {
@@ -1083,21 +1063,19 @@ describe('Edge cases', () => {
     const map = createClearMap();
     const sight = 7;
     map.updateFogOfWar([unit(64, 64, sight)]);
-    // (7,0) => 49 <= 49 — included
+    // (7,0) => Distance=7 — included
     expect(map.getVisibility(71, 64)).toBe(2);
-    // (5,5) => 50 > 49 — NOT included
+    // (6,2) => Distance=7 — included
+    expect(map.getVisibility(70, 66)).toBe(2);
+    // (5,5) => Distance=7.5 — NOT included
     expect(map.getVisibility(69, 69)).toBe(0);
-    // (7,1) => 50 > 49 — NOT included
-    expect(map.getVisibility(71, 65)).toBe(0);
   });
 
   it('large sight range does not overflow map bounds', () => {
     const map = createClearMap();
-    // Unit at center with sight > half map — should reveal huge area but not crash
+    // C++ map.cpp:296 rejects sight ranges above 10.
     map.updateFogOfWar([unit(64, 64, 100)]);
-    const vis = countVis(map, 2);
-    // Should reveal most of the map
-    expect(vis).toBeGreaterThan(MAP_CELLS * MAP_CELLS * 0.5);
+    expect(countVis(map, 2)).toBe(0);
   });
 
   it('empty units array causes all visible cells to become fog', () => {
@@ -1227,9 +1205,9 @@ describe('Darkness crate — functional GameMap test', () => {
 
 describe('Mathematical sight area verification', () => {
   const testCases: [number, number][] = [
-    [1, 5],    // dx*dx+dy*dy<=1: (0,0),(1,0),(-1,0),(0,1),(0,-1)
-    [2, 13],   // dx*dx+dy*dy<=4: a circle of radius 2
-    [3, 29],   // dx*dx+dy*dy<=9
+    [1, 5],
+    [2, 13],
+    [3, 29],
   ];
 
   for (const [sight, expectedCells] of testCases) {
@@ -1245,15 +1223,11 @@ describe('Mathematical sight area verification', () => {
     const map = createClearMap();
     map.updateFogOfWar([unit(64, 64, 5)]);
     const vis = countVis(map, 2);
-    // C++ coord.cpp:124-136 octagonal: max(|dx|,|dy|)*2 + min(|dx|,|dy|) <= radius*2
+    // C++ coord.cpp Distance over Cell_Coord centers: max + min/2 <= radius
     let expected = 0;
     for (let dy = -5; dy <= 5; dy++) {
       for (let dx = -5; dx <= 5; dx++) {
-        const adx = Math.abs(dx);
-        const ady = Math.abs(dy);
-        const big = adx > ady ? adx : ady;
-        const small = adx > ady ? ady : adx;
-        if (big * 2 + small <= 10) expected++;
+        if (cellDist(dx, dy) <= 5) expected++;
       }
     }
     expect(vis).toBe(expected);

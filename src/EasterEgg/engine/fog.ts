@@ -6,6 +6,7 @@
 import {
   CELL_SIZE, MAP_CELLS,
   House,
+  radiusCellOffsets,
 } from './types';
 import { type Entity, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
@@ -30,6 +31,14 @@ export const STRUCTURE_SIGHT: Record<string, number> = {
   PBOX: 5,  HBOX: 5,  GUN: 6,   SAM: 5,   AGUN: 6,
   TSLA: 8,  FTUR: 6,  BIO: 4,   HOSP: 4,  FCOM: 10,
 };
+
+/** C++ TechnoClass::Look() uses Coord_Cell(Coord), not BuildingClass::Center_Coord(). */
+export function structureLookCell(s: Pick<MapStructure, 'type' | 'cx' | 'cy'>): { cx: number; cy: number } {
+  return {
+    cx: s.cx,
+    cy: s.cy,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Context interface — thin view into the Game class
@@ -56,6 +65,7 @@ export interface FogContext {
   // Callbacks
   isAllied(a: House, b: House): boolean;
   entitiesAllied(a: Entity, b: Entity): boolean;
+  structureRevealsForPlayer?(s: MapStructure): boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,16 +106,18 @@ export function updateFogOfWar(ctx: FogContext): void {
 
   // C++ All_To_Look(units_only=true) at init skips buildings; per-tick sight includes them.
   for (const s of ctx.structures) {
-    const revealsForPlayer =
-      s.house === ctx.playerHouse ||
-      ((ctx.allyReveal ?? true) && ctx.isAllied(s.house, ctx.playerHouse));
+    const revealsForPlayer = ctx.structureRevealsForPlayer
+      ? ctx.structureRevealsForPlayer(s)
+      : s.house === ctx.playerHouse ||
+        ((ctx.allyReveal ?? true) && ctx.isAllied(s.house, ctx.playerHouse));
     if (s.alive && revealsForPlayer) {
       // C++ building.cpp uses Class->SightRange directly — no health reduction.
       const sight = STRUCTURE_SIGHT[s.type] ?? 5;
       // C++ map.cpp:296: if (!sightrange || sightrange > 10) return;
       if (!sight || sight > 10) continue;
-      const wx = s.cx * CELL_SIZE + CELL_SIZE / 2;
-      const wy = s.cy * CELL_SIZE + CELL_SIZE / 2;
+      const look = structureLookCell(s);
+      const wx = look.cx * CELL_SIZE + CELL_SIZE / 2;
+      const wy = look.cy * CELL_SIZE + CELL_SIZE / 2;
       units.push({ x: wx, y: wy, sight });
     }
   }
@@ -163,40 +175,17 @@ export function updateSubDetection(ctx: FogContext): void {
  * Reveal all cells within a circular radius around the given cell.
  * Pure function — only needs the map instance.
  */
-export function revealAroundCell(map: GameMap, cx: number, cy: number, radius: number): void {
+export function revealAroundCell(map: GameMap, cx: number, cy: number, radius: number, incremental = false): void {
+  // C++ map.cpp:295-296: if (!In_Radar(cell)) return;
+  if (!map.inBounds(cx, cy)) return;
   // C++ map.cpp:296: if (!sightrange || sightrange > 10) return;
   // Radius 0 reveals nothing — early return.
-  if (radius === 0) return;
-  // C++ map.cpp:70: RadiusCount[1] = 9 — radius 1 includes all 8 neighbors (3x3 grid).
-  if (radius === 1) {
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        const rx = cx + dx;
-        const ry = cy + dy;
-        if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
-          map.setVisibility(rx, ry, 2);
-        }
-      }
-    }
-    return;
-  }
-  // C++ coord.cpp:124-136 — Distance() uses octagonal approximation:
-  //   max(|dy|,|dx|) + min(|dy|,|dx|)/2, compared in lepton units.
-  // Simplified for cell coords: max*2 + min <= radius*2
-  const threshold = radius * 2;
-  for (let dy = -radius; dy <= radius; dy++) {
-    for (let dx = -radius; dx <= radius; dx++) {
-      const adx = Math.abs(dx);
-      const ady = Math.abs(dy);
-      const big = adx > ady ? adx : ady;
-      const small = adx > ady ? ady : adx;
-      if (big * 2 + small <= threshold) {
-        const rx = cx + dx;
-        const ry = cy + dy;
-        if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
-          map.setVisibility(rx, ry, 2);
-        }
-      }
+  if (radius === 0 || radius > 10) return;
+  for (const { dx, dy } of radiusCellOffsets(radius, incremental)) {
+    const rx = cx + dx;
+    const ry = cy + dy;
+    if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
+      map.setVisibility(rx, ry, 2);
     }
   }
 }
@@ -289,18 +278,9 @@ export function updateGapGenerators(ctx: FogContext): void {
     const cx = s.cx + Math.floor(gw / 2);
     const cy = s.cy + Math.floor(gh / 2);
     const r = GAP_RADIUS;
-    const rThreshold = r * 2;  // C++ octagonal distance: max*2+min <= r*2
 
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
-        const adx = Math.abs(dx);
-        const ady = Math.abs(dy);
-        const big = adx > ady ? adx : ady;
-        const small = adx > ady ? ady : adx;
-        if (big * 2 + small <= rThreshold) {
-          ctx.map.jamCell(cx + dx, cy + dy);
-        }
-      }
+    for (const { dx, dy } of radiusCellOffsets(r)) {
+      ctx.map.jamCell(cx + dx, cy + dy);
     }
 
     ctx.gapGeneratorCells.set(si, { cx, cy, radius: r });

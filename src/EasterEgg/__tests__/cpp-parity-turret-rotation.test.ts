@@ -130,8 +130,19 @@ function cppRotationAdjust(current: number, desired: number, rate: number): [num
   return [newFacing, newFacing32 !== oldFacing32];
 }
 
+const CPP_FACING32: readonly number[] = [
+  0,0,0,0,0,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,
+  3,4,4,4,4,4,4,5,5,5,5,5,5,5,6,6,6,6,6,6,6,7,7,7,7,7,7,7,8,8,8,8,
+  8,8,8,9,9,9,9,9,9,9,10,10,10,10,10,10,10,11,11,11,11,11,11,11,12,12,12,12,12,12,12,12,
+  13,13,13,13,13,13,13,13,14,14,14,14,14,14,14,14,14,15,15,15,15,15,15,15,15,15,16,16,16,16,16,16,
+  16,16,16,16,16,17,17,17,17,17,17,17,17,17,18,18,18,18,18,18,18,18,18,19,19,19,19,19,19,19,19,19,
+  19,20,20,20,20,20,20,21,21,21,21,21,21,21,22,22,22,22,22,22,22,23,23,23,23,23,23,23,24,24,24,24,
+  24,24,24,25,25,25,25,25,25,25,26,26,26,26,26,26,26,27,27,27,27,27,27,27,28,28,28,28,28,28,28,28,
+  29,29,29,29,29,29,29,29,30,30,30,30,30,30,30,30,30,31,31,31,31,31,31,31,31,31,0,0,0,0,0,0,
+];
+
 function cppDirTo32(dir: number): number {
-  return Math.floor(((dir & 0xFF) + 4) / 8) % 32;
+  return CPP_FACING32[dir & 0xff];
 }
 
 /** Simulate full C++ rotation and count ticks to reach desired */
@@ -407,10 +418,10 @@ describe('4. Turret rotation rate = ROT+1 per tick (unit.cpp:542)', () => {
     tank.tickTurretRotation();
     expect(tank.turretFacing32).toBe(1);
 
-    // Second tick: 12 in 256-dir space rounds to visual step 2.
+    // Second tick: 12 in 256-dir space is still visual step 1 in C++ Facing32.
     tank.turretRotTickedThisFrame = false;
     tank.tickTurretRotation();
-    expect(tank.turretFacing32).toBe(2);
+    expect(tank.turretFacing32).toBe(1);
   });
 
   it('turret rotates faster than body for same unit (body=ROT, turret=ROT+1)', () => {
@@ -586,7 +597,7 @@ describe('6. Idle turret return to body facing (unit.cpp:554-556)', () => {
     const aligned = tank.tickTurretRotation();
     expect(aligned).toBe(true);
     expect(tank.turretRotAccumulator).toBe(0);
-    expect(tank.turretFacing32).toBe(Dir.SE * 4);
+    expect(tank.turretFacing32).toBe(cppDirTo32(Dir.SE * 32));
   });
 });
 
@@ -733,7 +744,7 @@ describe('9. 32-step turret rotation ring: direction and timing', () => {
     tank.tickTurretRotation();
 
     // Should have stepped CW in exact 256-dir space.
-    expect(tank.turretFacing32).toBe(2);
+    expect(tank.turretFacing32).toBe(1);
   });
 
   it('turret rotates counter-clockwise (CCW) when diff >= 16 in 32-ring', () => {
@@ -1078,7 +1089,6 @@ describe('17. Turret rotation timing invariants (from INI ROT values)', () => {
 describe('18. 256-step DirType to 32-step visual mapping parity', () => {
   it('C++ Dir_To_32 maps each 8-wide zone to one of 32 visual steps', () => {
     // C++ inline.h:694: Dir_To_32 uses Facing32 lookup table
-    // Our simplified version: floor((dir + 4) / 8) % 32
     for (let dir = 0; dir < 256; dir++) {
       const zone = cppDirTo32(dir);
       expect(zone).toBeGreaterThanOrEqual(0);
@@ -1088,24 +1098,24 @@ describe('18. 256-step DirType to 32-step visual mapping parity', () => {
 
   it('cardinal directions map to expected 32-step values', () => {
     expect(cppDirTo32(0)).toBe(0);    // DIR_N -> step 0
-    expect(cppDirTo32(32)).toBe(4);   // DIR_NE -> step 4
+    expect(cppDirTo32(32)).toBe(3);   // DIR_NE -> step 3
     expect(cppDirTo32(64)).toBe(8);   // DIR_E -> step 8
-    expect(cppDirTo32(96)).toBe(12);  // DIR_SE -> step 12
+    expect(cppDirTo32(96)).toBe(13);  // DIR_SE -> step 13
     expect(cppDirTo32(128)).toBe(16); // DIR_S -> step 16
-    expect(cppDirTo32(160)).toBe(20); // DIR_SW -> step 20
+    expect(cppDirTo32(160)).toBe(19); // DIR_SW -> step 19
     expect(cppDirTo32(192)).toBe(24); // DIR_W -> step 24
-    expect(cppDirTo32(224)).toBe(28); // DIR_NW -> step 28
+    expect(cppDirTo32(224)).toBe(29); // DIR_NW -> step 29
   });
 
-  it('TS 8-dir * 4 produces same 32-step indices as C++ cardinal Dir_To_32', () => {
-    // TS maps Dir (0-7) to 32-step via dir * 4
-    // C++ maps DirType (0, 32, 64, 96, 128, 160, 192, 224) via Dir_To_32
-    const cppCardinals = [0, 32, 64, 96, 128, 160, 192, 224];
-    for (let d = 0; d < 8; d++) {
-      const tsStep32 = d * 4;
-      const cppStep32 = cppDirTo32(cppCardinals[d]);
-      expect(tsStep32, `Dir ${d}`).toBe(cppStep32);
-    }
+  it('C++ diagonal facings are deliberately not equal to 8-dir * 4', () => {
+    expect(cppDirTo32(0)).toBe(Dir.N * 4);
+    expect(cppDirTo32(64)).toBe(Dir.E * 4);
+    expect(cppDirTo32(128)).toBe(Dir.S * 4);
+    expect(cppDirTo32(192)).toBe(Dir.W * 4);
+    expect(cppDirTo32(32)).not.toBe(Dir.NE * 4);
+    expect(cppDirTo32(96)).not.toBe(Dir.SE * 4);
+    expect(cppDirTo32(160)).not.toBe(Dir.SW * 4);
+    expect(cppDirTo32(224)).not.toBe(Dir.NW * 4);
   });
 });
 

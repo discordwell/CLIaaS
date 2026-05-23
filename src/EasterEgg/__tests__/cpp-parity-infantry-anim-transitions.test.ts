@@ -195,6 +195,8 @@ describe('C++ Parity: G3 — LIE_DOWN/GET_UP Transition Animations', () => {
     e.animState = AnimState.GET_UP;
     e.animFrame = 1;
     e.facing = 4; // S → INFANTRY_SHAPE[4] = 4
+    e.bodyFacing256 = 128;
+    e.bodyFacing32 = 16;
     const anim = INFANTRY_ANIMS.E1;
     const sdir = INFANTRY_SHAPE[4];
     const expected = anim.getUp!.frame + sdir * anim.getUp!.jump + 1;
@@ -340,6 +342,8 @@ describe('C++ Parity: G8 — Gesture/Salute Animation Fields', () => {
     e.gestureDoInfo = anim.gesture1!;
     e.animFrame = 1;
     e.facing = 2; // E → INFANTRY_SHAPE[2] = 6
+    e.bodyFacing256 = 64;
+    e.bodyFacing32 = 8;
     const sdir = INFANTRY_SHAPE[2];
     const expected = anim.gesture1!.frame + sdir * anim.gesture1!.jump + 1;
     expect(e.spriteFrame).toBe(expected);

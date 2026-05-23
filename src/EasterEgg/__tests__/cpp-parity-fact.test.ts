@@ -430,13 +430,14 @@ describe('FACT 3x3 destruction effects scaling', () => {
     expect(ctx.screenShake).toBe(6);
   });
 
-  it('produces screen flash of 6 (fw * 2 = 3*2, clamped to min(8, 6))', () => {
+  it('does not produce a full-screen flash on destruction', () => {
     const fact = makeFACT(10, 10, 50);
     fact.house = House.USSR;
     const ctx = makeCombatCtx([fact]);
     structureDamage(ctx, fact, 100);
-    // screenFlash = min(8, fw * 2) = min(8, 6) = 6
-    expect(ctx.screenFlash).toBe(6);
+    // C++ building.cpp:1292-1312 spawns local explosions and calls
+    // Shake_The_Screen(shakes); it does not fade or flash the whole palette.
+    expect(ctx.screenFlash).toBe(0);
   });
 
   it('generates at least 6 pre-explosion effects (max for 3x3 = min(6, 9) = 6)', () => {

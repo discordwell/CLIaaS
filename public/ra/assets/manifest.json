@@ -197,6 +197,15 @@
     "sheetWidth": 800,
     "sheetHeight": 624
   },
+  "e7": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 316,
+    "columns": 16,
+    "rows": 20,
+    "sheetWidth": 800,
+    "sheetHeight": 780
+  },
   "dog": {
     "frameWidth": 50,
     "frameHeight": 39,
@@ -340,6 +349,33 @@
     "rows": 1,
     "sheetWidth": 230,
     "sheetHeight": 34
+  },
+  "mgun": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 384,
+    "sheetHeight": 48
+  },
+  "ssam": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 384,
+    "sheetHeight": 48
+  },
+  "turr": {
+    "frameWidth": 18,
+    "frameHeight": 11,
+    "frameCount": 32,
+    "columns": 16,
+    "rows": 2,
+    "sheetWidth": 288,
+    "sheetHeight": 22
   },
   "hind": {
     "frameWidth": 56,

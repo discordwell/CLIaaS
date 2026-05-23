@@ -386,13 +386,21 @@ export interface InfantryAnim {
   idleRate?: number;   // ticks per frame for idle (default 4)
 }
 
-// C++ infantry.cpp:90 — HumanShape maps 8-dir enum to SHP sprite direction order.
-// SHP files store direction sprites as: N(0), NW(1), W(2), SW(3), S(4), SE(5), E(6), NE(7).
+// C++ infantry.cpp:90 — HumanShape maps Dir_To_32(PrimaryFacing.Current()) to
+// SHP sprite direction order. SHP files store directions as:
+// N(0), NW(1), W(2), SW(3), S(4), SE(5), E(6), NE(7).
+export const INFANTRY_HUMAN_SHAPE: readonly number[] = [
+  0, 0, 7, 7, 7, 7, 6, 6, 6, 6, 5, 5, 5, 5, 5, 4,
+  4, 4, 3, 3, 3, 3, 2, 2, 2, 2, 1, 1, 1, 1, 1, 0,
+];
+
+// 8-way convenience table for exact primary facings. Rendering uses
+// INFANTRY_HUMAN_SHAPE + Dir_To_32 to preserve C++ intermediate-facing behavior.
 // Our Dir enum is: N(0), NE(1), E(2), SE(3), S(4), SW(5), W(6), NW(7).
 export const INFANTRY_SHAPE: number[] = [0, 7, 6, 5, 4, 3, 2, 1];
 
 // Infantry animation layouts per type — exact C++ idata.cpp DoControls values.
-// Frame formula: frame + INFANTRY_SHAPE[dir] * jump + animFrame % count
+// Frame formula: frame + HumanShape[Dir_To_32(primaryFacing)] * jump + animFrame % count
 // C++ infantry.cpp maps InfDeath 1..4 to DO_GUN_DEATH, DO_EXPLOSION_DEATH,
 // DO_GRENADE_DEATH, DO_FIRE_DEATH. InfDeath 0 deletes immediately; InfDeath 5
 // creates an electro AnimClass and deletes immediately.
@@ -963,7 +971,7 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   HELI: { type: UnitType.V_HELI, name: 'Longbow', image: 'heli', strength: 225, armor: 'heavy', speed: 16, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'Hellfire', secondaryWeapon: 'Hellfire', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', landingSpeed: 0xFF, maxAmmo: 6, guardRange: 30, points: 50, crewed: true },
   HIND: { type: UnitType.V_HIND, name: 'Hind', image: 'hind', strength: 225, armor: 'heavy', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'ChainGun', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', landingSpeed: 0xFF, maxAmmo: 12, guardRange: 30, points: 40, crewed: true },
   // Tanya & Thief (new infantry)
-  E7:   { type: UnitType.I_TANYA, name: 'Tanya', image: 'e5', strength: 100, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 6, rot: 8, isInfantry: true, primaryWeapon: 'Colt45', secondaryWeapon: 'Colt45', crushable: true, owner: 'both', cost: 1200, canSwim: true, hasC4: true, isInfiltrate: true, points: 25, isCrawling: true },
+  E7:   { type: UnitType.I_TANYA, name: 'Tanya', image: 'e7', strength: 100, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 6, rot: 8, isInfantry: true, primaryWeapon: 'Colt45', secondaryWeapon: 'Colt45', crushable: true, owner: 'both', cost: 1200, canSwim: true, hasC4: true, isInfiltrate: true, points: 25, isCrawling: true },
   THF:  { type: UnitType.I_THF, name: 'Thief', image: 'e1', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, secondaryWeapon: null, crushable: true, owner: 'allied', cost: 500, isInfiltrate: true, points: 10 },  // NO Fraidycat=yes in rules.ini
   // Expansion vehicles (V2 Rocket, Minelayer)
   V2RL: { type: UnitType.V_V2RL, name: 'V2 Rocket', image: 'v2rl', strength: 150, armor: 'light', speed: 7, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'SCUD', secondaryWeapon: null, owner: 'soviet', cost: 700, noMovingFire: true, maxAmmo: 1, crusher: true, points: 40, crewed: true },  // rules.ini Tracked=yes
@@ -1668,6 +1676,63 @@ export function leptonDist(ax: number, ay: number, bx: number, by: number): numb
     return (diff1 + ((diff2 >>> 0) >> 1)) | 0;
   }
   return (diff2 + ((diff1 >>> 0) >> 1)) | 0;
+}
+
+/** C++ coord.cpp Distance(Cell_Coord(a), Cell_Coord(b)) in cell units.
+ *  The RadiusOffset table over-includes candidates, then Sight_From filters
+ *  with exact lepton distance. Odd diagonals therefore count as .5 cells. */
+export function cellDist(dx: number, dy: number): number {
+  const adx = Math.abs(dx);
+  const ady = Math.abs(dy);
+  return ady > adx ? ady + adx / 2 : adx + ady / 2;
+}
+
+const MAX_CPP_SIGHT_RADIUS = 10;
+
+function candidateCellDist(dx: number, dy: number): number {
+  const adx = Math.abs(dx);
+  const ady = Math.abs(dy);
+  return ady > adx ? ady + (adx >> 1) : adx + (ady >> 1);
+}
+
+const RADIUS_CANDIDATE_OFFSETS: ReadonlyArray<ReadonlyArray<{ dx: number; dy: number }>> = (() => {
+  const candidatesByRadius: Array<ReadonlyArray<{ dx: number; dy: number }>> = [];
+  const candidates: Array<{ dx: number; dy: number }> = [{ dx: 0, dy: 0 }];
+  candidatesByRadius[0] = Object.freeze([...candidates]);
+
+  for (let ring = 1; ring <= MAX_CPP_SIGHT_RADIUS; ring++) {
+    for (let dy = -ring; dy <= ring; dy++) {
+      for (let dx = -ring; dx <= ring; dx++) {
+        if (candidateCellDist(dx, dy) !== ring) continue;
+        candidates.push({ dx, dy });
+      }
+    }
+    candidatesByRadius[ring] = Object.freeze([...candidates]);
+  }
+
+  return Object.freeze(candidatesByRadius);
+})();
+
+const RADIUS_CELL_OFFSETS: ReadonlyArray<ReadonlyArray<{ dx: number; dy: number }>> = Object.freeze(
+  RADIUS_CANDIDATE_OFFSETS.map((candidates, radius) =>
+    Object.freeze(candidates.filter(({ dx, dy }) => cellDist(dx, dy) <= radius)),
+  ),
+);
+
+const INCREMENTAL_RADIUS_CELL_OFFSETS: ReadonlyArray<ReadonlyArray<{ dx: number; dy: number }>> = Object.freeze(
+  RADIUS_CANDIDATE_OFFSETS.map((candidates, radius) => {
+    if (radius <= 2) return RADIUS_CELL_OFFSETS[radius];
+    const skip = RADIUS_CANDIDATE_OFFSETS[radius - 3]?.length ?? 0;
+    return Object.freeze(candidates.slice(skip).filter(({ dx, dy }) => cellDist(dx, dy) <= radius));
+  }),
+);
+
+/** Accepted Sight_From/Jam_From offsets in C++ RadiusOffset iteration order. */
+export function radiusCellOffsets(radius: number, incremental = false): ReadonlyArray<{ dx: number; dy: number }> {
+  if (!Number.isFinite(radius)) return [];
+  const r = Math.trunc(radius);
+  if (r < 0 || r > MAX_CPP_SIGHT_RADIUS) return [];
+  return (incremental ? INCREMENTAL_RADIUS_CELL_OFFSETS[r] : RADIUS_CELL_OFFSETS[r]) ?? [];
 }
 
 // Direction from a to b (8-way)

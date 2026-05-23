@@ -455,4 +455,113 @@ describe('sidebar production visuals', () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it('building Look uses TechnoClass::Coord, not BuildingClass::Center_Coord', () => {
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    vi.stubGlobal('Audio', class {
+      src = '';
+      preload = '';
+      addEventListener = vi.fn();
+    });
+    try {
+      const game = new Game(mockCanvas());
+      game.map.setBounds(1, 1, 62, 62);
+
+      (game as any).revealStructureSightForPlayer({
+        type: 'APWR',
+        house: House.Greece,
+        alive: true,
+        cx: 10,
+        cy: 10,
+        hp: 700,
+        maxHp: 700,
+      });
+
+      // TechnoClass::Look() calls Coord_Cell(Coord). BuildingClass::Center_Coord()
+      // is used for targeting/docking, but not for ordinary sight.
+      expect((game as any).isCellMappedForPlayer(10, 6)).toBe(true);
+      expect((game as any).isCellMappedForPlayer(15, 11)).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('runs PlayerPtr HouseClass::IsToLook once and cascades newly revealed own buildings', () => {
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    vi.stubGlobal('Audio', class {
+      src = '';
+      preload = '';
+      addEventListener = vi.fn();
+    });
+    try {
+      const game = new Game(mockCanvas());
+      game.playerHouse = House.Greece;
+      game.map.setBounds(1, 1, 62, 62);
+      game.structures = [
+        { type: 'DOME', house: House.Greece, alive: true, cx: 10, cy: 10, hp: 1000, maxHp: 1000 },
+        { type: 'APWR', house: House.Greece, alive: true, cx: 19, cy: 10, hp: 700, maxHp: 700 },
+      ] as any;
+      (game as any).playerDiscoveredStructureIds.add(0);
+
+      expect((game as any).isCellMappedForPlayer(23, 10)).toBe(false);
+
+      (game as any).runPlayerHouseAllToLook();
+
+      // C++ house.cpp:1380 calls Map.All_To_Look() on PlayerPtr's first
+      // HouseClass::AI frame. DisplayClass::Map_Cell reveals the APWR, and
+      // TechnoClass::Revealed immediately calls its own Look().
+      expect((game as any).playerDiscoveredStructureIds.has(1)).toBe(true);
+      expect((game as any).isCellMappedForPlayer(23, 10)).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('per-tick fog does not reveal moving units between C++ Look call sites', () => {
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    vi.stubGlobal('Audio', class {
+      src = '';
+      preload = '';
+      addEventListener = vi.fn();
+    });
+    try {
+      const game = new Game(mockCanvas());
+      game.playerHouse = House.Greece;
+      game.map.setBounds(1, 1, 62, 62);
+      const unit = {
+        id: 1,
+        alive: true,
+        inLimbo: false,
+        house: House.Greece,
+        isAirUnit: false,
+        isDriving: true,
+        pos: { x: 40 * 24 + 12, y: 40 * 24 + 12 },
+        cell: { cx: 40, cy: 40 },
+        stats: { sight: 1 },
+      } as any;
+      game.entities = [unit];
+
+      (game as any).updateFogOfWar();
+
+      // C++ does not rebuild fog from every object every frame. A moving unit
+      // reveals when TechnoClass::Look() runs from the cell-boundary PCP path,
+      // not merely because its current interpolated position is on the map.
+      expect(game.map.getDisplayVisibility(40, 40)).toBe(0);
+
+      (game as any).runMobileLookForPlayer(unit);
+
+      expect(game.map.getDisplayVisibility(40, 40)).toBeGreaterThan(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

@@ -15,194 +15,54 @@ import { describe, it, expect, vi } from 'vitest';
 import { Camera } from '../engine/camera';
 import { Entity } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
-import { Renderer } from '../engine/renderer';
+import { applyWaterPaletteCycle, HOUSE_MINIMAP_COLOR, Renderer, waterPaletteCycleShift } from '../engine/renderer';
+import { NonCriticalRandom } from '../engine/random';
 import { CELL_SIZE, House, UnitType } from '../engine/types';
 
 // ============================================================
 // Section 1: Minimap Blip Colors — hdata.cpp + radar.cpp:740
 // ============================================================
 describe('minimap blip colors per house (hdata.cpp → radar.cpp:740)', () => {
-  // C++ hdata.cpp defines each house's RemapColor (PCOLOR):
-  //   England → PCOLOR_GREEN    (index 3)
-  //   Germany → PCOLOR_GREY     (index 5)
-  //   France  → PCOLOR_BLUE     (index 6) — NOT PCOLOR_LTBLUE
-  //   Ukraine → PCOLOR_ORANGE   (index 4)
-  //   USSR    → PCOLOR_RED      (index 2)
-  //   Greece  → PCOLOR_LTBLUE   (index 1)
-  //   Turkey  → PCOLOR_BROWN    (index 7)
-  //   Spain   → PCOLOR_GOLD     (index 0)
-  //   GoodGuy → PCOLOR_LTBLUE   (index 1)
-  //   BadGuy  → PCOLOR_RED      (index 2)
-  //   Neutral → PCOLOR_GOLD     (index 0)
-  //
-  // The radar uses ColorRemaps[house->RemapColor].Bar as the dot color.
-  // Each PCOLOR maps to a specific palette-derived bar color from PCOLOR.CPS.
-  //
-  // C++ PCOLOR → canonical radar bar color:
-  //   PCOLOR_GOLD(0)    → gold/yellow
-  //   PCOLOR_LTBLUE(1)  → light blue
-  //   PCOLOR_RED(2)     → red
-  //   PCOLOR_GREEN(3)   → green
-  //   PCOLOR_ORANGE(4)  → orange
-  //   PCOLOR_GREY(5)    → grey
-  //   PCOLOR_BLUE(6)    → dark blue
-  //   PCOLOR_BROWN(7)   → brown
-
-  // C++ authoritative house → PCOLOR mapping from hdata.cpp
-  const CPP_HOUSE_PCOLOR: Record<string, string> = {
-    Spain:   'PCOLOR_GOLD',     // hdata.cpp:125
-    Greece:  'PCOLOR_LTBLUE',   // hdata.cpp:105
-    USSR:    'PCOLOR_RED',      // hdata.cpp:95
-    England: 'PCOLOR_GREEN',    // hdata.cpp:55
-    Ukraine: 'PCOLOR_ORANGE',   // hdata.cpp:85
-    Germany: 'PCOLOR_GREY',     // hdata.cpp:65
-    France:  'PCOLOR_BLUE',     // hdata.cpp:75 — NOT PCOLOR_LTBLUE
-    Turkey:  'PCOLOR_BROWN',    // hdata.cpp:115
-    GoodGuy: 'PCOLOR_LTBLUE',   // hdata.cpp:135
-    BadGuy:  'PCOLOR_RED',      // hdata.cpp:145
-    Neutral: 'PCOLOR_GOLD',     // hdata.cpp:155
+  const CPP_RADAR_BAR_COLOR: Record<string, string> = {
+    [House.Spain]: 'rgb(144,136,76)',
+    [House.Greece]: 'rgb(104,116,160)',
+    [House.USSR]: 'rgb(176,0,0)',
+    [House.England]: 'rgb(120,152,100)',
+    [House.France]: 'rgb(64,132,116)',
+    [House.Ukraine]: 'rgb(212,120,16)',
+    [House.Germany]: 'rgb(148,124,112)',
+    [House.Turkey]: 'rgb(152,76,56)',
+    [House.GoodGuy]: 'rgb(104,116,160)',
+    [House.BadGuy]: 'rgb(176,0,0)',
+    [House.Neutral]: 'rgb(144,136,76)',
+    [House.Special]: 'rgb(144,136,76)',
+    [House.Multi1]: 'rgb(144,136,76)',
+    [House.Multi2]: 'rgb(104,116,160)',
+    [House.Multi3]: 'rgb(176,0,0)',
+    [House.Multi4]: 'rgb(120,152,100)',
+    [House.Multi5]: 'rgb(212,120,16)',
+    [House.Multi6]: 'rgb(148,124,112)',
+    [House.Multi7]: 'rgb(64,132,116)',
+    [House.Multi8]: 'rgb(152,76,56)',
   };
 
-  // PCOLOR → color category (what the radar bar color looks like)
-  const PCOLOR_CATEGORY: Record<string, string> = {
-    PCOLOR_GOLD:   'gold',
-    PCOLOR_LTBLUE: 'lightblue',
-    PCOLOR_RED:    'red',
-    PCOLOR_GREEN:  'green',
-    PCOLOR_ORANGE: 'orange',
-    PCOLOR_GREY:   'grey',
-    PCOLOR_BLUE:   'darkblue',
-    PCOLOR_BROWN:  'brown',
-  };
-
-  // TS minimap colors from renderer.ts:42-54 (HOUSE_MINIMAP_COLOR)
-  const TS_MINIMAP_COLOR: Record<string, string> = {
-    [House.Spain]:   '#FFD700', // gold
-    [House.USSR]:    '#FF3030', // red
-    [House.Greece]:  '#4080FF', // blue
-    [House.England]: '#40C040', // green
-    [House.France]:  '#2040C0', // dark blue (C++ hdata.cpp:75 PCOLOR_BLUE)
-    [House.Ukraine]: '#E07020', // orange (C++ hdata.cpp:85 PCOLOR_ORANGE)
-    [House.Germany]: '#A0A0A0', // gray
-    [House.Turkey]:  '#A06830', // brown (C++ hdata.cpp:115 PCOLOR_BROWN)
-    [House.GoodGuy]: '#60B0FF', // light blue (C++ hdata.cpp:135 PCOLOR_LTBLUE)
-    [House.BadGuy]:  '#FF4040', // red
-    [House.Neutral]: '#FFD700', // gold (C++ hdata.cpp:155 PCOLOR_GOLD)
-    [House.Special]: '#FFFFFF', // white (HOUSE_SPECIAL — reinforcements/scripted)
-  };
-
-  // Classify a hex color into a category for loose matching
-  function classifyHex(hex: string): string {
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-
-    // White
-    if (r > 240 && g > 240 && b > 240) return 'white';
-    // Gold/Yellow (high R, high G, low B)
-    if (r > 200 && g > 180 && b < 80) return 'gold';
-    // Red (high R, low G, low B)
-    if (r > 200 && g < 100 && b < 100) return 'red';
-    // Green (low R, high G, low B)
-    if (r < 100 && g > 150 && b < 100) return 'green';
-    // Orange (high R, medium G, low B)
-    if (r > 200 && g > 100 && g < 200 && b < 80) return 'orange';
-    // Grey (R≈G≈B, medium range)
-    if (Math.abs(r - g) < 30 && Math.abs(g - b) < 30 && r > 100 && r < 200) return 'grey';
-    // Purple (high R, low G, high B)
-    if (r > 150 && g < 100 && b > 150) return 'purple';
-    // Light blue (low-medium R, medium G, high B)
-    if (r < 130 && b > 200) return 'lightblue';
-    // Dark blue (low R, low G, high B)
-    if (r < 80 && g < 80 && b > 150) return 'darkblue';
-    // Brown (medium R, low-medium G, low B)
-    if (r > 120 && r < 200 && g > 60 && g < 130 && b < 80) return 'brown';
-    // Olive (medium R, medium G, low B)
-    if (r > 150 && g > 150 && b < 120) return 'olive';
-    // Yellow (high R, high G, low B — brighter than gold)
-    if (r > 240 && g > 240 && b < 100) return 'yellow';
-
-    return 'unknown';
-  }
-
-  it('all original 12 TS House enum values have a minimap color entry', () => {
-    // C++ defines 12 house types with radar PCOLOR mappings (hdata.cpp:49-157).
-    // Multi1-8 are multiplayer slots that inherit color at runtime — not stored here.
-    const cppHouses = [
-      House.Spain, House.Greece, House.USSR, House.England, House.France,
-      House.Ukraine, House.Germany, House.Turkey, House.GoodGuy, House.BadGuy,
-      House.Neutral, House.Special,
-    ];
-    for (const h of cppHouses) {
-      expect(TS_MINIMAP_COLOR[h], `${h} should have a minimap color`).toBeDefined();
-    }
+  it('uses exact C++ ColorRemaps[pcolor].Bar RGB values, not loose color categories', () => {
+    expect(HOUSE_MINIMAP_COLOR).toMatchObject(CPP_RADAR_BAR_COLOR);
   });
 
-  it('Spain → PCOLOR_GOLD → gold minimap color', () => {
-    const category = classifyHex(TS_MINIMAP_COLOR[House.Spain]);
-    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.Spain]);
-  });
+  it('maps campaign and multiplayer houses through hdata.cpp PCOLOR assignments', () => {
+    const sameAsSpain = [House.Neutral, House.Special, House.Multi1];
+    const sameAsGreece = [House.GoodGuy, House.Multi2];
+    const sameAsUSSR = [House.BadGuy, House.Multi3];
 
-  it('Greece → PCOLOR_LTBLUE → light blue minimap color', () => {
-    const category = classifyHex(TS_MINIMAP_COLOR[House.Greece]);
-    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.Greece]);
-  });
-
-  it('USSR → PCOLOR_RED → red minimap color', () => {
-    const category = classifyHex(TS_MINIMAP_COLOR[House.USSR]);
-    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.USSR]);
-  });
-
-  it('England → PCOLOR_GREEN → green minimap color', () => {
-    const category = classifyHex(TS_MINIMAP_COLOR[House.England]);
-    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.England]);
-  });
-
-  it('Germany → PCOLOR_GREY → grey minimap color', () => {
-    const category = classifyHex(TS_MINIMAP_COLOR[House.Germany]);
-    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.Germany]);
-  });
-
-  it('BadGuy → PCOLOR_RED → red minimap color', () => {
-    const category = classifyHex(TS_MINIMAP_COLOR[House.BadGuy]);
-    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.BadGuy]);
-  });
-
-  // FIXED: All 11 houses now use correct C++ PCOLOR mappings (renderer.ts parity)
-
-  it('Ukraine → PCOLOR_ORANGE → orange minimap color', () => {
-    // C++ hdata.cpp:85 — HOUSE_UKRAINE → PCOLOR_ORANGE
-    // FIXED: TS renderer.ts:48 — Ukraine → '#E07020' (orange)
-    const category = classifyHex(TS_MINIMAP_COLOR[House.Ukraine]);
-    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.Ukraine]);
-  });
-
-  it('France → PCOLOR_BLUE → dark blue minimap color', () => {
-    // C++ hdata.cpp:75 — HOUSE_FRANCE → PCOLOR_BLUE (dark blue, index 6)
-    // FIXED: TS renderer.ts:47 — France → '#2040C0' (dark blue)
-    const category = classifyHex(TS_MINIMAP_COLOR[House.France]);
-    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.France]);
-  });
-
-  it('Turkey → PCOLOR_BROWN → brown minimap color', () => {
-    // C++ hdata.cpp:115 — HOUSE_TURKEY → PCOLOR_BROWN
-    // FIXED: TS renderer.ts:50 — Turkey → '#A06830' (brown)
-    const category = classifyHex(TS_MINIMAP_COLOR[House.Turkey]);
-    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.Turkey]);
-  });
-
-  it('GoodGuy → PCOLOR_LTBLUE → light blue minimap color', () => {
-    // C++ hdata.cpp:135 — HOUSE_GOOD → PCOLOR_LTBLUE
-    // FIXED: TS renderer.ts:51 — GoodGuy → '#60B0FF' (light blue)
-    const category = classifyHex(TS_MINIMAP_COLOR[House.GoodGuy]);
-    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.GoodGuy]);
-  });
-
-  it('Neutral → PCOLOR_GOLD → gold minimap color', () => {
-    // C++ hdata.cpp:155 — HOUSE_NEUTRAL → PCOLOR_GOLD
-    // FIXED: TS renderer.ts:53 — Neutral → '#FFD700' (gold)
-    const category = classifyHex(TS_MINIMAP_COLOR[House.Neutral]);
-    expect(category).toBe(PCOLOR_CATEGORY[CPP_HOUSE_PCOLOR.Neutral]);
+    for (const house of sameAsSpain) expect(HOUSE_MINIMAP_COLOR[house]).toBe(HOUSE_MINIMAP_COLOR[House.Spain]);
+    for (const house of sameAsGreece) expect(HOUSE_MINIMAP_COLOR[house]).toBe(HOUSE_MINIMAP_COLOR[House.Greece]);
+    for (const house of sameAsUSSR) expect(HOUSE_MINIMAP_COLOR[house]).toBe(HOUSE_MINIMAP_COLOR[House.USSR]);
+    expect(HOUSE_MINIMAP_COLOR[House.Multi4]).toBe(HOUSE_MINIMAP_COLOR[House.England]);
+    expect(HOUSE_MINIMAP_COLOR[House.Multi5]).toBe(HOUSE_MINIMAP_COLOR[House.Ukraine]);
+    expect(HOUSE_MINIMAP_COLOR[House.Multi6]).toBe(HOUSE_MINIMAP_COLOR[House.Germany]);
+    expect(HOUSE_MINIMAP_COLOR[House.Multi7]).toBe(HOUSE_MINIMAP_COLOR[House.France]);
+    expect(HOUSE_MINIMAP_COLOR[House.Multi8]).toBe(HOUSE_MINIMAP_COLOR[House.Turkey]);
   });
 });
 
@@ -685,6 +545,209 @@ describe('renderer theatre-specific terrain object art', () => {
   });
 });
 
+describe('renderer smudge/crater art (sdata.cpp SmudgeTypeClass::Draw_It)', () => {
+  function mockCanvas(): { canvas: HTMLCanvasElement; ctx: any } {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      fillStyle: '#000',
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+    };
+    return {
+      canvas: {
+        width: CELL_SIZE,
+        height: CELL_SIZE,
+        getContext: () => ctx,
+      } as unknown as HTMLCanvasElement,
+      ctx,
+    };
+  }
+
+  it('draws theater smudge sprites at the cell upper-left instead of procedural ellipses', () => {
+    // C++ sdata.cpp:524-530 draws the smudge shape with SHAPE_WIN_REL at
+    // the supplied icon upper-left. SNOW maps SC3 to SC3.SNO.
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    renderer.theatre = 'SNOW';
+
+    const camera = new Camera(0, 0);
+    camera.x = 12 * CELL_SIZE;
+    camera.y = 12 * CELL_SIZE;
+
+    const map = new GameMap();
+    map.smudges.push({ type: 'SC3', cx: 12, cy: 12 });
+
+    const assets = {
+      hasSheet: vi.fn((name: string) => name === 'sc3_snow'),
+      drawFrame: vi.fn(),
+    };
+
+    (renderer as any).renderDecals(camera, map, assets);
+
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'sc3_snow', 0, 0, 0);
+    expect(ctx.ellipse).not.toHaveBeenCalled();
+  });
+
+  it('draws dynamic crater decals through CR1 theater art', () => {
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+
+    const camera = new Camera(0, 0);
+    camera.x = 20 * CELL_SIZE;
+    camera.y = 20 * CELL_SIZE;
+
+    const map = new GameMap();
+    map.addDecal(20, 20, 10, 0.5);
+
+    const assets = {
+      hasSheet: vi.fn((name: string) => name === 'cr1'),
+      drawFrame: vi.fn(),
+    };
+
+    (renderer as any).renderDecals(camera, map, assets);
+
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'cr1', 0, 0, 0);
+    expect(ctx.ellipse).not.toHaveBeenCalled();
+  });
+});
+
+describe('renderer terrain palette cycling (conquer.cpp:1667-1677)', () => {
+  function makePalette(): number[][] {
+    const pal = Array.from({ length: 256 }, () => [0, 0, 0, 255]);
+    for (let i = 0; i < 7; i++) {
+      pal[96 + i] = [10 + i, 40 + i, 90 + i, 255];
+    }
+    return pal;
+  }
+
+  it('rotates the C++ water palette range every TIMER_SECOND/4 equivalent', () => {
+    // C++ Color_Cycle rotates CYCLE_COLOR_START (6*16 = 96) through 102.
+    // TIMER_SECOND/4 is one quarter-second; at the default 15 game ticks/sec
+    // that advances once every 4 logic ticks.
+    expect(waterPaletteCycleShift(0)).toBe(0);
+    expect(waterPaletteCycleShift(3)).toBe(0);
+    expect(waterPaletteCycleShift(4)).toBe(1);
+    expect(waterPaletteCycleShift(28)).toBe(0);
+  });
+
+  it('remaps baked RGBA water pixels through the same palette rotation', () => {
+    const pal = makePalette();
+    const data = new Uint8ClampedArray([
+      ...pal[96],  // shift 1 -> original palette slot 102
+      ...pal[98],  // shift 1 -> original palette slot 97
+      1, 2, 3, 255, // non-water color remains unchanged
+    ]);
+
+    applyWaterPaletteCycle(data, pal, 1);
+
+    expect([...data.slice(0, 4)]).toEqual(pal[102]);
+    expect([...data.slice(4, 8)]).toEqual(pal[97]);
+    expect([...data.slice(8, 12)]).toEqual([1, 2, 3, 255]);
+  });
+
+  it('draws tileset terrain through a remapped atlas when the water cycle advances', () => {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      fillStyle: '#000',
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+    };
+    const canvas = {
+      width: CELL_SIZE,
+      height: CELL_SIZE,
+      getContext: () => ctx,
+    } as unknown as HTMLCanvasElement;
+
+    const pal = makePalette();
+    const imageData = { data: new Uint8ClampedArray([...pal[96]]) };
+    const cycleCtx = {
+      drawImage: vi.fn(),
+      getImageData: vi.fn(() => imageData),
+      putImageData: vi.fn(),
+    };
+    const cycledCanvas = {
+      width: 0,
+      height: 0,
+      getContext: () => cycleCtx,
+    } as unknown as HTMLCanvasElement;
+
+    const previousDocument = (globalThis as typeof globalThis & { document?: Document }).document;
+    const createElement = vi.fn(() => cycledCanvas);
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: { createElement },
+    });
+    try {
+      const renderer = new Renderer(canvas);
+      renderer.theatre = 'SNOW';
+      (renderer as any).pal = pal;
+      (renderer as any).tilesetImage = { naturalWidth: 1, naturalHeight: 1, width: 1, height: 1 };
+      (renderer as any).tilesetMeta = {
+        tileW: CELL_SIZE,
+        tileH: CELL_SIZE,
+        atlasW: 1,
+        atlasH: 1,
+        tileCount: 1,
+        tiles: { '1,0': { ax: 0, ay: 0, lt: 'Water' } },
+      };
+      (renderer as any).tilesetReady = true;
+      (renderer as any).tilesetTheatre = 'SNOW';
+
+      const camera = new Camera(0, 0);
+      camera.x = 4 * CELL_SIZE;
+      camera.y = 4 * CELL_SIZE;
+
+      const map = new GameMap();
+      map.setBounds(4, 4, 1, 1);
+      map.setTerrain(4, 4, Terrain.WATER);
+      map.templateType[4 * 128 + 4] = 1;
+      map.templateIcon[4 * 128 + 4] = 0;
+
+      (renderer as any).renderTerrain(camera, map, 4, {});
+
+      expect(createElement).toHaveBeenCalledWith('canvas');
+      expect(cycleCtx.putImageData).toHaveBeenCalled();
+      expect([...imageData.data]).toEqual(pal[102]);
+      expect(ctx.drawImage.mock.calls[0][0]).toBe(cycledCanvas);
+    } finally {
+      Object.defineProperty(globalThis, 'document', {
+        configurable: true,
+        value: previousDocument,
+      });
+    }
+  });
+});
+
 describe('renderer infantry draw anchor (infantry.cpp:545-548)', () => {
   function mockCanvas(): { canvas: HTMLCanvasElement; ctx: any } {
     const ctx = {
@@ -758,6 +821,220 @@ describe('renderer infantry draw anchor (infantry.cpp:545-548)', () => {
     expect(call[3]).toBeCloseTo(baseScreen.x - 2);
     expect(call[4]).toBeCloseTo(baseScreen.y + 4);
     expect(call[5]).toEqual({ centerX: true, centerY: true });
+  });
+});
+
+describe('renderer structure draw anchor (building.cpp:2795, bdata.cpp:3806)', () => {
+  function mockCanvas(): { canvas: HTMLCanvasElement; ctx: any } {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      globalCompositeOperation: 'source-over',
+      fillStyle: '#000',
+      strokeStyle: '#fff',
+      lineWidth: 1,
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      strokeRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      rect: vi.fn(),
+      clip: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      setLineDash: vi.fn(),
+    };
+    return {
+      canvas: {
+        width: 160,
+        height: 120,
+        getContext: () => ctx,
+      } as unknown as HTMLCanvasElement,
+      ctx,
+    };
+  }
+
+  it('centers small 1x1 building sprites on the C++ building center coordinate', () => {
+    // C++ BuildingTypeClass::Coord_Fixup floors placement to the cell origin,
+    // then ObjectClass::Render_Coord returns BuildingClass::Center_Coord().
+    // BARL.SHP is only 12x10, so using frameWidth/frameHeight as the anchor
+    // shifts bridge barrels up-left from the original renderer.
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    const camera = new Camera(160, 120);
+    const map = new GameMap();
+    map.setBounds(0, 0, 128, 128);
+    map.revealAll();
+
+    const barrel = {
+      type: 'BARL',
+      image: 'barl',
+      house: House.USSR,
+      cx: 3,
+      cy: 4,
+      hp: 10,
+      maxHp: 10,
+      alive: true,
+      rubble: false,
+      attackCooldown: 0,
+      ammo: -1,
+      maxAmmo: -1,
+    };
+
+    const assets = {
+      getSheet: vi.fn(() => ({
+        meta: {
+          frameWidth: 12,
+          frameHeight: 10,
+          frameCount: 3,
+        },
+      })),
+      getRemappedSheet: vi.fn(() => null),
+      drawFrame: vi.fn(),
+      drawFrameFrom: vi.fn(),
+      hasSheet: vi.fn(() => false),
+    };
+
+    (renderer as any).renderStructures(camera, map, [barrel], assets, 0);
+
+    const screen = camera.worldToScreen(barrel.cx * CELL_SIZE, barrel.cy * CELL_SIZE);
+    const call = assets.drawFrame.mock.calls[0];
+    expect(call[0]).toBe(ctx);
+    expect(call[1]).toBe('barl');
+    expect(call[2]).toBe(0);
+    expect(call[3]).toBeCloseTo(screen.x + CELL_SIZE / 2);
+    expect(call[4]).toBeCloseTo(screen.y + CELL_SIZE / 2);
+    expect(call[5]).toEqual({ centerX: true, centerY: true });
+  });
+});
+
+describe('renderer vessel body frames (vessel.cpp:345-365)', () => {
+  function mockCanvas(): { canvas: HTMLCanvasElement; ctx: any } {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      fillStyle: '#000',
+      strokeStyle: '#fff',
+      lineWidth: 1,
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      strokeRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      setLineDash: vi.fn(),
+    };
+    return {
+      canvas: {
+        width: 160,
+        height: 120,
+        getContext: () => ctx,
+      } as unknown as HTMLCanvasElement,
+      ctx,
+    };
+  }
+
+  function renderSingleCalls(entity: Entity, frameCount: number) {
+    const { canvas } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    const camera = new Camera(160, 120);
+    const map = new GameMap();
+    map.setBounds(0, 0, 128, 128);
+    map.revealAll();
+    entity.prevPos = { ...entity.pos };
+
+    const assets = {
+      getSheet: vi.fn(() => ({
+        meta: {
+          frameWidth: 56,
+          frameHeight: 56,
+          frameCount,
+        },
+      })),
+      getRemappedSheet: vi.fn(() => null),
+      drawFrame: vi.fn(),
+      drawFrameFrom: vi.fn(),
+    };
+
+    (renderer as any).renderEntities(camera, map, [entity], assets, new Set(), 0);
+    return assets.drawFrame.mock.calls;
+  }
+
+  function renderSingle(entity: Entity, frameCount: number) {
+    return renderSingleCalls(entity, frameCount)[0];
+  }
+
+  it('maps PT body facing through C++ 16-facing VesselClass::Shape_Number', () => {
+    // C++ vessel.cpp:352:
+    //   shapenum = UnitClass::BodyShape[Dir_To_16(PrimaryFacing) * 2] >> 1
+    // For DIR_E (64), Dir_To_16=4 and BodyShape[8]=24, so PT.SHP frame 12.
+    // The vehicle BodyShape[Dir_To_32] % 16 path draws frame 8 instead.
+    const pt = new Entity(UnitType.V_PT, House.Greece, 64, 64);
+    pt.bodyFacing256 = 64;
+    pt.bodyFacing32 = 8;
+    pt.prevBodyFacing32 = 8;
+
+    const call = renderSingle(pt, 16);
+
+    expect(call[1]).toBe('pt');
+    expect(call[2]).toBe(12);
+  });
+
+  it('keeps LST transport on C++ special-case frame 0', () => {
+    // C++ vessel.cpp:358-360 special-cases VESSEL_TRANSPORT to frame 0
+    // before any door animation stage overrides it.
+    const lst = new Entity(UnitType.V_LST, House.Greece, 64, 64);
+    lst.bodyFacing256 = 64;
+    lst.bodyFacing32 = 8;
+    lst.prevBodyFacing32 = 8;
+
+    const call = renderSingle(lst, 5);
+
+    expect(call[1]).toBe('lst');
+    expect(call[2]).toBe(0);
+  });
+
+  it('draws PT MGUN turret with C++ VesselTypeClass::Turret_Adjust offset', () => {
+    // C++ vessel.cpp:453-456 uses MGunShapes for VESSEL_PT, frame
+    // BodyShape[Dir_To_32(SecondaryFacing)]. vdata.cpp:621-624 offsets it by
+    // Normal_Move_Point(primary Dir_To_16 * 16, 14), then y += 1.
+    const pt = new Entity(UnitType.V_PT, House.Greece, 64, 64);
+    pt.bodyFacing256 = 64;
+    pt.bodyFacing32 = 8;
+    pt.prevBodyFacing32 = 8;
+    pt.turretFacing256 = 0;
+    pt.turretFacing32 = 0;
+    pt.prevTurretFacing32 = 0;
+
+    const calls = renderSingleCalls(pt, 16);
+    const turret = calls.find((call) => call[1] === 'mgun');
+
+    expect(turret).toBeDefined();
+    expect(turret![2]).toBe(0);
+    expect(turret![3]).toBeCloseTo(pt.pos.x + 13);
+    expect(turret![4]).toBeCloseTo(pt.pos.y + 1);
+    expect(turret![5]).toEqual({ centerX: true, centerY: true });
   });
 });
 
@@ -877,5 +1154,93 @@ describe('renderer top tab font (tab.cpp:123, credits.cpp:118-157)', () => {
       '#efefef',
       expect.objectContaining({ align: 'center', indexedPalette: expect.any(Array), letterSpacing: 1 }),
     );
+  });
+});
+
+describe('renderer screen shake parity (conquer.cpp:5523-5566)', () => {
+  function mockCanvas(): { canvas: HTMLCanvasElement; ctx: any } {
+    const ctx = {
+      clearRect: vi.fn(),
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+    };
+    return {
+      canvas: {
+        width: 640,
+        height: 400,
+        getContext: () => ctx,
+      } as unknown as HTMLCanvasElement,
+      ctx,
+    };
+  }
+
+  function mockAssets() {
+    return {
+      getTheatrePalette: vi.fn(() => Array.from({ length: 256 }, () => [0, 0, 0])),
+      hasTileset: vi.fn(() => false),
+    };
+  }
+
+  function silenceLayers(renderer: Renderer): void {
+    for (const method of [
+      'renderTerrain',
+      'renderDecals',
+      'renderOverlays',
+      'renderStructures',
+      'renderCrates',
+      'renderCorpses',
+      'renderEntities',
+      'renderTargetLines',
+      'renderWaypoints',
+      'renderEffects',
+      'renderFogOfWar',
+      'renderPlacementGhost',
+      'renderSelectionBox',
+      'renderAttackMoveIndicator',
+      'renderModeLabel',
+      'renderOffscreenIndicators',
+      'renderSidebar',
+      'renderMinimap',
+      'renderSidebarButtonRow',
+      'renderFullscreenRadar',
+      'renderHelpOverlay',
+      'renderCursor',
+    ]) {
+      (renderer as any)[method] = vi.fn();
+    }
+  }
+
+  it('uses C++ vertical-only two-pixel displacement in normal render mode', () => {
+    // C++ WIN32 path doubles the requested shakes, then repeatedly blits the
+    // page at y offsets -2/0/+2. It never applies an X-axis displacement.
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    silenceLayers(renderer);
+    NonCriticalRandom.seed = 0;
+    renderer.screenShake = 4;
+
+    renderer.render(new Camera(640, 400), new GameMap(), [], [], mockAssets() as any, {} as any, new Set(), [], 1);
+
+    expect(ctx.translate).toHaveBeenCalledTimes(1);
+    const [x, y] = ctx.translate.mock.calls[0];
+    expect(x).toBe(0);
+    expect([-2, 0, 2]).toContain(y);
+    expect(renderer.screenShake).toBe(3);
+  });
+
+  it('suppresses visible shake in agent/compare mode like the WASM harness', () => {
+    // C++ __EMSCRIPTEN__ agent harness returns from Shake_The_Screen before any
+    // page blit, so visual parity captures must not offset the TS canvas either.
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    silenceLayers(renderer);
+    renderer.suppressScreenShake = true;
+    renderer.screenShake = 4;
+
+    renderer.render(new Camera(640, 400), new GameMap(), [], [], mockAssets() as any, {} as any, new Set(), [], 1);
+
+    expect(ctx.translate).not.toHaveBeenCalled();
+    expect(renderer.screenShake).toBe(0);
   });
 });

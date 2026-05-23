@@ -3,7 +3,7 @@
  * The map is 128×128 cells but only a portion (typically 50×50) is playable.
  */
 
-import { MAP_CELLS, CELL_SIZE, type CellPos, SpeedClass, TERRAIN_SPEED, House } from './types';
+import { MAP_CELLS, CELL_SIZE, type CellPos, SpeedClass, TERRAIN_SPEED, House, radiusCellOffsets } from './types';
 import { ScenarioRandom } from './random';
 import { SHADOW_TABLE } from './shadow';
 
@@ -324,12 +324,12 @@ export class GameMap {
   }
 
   /** Set map bounds from scenario data */
-  setBounds(x: number, y: number, w: number, h: number): void {
+  setBounds(x: number, y: number, w: number, h: number, markDisplayRing = true): void {
     this.boundsX = x;
     this.boundsY = y;
     this.boundsW = w;
     this.boundsH = h;
-    this.markDisplayShroudRing();
+    if (markDisplayRing) this.markDisplayShroudRing();
   }
 
   private setDisplayVisible(cx: number, cy: number): void {
@@ -340,7 +340,7 @@ export class GameMap {
   /** C++ scenario.cpp:588-599 marks the one-cell perimeter outside the
    * playable map as IsMapped/IsVisible so shroud art does not form a black wall
    * at scenario bounds. This is display-only; gameplay sight stays shrouded. */
-  private markDisplayShroudRing(): void {
+  markDisplayShroudRing(): void {
     const left = this.boundsX - 1;
     const right = this.boundsX + this.boundsW;
     const top = this.boundsY - 1;
@@ -1058,25 +1058,26 @@ export class GameMap {
       this.displayVisibility[idx] = 2;
     }
 
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        if (dx === 0 && dy === 0) continue;
-        const nx = cx + dx;
-        const ny = cy + dy;
-        if (!this.inDisplayBounds(nx, ny)) continue;
-        const nIdx = ny * MAP_CELLS + nx;
-        if (this.displayVisibility[nIdx] === 2) continue;
+    const facingOrder: Array<[number, number]> = [
+      [0, -1], [1, -1], [1, 0], [1, 1],
+      [0, 1], [-1, 1], [-1, 0], [-1, -1],
+    ];
+    for (const [dx, dy] of facingOrder) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (!this.inDisplayBounds(nx, ny)) continue;
+      const nIdx = ny * MAP_CELLS + nx;
+      if (this.displayVisibility[nIdx] === 2) continue;
 
-        const shadow = this.displayCellShadow(nx, ny);
-        if (shadow === -1) {
-          if (this.displayVisibility[nIdx] === 0) {
-            this.mapDisplayCell(nx, ny);
-          } else {
-            this.displayVisibility[nIdx] = 2;
-          }
-        } else if (shadow !== -2 && this.displayVisibility[nIdx] === 0) {
+      const shadow = this.displayCellShadow(nx, ny);
+      if (shadow === -1) {
+        if (this.displayVisibility[nIdx] === 0) {
           this.mapDisplayCell(nx, ny);
+        } else {
+          this.displayVisibility[nIdx] = 2;
         }
+      } else if (shadow !== -2 && this.displayVisibility[nIdx] === 0) {
+        this.mapDisplayCell(nx, ny);
       }
     }
     return true;
@@ -1147,28 +1148,20 @@ export class GameMap {
     for (const u of units) {
       const cx = Math.floor(u.x / CELL_SIZE);
       const cy = Math.floor(u.y / CELL_SIZE);
+      if (!this.inBounds(cx, cy)) continue;
       const s = u.sight;
-      const sThreshold = s * 2;  // C++ coord.cpp:124-136 octagonal distance
-      for (let dy = -s; dy <= s; dy++) {
-        for (let dx = -s; dx <= s; dx++) {
-          const adx = Math.abs(dx);
-          const ady = Math.abs(dy);
-          const big = adx > ady ? adx : ady;
-          const small = adx > ady ? ady : adx;
-          if (big * 2 + small <= sThreshold) {
-            const rx = cx + dx;
-            const ry = cy + dy;
-            if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
-              // C++ map.cpp:286-344 Sight_From: reveals ALL cells in radius
-              // using precomputed octagonal offset table — NO LOS terrain blocking.
-              const idx = ry * MAP_CELLS + rx;
-              if (this.visibility[idx] !== 2) {
-                this.visibility[idx] = 2;
-                this.visibleCells.push(idx);
-              }
-              this.mapDisplayCell(rx, ry);
-            }
+      for (const { dx, dy } of radiusCellOffsets(s)) {
+        const rx = cx + dx;
+        const ry = cy + dy;
+        if (rx >= 0 && rx < MAP_CELLS && ry >= 0 && ry < MAP_CELLS) {
+          // C++ map.cpp:286-344 Sight_From: reveals ALL cells in radius
+          // using precomputed RadiusOffset order — NO LOS terrain blocking.
+          const idx = ry * MAP_CELLS + rx;
+          if (this.visibility[idx] !== 2) {
+            this.visibility[idx] = 2;
+            this.visibleCells.push(idx);
           }
+          this.mapDisplayCell(rx, ry);
         }
       }
     }
@@ -1761,20 +1754,10 @@ export class GameMap {
     }
   }
 
-  /** Unjam all cells in a radius around a position.
-   *  C++ coord.cpp:124-136 octagonal distance: max*2+min <= radius*2 */
+  /** Unjam all cells in a radius around a position using C++ coord.cpp Distance(). */
   unjamRadius(cx: number, cy: number, radius: number): void {
-    const threshold = radius * 2;
-    for (let dy = -radius; dy <= radius; dy++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        const adx = Math.abs(dx);
-        const ady = Math.abs(dy);
-        const big = adx > ady ? adx : ady;
-        const small = adx > ady ? ady : adx;
-        if (big * 2 + small <= threshold) {
-          this.unjamCell(cx + dx, cy + dy);
-        }
-      }
+    for (const { dx, dy } of radiusCellOffsets(radius)) {
+      this.unjamCell(cx + dx, cy + dy);
     }
   }
 

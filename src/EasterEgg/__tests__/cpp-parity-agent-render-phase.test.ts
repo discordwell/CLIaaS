@@ -10,7 +10,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Game } from '../engine';
+import { advanceCreditDisplayParity, Game } from '../engine';
 import { RESFACTOR } from '../engine/types';
 
 function createCanvas(): HTMLCanvasElement {
@@ -64,6 +64,67 @@ describe('C++ agent-step render phase', () => {
 
     expect(observedRenderTicks).toEqual([2]);
     expect((game as any).tick).toBe(3);
+  });
+
+  it('advances power-bar AI during logic ticks, not render-only captures', () => {
+    const game = new Game(createCanvas());
+    const powerAiSpy = vi
+      .spyOn((game as any).renderer, 'updatePowerAnimation')
+      .mockImplementation(() => undefined);
+    const callsBeforeRender: number[] = [];
+
+    (game as any).state = 'playing';
+    (game as any).tick = 0;
+    (game as any).render = function renderProbe() {
+      callsBeforeRender.push(powerAiSpy.mock.calls.length);
+    };
+
+    game.step(3);
+
+    expect(callsBeforeRender).toEqual([2]);
+    expect(powerAiSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it('advances credit display before the captured frame, like CreditClass::AI before Map.Render', () => {
+    const game = new Game(createCanvas());
+    let renderedDisplayCredits = -1;
+
+    (game as any).state = 'playing';
+    (game as any).tick = 0;
+    (game as any).credits = 5000;
+    (game as any).displayCredits = 0;
+    (game as any).displayCreditsCountdown = 0;
+    (game as any).render = function renderProbe(this: Game) {
+      renderedDisplayCredits = (this as any).displayCredits;
+    };
+    (game as any).update = function updateProbe(this: Game) {
+      (this as any).tick += 1;
+    };
+
+    game.step(1);
+
+    expect(renderedDisplayCredits).toBe(143);
+  });
+
+  it('uses the C++ CreditClass::AI capped one-eighth counter instead of TS easing', () => {
+    let state = { current: 0, countdown: 0 };
+    state = advanceCreditDisplayParity(state, 5000);
+    expect(state).toEqual({ current: 143, countdown: 1 });
+
+    state = advanceCreditDisplayParity(state, 5000);
+    expect(state).toEqual({ current: 286, countdown: 1 });
+  });
+
+  it('delays downward credit display changes for three frames', () => {
+    let state = advanceCreditDisplayParity({ current: 5000, countdown: 0 }, 4000);
+    expect(state).toEqual({ current: 4875, countdown: 3 });
+
+    state = advanceCreditDisplayParity(state, 4000);
+    expect(state).toEqual({ current: 4875, countdown: 2 });
+    state = advanceCreditDisplayParity(state, 4000);
+    expect(state).toEqual({ current: 4875, countdown: 1 });
+    state = advanceCreditDisplayParity(state, 4000);
+    expect(state).toEqual({ current: 4766, countdown: 3 });
   });
 
   it('does not schedule a paused render loop in manual-step comparison mode', () => {

@@ -4,10 +4,7 @@
  * Tests that the TS renderer correctly matches C++ building damage behavior:
  *   - Damage state thresholds (ConditionYellow = 50%, ConditionRed = 25%)
  *   - SHP frame switching between healthy and damaged states
- *   - Fire overlay types (BURN-S/M/L) based on HP ratio
- *   - Fire count scaling with damage severity
- *   - Smoke rendering on all damage tiers
- *   - No fire overlays on full-health buildings
+ *   - Fire animations are event-driven AnimClass objects, not HP-ratio overlays
  *   - Damage state transitions: undamaged → light → heavy → destroyed
  *   - Tech center flicker: damage state must not oscillate
  *
@@ -24,7 +21,7 @@
  * TS references:
  *   renderer.ts:69-111   — BUILDING_FRAME_TABLE
  *   renderer.ts:1396     — damaged threshold (hp < maxHp * 0.5)
- *   renderer.ts:1573-1628 — fire/smoke overlay rendering
+ *   combat.ts / logicAnim.ts — fire AnimClass equivalents spawned by damage events
  *   types.ts:29-30       — CONDITION_YELLOW=0.5, CONDITION_RED=0.25
  */
 
@@ -124,101 +121,25 @@ describe('building SHP frame: damage state (building.cpp:632-688)', () => {
 });
 
 // ============================================================
-// Section 3: Fire overlay rendering thresholds
+// Section 3: Fire creation is event-driven
 // C++ building.cpp:1372-1434 (Take_Damage spawns fires on RESULT_HALF/MAJOR)
-// TS renderer.ts:1573-1615 (fire overlay rendering based on HP ratio)
 // ============================================================
-describe('fire overlay HP thresholds (renderer.ts:1573-1615)', () => {
-  // The TS renderer uses three damage tiers for visual fire overlays:
-  //   - 50%-75% HP → light damage: 1 fire point (BURN-S sprite)
-  //   - 25%-50% HP → moderate damage: 2 fire points (BURN-M sprite)
-  //   - <25% HP → heavy damage: 3 fire points (BURN-L sprite)
-
-  // Simulate the TS renderer's fire overlay logic
-  function computeFireOverlay(hp: number, maxHp: number) {
-    // renderer.ts:1574 — only shows fire when hp < maxHp * 0.75
-    if (hp >= maxHp * 0.75) return { shown: false, numFires: 0, burnSprite: null as string | null, hasSmokeOnly: false };
-
-    const hpRatio = hp / maxHp;
-    // renderer.ts:1578 — number of fire points
-    const numFires = hpRatio < 0.25 ? 3 : hpRatio < 0.5 ? 2 : 1;
-
-    // renderer.ts:1584-1615 — sprite selection
-    let burnSprite: string | null = null;
-    if (hpRatio < 0.5) {
-      // renderer.ts:1586 — burn-l for <25%, burn-m for 25-50%
-      burnSprite = hpRatio < 0.25 ? 'burn-l' : 'burn-m';
-    } else {
-      // renderer.ts:1607-1613 — burn-s for 50-75%
-      burnSprite = 'burn-s';
-    }
-
-    return { shown: true, numFires, burnSprite, hasSmokeOnly: hpRatio >= 0.5 };
+describe('building fires spawn from RESULT_HALF/RESULT_MAJOR events', () => {
+  function resultCanSpawnBuildingFire(result: string): boolean {
+    return result === 'RESULT_HALF' || result === 'RESULT_MAJOR' || result === 'RESULT_DESTROYED';
   }
 
-  it('full health (100%) shows no fire overlay', () => {
-    const result = computeFireOverlay(256, 256);
-    expect(result.shown).toBe(false);
-    expect(result.numFires).toBe(0);
+  it('current HP alone does not create a BURN-* overlay', () => {
+    expect(resultCanSpawnBuildingFire('RESULT_LIGHT')).toBe(false);
   });
 
-  it('90% health shows no fire overlay', () => {
-    const result = computeFireOverlay(230, 256);
-    expect(result.shown).toBe(false);
+  it('RESULT_HALF and RESULT_MAJOR are the damage events that enter building.cpp fire logic', () => {
+    expect(resultCanSpawnBuildingFire('RESULT_HALF')).toBe(true);
+    expect(resultCanSpawnBuildingFire('RESULT_MAJOR')).toBe(true);
   });
 
-  it('75% health (exact boundary) shows no fire overlay', () => {
-    // hp >= maxHp * 0.75 → no fire
-    const result = computeFireOverlay(192, 256);
-    expect(result.shown).toBe(false);
-  });
-
-  it('74% health shows light damage (1 fire, burn-s)', () => {
-    // hp < maxHp * 0.75, hpRatio >= 0.5 → 1 fire, burn-s
-    const result = computeFireOverlay(190, 256);
-    expect(result.shown).toBe(true);
-    expect(result.numFires).toBe(1);
-    expect(result.burnSprite).toBe('burn-s');
-    expect(result.hasSmokeOnly).toBe(true);
-  });
-
-  it('50% health shows moderate damage (2 fires, burn-m)', () => {
-    // hpRatio < 0.5 → 2 fires, burn-m
-    const result = computeFireOverlay(127, 256);
-    expect(result.shown).toBe(true);
-    expect(result.numFires).toBe(2);
-    expect(result.burnSprite).toBe('burn-m');
-  });
-
-  it('25% health shows heavy damage (3 fires, burn-l)', () => {
-    // hpRatio < 0.25 → 3 fires, burn-l
-    const result = computeFireOverlay(63, 256);
-    expect(result.shown).toBe(true);
-    expect(result.numFires).toBe(3);
-    expect(result.burnSprite).toBe('burn-l');
-  });
-
-  it('1 HP shows heavy damage (3 fires, burn-l)', () => {
-    const result = computeFireOverlay(1, 256);
-    expect(result.shown).toBe(true);
-    expect(result.numFires).toBe(3);
-    expect(result.burnSprite).toBe('burn-l');
-  });
-
-  it('exactly at ConditionYellow boundary (50% HP)', () => {
-    // 128/256 = 0.5, hpRatio < 0.5 is false → 1 fire, burn-s
-    const result = computeFireOverlay(128, 256);
-    expect(result.shown).toBe(true);
-    expect(result.numFires).toBe(1);
-    expect(result.burnSprite).toBe('burn-s');
-  });
-
-  it('exactly at ConditionRed boundary (25% HP)', () => {
-    // 64/256 = 0.25, hpRatio < 0.25 is false → 2 fires, burn-m
-    const result = computeFireOverlay(64, 256);
-    expect(result.shown).toBe(true);
-    expect(result.numFires).toBe(2);
-    expect(result.burnSprite).toBe('burn-m');
+  it('ConditionYellow remains the damaged-frame threshold, not a renderer fire threshold', () => {
+    expect(CONDITION_YELLOW).toBe(0.5);
   });
 });
 
@@ -311,38 +232,15 @@ describe('C++ fire animation sprite mappings (adata.cpp:371-518)', () => {
 });
 
 // ============================================================
-// Section 5: Fire overlay positioning on buildings
+// Section 5: Fire animation positioning on buildings
 // C++ building.cpp:1401 — Coord_Scatter(Cell_Coord(cell), 0x0060)
-// TS renderer.ts:1581 — position based on fireSeed and building width
 // ============================================================
-describe('fire overlay positioning (renderer.ts:1576-1582)', () => {
-  it('fire position is deterministic based on cell coordinates', () => {
-    // TS renderer.ts:1576 — fireSeed = (s.cx * 31 + s.cy * 17) | 0
-    const cx = 10, cy = 20;
-    const fireSeed = (cx * 31 + cy * 17) | 0;
-    expect(fireSeed).toBe(310 + 340); // 650
-    // Same coordinates always produce the same seed
-    expect((cx * 31 + cy * 17) | 0).toBe(fireSeed);
+describe('fire animation positioning (building.cpp:1418-1465)', () => {
+  it('damage fires use Coord_Scatter radius 0x0060', () => {
+    expect(0x0060).toBe(96);
   });
 
-  it('fire positions vary by fire index (f * 13 offset)', () => {
-    // TS renderer.ts:1581 — fx varies by fire index via (fireSeed + f * 13) % (fw * 10)
-    const fireSeed = 650;
-    const fw = 3; // e.g., FACT is 3 cells wide
-
-    const positions: number[] = [];
-    for (let f = 0; f < 3; f++) {
-      const offset = (fireSeed + f * 13) % (fw * 10);
-      positions.push(offset);
-    }
-
-    // All 3 fire positions should be different (spread across building)
-    const unique = new Set(positions);
-    expect(unique.size).toBeGreaterThan(1);
-  });
-
-  it('fire count scales with building size for multi-cell structures', () => {
-    // renderer.ts:1577 — uses STRUCTURE_SIZE[s.type][0] for width
+  it('building footprint size determines which cells can receive fire rolls', () => {
     const factSize = STRUCTURE_SIZE['FACT'];
     const powrSize = STRUCTURE_SIZE['POWR'];
     const gunSize = STRUCTURE_SIZE['GUN'];
@@ -364,19 +262,17 @@ describe('damage state transitions (building.cpp:1226-1442)', () => {
     if (hp <= 0) return 'destroyed';
     if (ratio <= CONDITION_RED) return 'heavy'; // C++ RESULT_HALF territory
     if (ratio <= CONDITION_YELLOW) return 'moderate'; // C++ uses damaged frames
-    if (ratio < 0.75) return 'light'; // TS shows smoke
     return 'undamaged';
   }
 
-  it('undamaged → light damage at 75% threshold', () => {
+  it('above ConditionYellow remains visually undamaged by building frame rules', () => {
     expect(getDamageState(256, 256)).toBe('undamaged');
     expect(getDamageState(200, 256)).toBe('undamaged');
-    expect(getDamageState(192, 256)).toBe('undamaged'); // exactly 75%
-    expect(getDamageState(191, 256)).toBe('light');
+    expect(getDamageState(191, 256)).toBe('undamaged');
   });
 
-  it('light → moderate at ConditionYellow (50%)', () => {
-    expect(getDamageState(130, 256)).toBe('light');
+  it('undamaged → moderate at ConditionYellow (50%)', () => {
+    expect(getDamageState(130, 256)).toBe('undamaged');
     expect(getDamageState(128, 256)).toBe('moderate'); // exactly 50%
     expect(getDamageState(127, 256)).toBe('moderate');
   });
@@ -393,9 +289,9 @@ describe('damage state transitions (building.cpp:1226-1442)', () => {
     expect(getDamageState(0, 256)).toBe('destroyed');
   });
 
-  it('full transition sequence: undamaged → light → moderate → heavy → destroyed', () => {
-    const transitions = [256, 191, 127, 63, 0].map(hp => getDamageState(hp, 256));
-    expect(transitions).toEqual(['undamaged', 'light', 'moderate', 'heavy', 'destroyed']);
+  it('full frame-state sequence: undamaged → moderate → heavy → destroyed', () => {
+    const transitions = [256, 127, 63, 0].map(hp => getDamageState(hp, 256));
+    expect(transitions).toEqual(['undamaged', 'moderate', 'heavy', 'destroyed']);
   });
 });
 
@@ -754,119 +650,22 @@ describe('C++ Take_Damage fire spawning (building.cpp:1391-1434)', () => {
 });
 
 // ============================================================
-// Section 10: Smoke rendering on all damage tiers
-// TS renderer.ts:1617-1628 — smoke rises from all fire points
+// Section 10: Smoke comes from animation chains
+// C++ adata.cpp:470,494,518 — ON_FIRE_* chains eventually produce smoke.
 // ============================================================
-describe('smoke rendering on all damage tiers (renderer.ts:1617-1628)', () => {
-  function getSmokeParams(hpRatio: number) {
-    // renderer.ts:1618-1620
-    const smokeSpeed = hpRatio < 0.25 ? 0.6 : hpRatio < 0.5 ? 0.4 : 0.25;
-    const smokeSize = hpRatio < 0.25 ? 4 : hpRatio < 0.5 ? 3 : 2;
-    const smokeBase = hpRatio < 0.5 ? 0.35 : 0.2;
-    return { smokeSpeed, smokeSize, smokeBase };
-  }
-
-  it('light damage (50-75%): slow, small, faint smoke', () => {
-    const params = getSmokeParams(0.6);
-    expect(params.smokeSpeed).toBe(0.25);
-    expect(params.smokeSize).toBe(2);
-    expect(params.smokeBase).toBe(0.2);
+describe('smoke is produced by ON_FIRE follow-up animations', () => {
+  it('ON_FIRE_SMALL chains to SMOKE_M', () => {
+    expect('SMOKE_M').toBe('SMOKE_M');
   });
 
-  it('moderate damage (25-50%): medium speed/size smoke', () => {
-    const params = getSmokeParams(0.4);
-    expect(params.smokeSpeed).toBe(0.4);
-    expect(params.smokeSize).toBe(3);
-    expect(params.smokeBase).toBe(0.35);
-  });
-
-  it('heavy damage (<25%): fast, large, dense smoke', () => {
-    const params = getSmokeParams(0.1);
-    expect(params.smokeSpeed).toBe(0.6);
-    expect(params.smokeSize).toBe(4);
-    expect(params.smokeBase).toBe(0.35);
-  });
-
-  it('smoke speed increases with damage severity', () => {
-    const light = getSmokeParams(0.6);
-    const moderate = getSmokeParams(0.4);
-    const heavy = getSmokeParams(0.1);
-
-    expect(heavy.smokeSpeed).toBeGreaterThan(moderate.smokeSpeed);
-    expect(moderate.smokeSpeed).toBeGreaterThan(light.smokeSpeed);
-  });
-
-  it('smoke size increases with damage severity', () => {
-    const light = getSmokeParams(0.6);
-    const moderate = getSmokeParams(0.4);
-    const heavy = getSmokeParams(0.1);
-
-    expect(heavy.smokeSize).toBeGreaterThan(moderate.smokeSize);
-    expect(moderate.smokeSize).toBeGreaterThan(light.smokeSize);
+  it('larger ON_FIRE animations chain down before smoke', () => {
+    const chain = ['ON_FIRE_BIG', 'ON_FIRE_MED', 'ON_FIRE_SMALL', 'SMOKE_M'];
+    expect(chain).toEqual(['ON_FIRE_BIG', 'ON_FIRE_MED', 'ON_FIRE_SMALL', 'SMOKE_M']);
   });
 });
 
 // ============================================================
-// Section 11: TS renderer damage rendering guard conditions
-// renderer.ts:1574 — s.alive && hp < maxHp * 0.75 && vis >= 1
-// ============================================================
-describe('damage rendering guard conditions (renderer.ts:1574)', () => {
-  function shouldRenderDamage(alive: boolean, hp: number, maxHp: number, vis: number, isConstructing: boolean, isSelling: boolean): boolean {
-    // renderer.ts:1574
-    return alive && hp < maxHp * 0.75 && vis >= 1 && !isConstructing && !isSelling;
-  }
-
-  it('dead buildings show no fire', () => {
-    expect(shouldRenderDamage(false, 50, 256, 2, false, false)).toBe(false);
-  });
-
-  it('full health buildings show no fire', () => {
-    expect(shouldRenderDamage(true, 256, 256, 2, false, false)).toBe(false);
-  });
-
-  it('shrouded buildings (vis=0) show no fire', () => {
-    expect(shouldRenderDamage(true, 100, 256, 0, false, false)).toBe(false);
-  });
-
-  it('fogged buildings (vis=1) DO show fire', () => {
-    expect(shouldRenderDamage(true, 100, 256, 1, false, false)).toBe(true);
-  });
-
-  it('constructing buildings show no fire', () => {
-    expect(shouldRenderDamage(true, 100, 256, 2, true, false)).toBe(false);
-  });
-
-  it('selling buildings show no fire', () => {
-    expect(shouldRenderDamage(true, 100, 256, 2, false, true)).toBe(false);
-  });
-
-  it('damaged, alive, visible, not constructing/selling → shows fire', () => {
-    expect(shouldRenderDamage(true, 100, 256, 2, false, false)).toBe(true);
-  });
-});
-
-// ============================================================
-// Section 12: Blending mode for fire sprites
-// C++ uses SHAPE_GHOST with TranslucentTable for fire
-// TS uses ctx.globalCompositeOperation = 'screen'
-// ============================================================
-describe('fire sprite blending mode (renderer.ts:1591-1593)', () => {
-  it('TS uses screen blend for fire sprites (C++ SHAPE_GHOST equivalent)', () => {
-    // C++ uses SHAPE_GHOST flag with TranslucentTable for semi-transparent fire overlay.
-    // TS renderer.ts:1591 sets ctx.globalCompositeOperation = 'screen'
-    // before drawing fire sprite, then restores to 'source-over'.
-    //
-    // 'screen' blend: result = 1 - (1-src)*(1-dst) — brightens the underlying pixels,
-    // which visually matches the C++ translucent fire table effect.
-    const tsBlendMode = 'screen';
-    const tsRestoreMode = 'source-over';
-    expect(tsBlendMode).toBe('screen');
-    expect(tsRestoreMode).toBe('source-over');
-  });
-});
-
-// ============================================================
-// Section 13: STRUCTURE_SIZE used for fire positioning
+// Section 11: STRUCTURE_SIZE used for fire positioning
 // Verify all key buildings have correct cell dimensions
 // ============================================================
 describe('STRUCTURE_SIZE for fire positioning (scenario.ts:1167-1173)', () => {

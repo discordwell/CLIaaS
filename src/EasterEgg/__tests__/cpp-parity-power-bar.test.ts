@@ -141,6 +141,7 @@ describe('C++ Power_Height raw values (POWER_HEIGHT=110, power.cpp:394-417)', ()
   for (const [value, expected] of RAW_EXPECTED) {
     it(`value=${value} → raw=${expected}`, () => {
       expect(cppPowerHeight(value)).toBe(expected);
+      expect(Renderer.powerBarRawHeight(value)).toBe(expected);
     });
   }
 
@@ -315,19 +316,25 @@ describe('Bounce animation — C++ AI() parity (power.cpp:268-350)', () => {
     expect(mod[10]).toBe(2);
   });
 
-  it('C++ animation steps by exactly 1 per tick — TS matches (power.cpp:318-319, 330-331)', () => {
-    // C++ AI (power.cpp:330-331):
-    //   if (PowerHeight != DesiredPowerHeight) {
-    //     PowerHeight += PowerDir;
-    //   }
-    // TS updatePowerAnimation() now increments by exactly 1 per tick:
-    //   this.powerHeight += this.powerDir;
-    // Both take exactly 100 ticks to move 100 pixels.
-    const cppTicksToReach100 = 100; // always 1 per tick
-    expect(cppTicksToReach100).toBe(100);
-    // TS step is also always 1 (powerDir is +1 or -1)
-    // Cannot test without canvas, but code review confirms renderer.ts:346
-    // uses `this.powerHeight += this.powerDir` (no pStep multiplier)
+  it('C++ animation steps by exactly 1 raw POWER_HEIGHT unit per tick', () => {
+    const canvas = {
+      width: 640,
+      height: 400,
+      getContext: () => ({ imageSmoothingEnabled: false }),
+    } as unknown as HTMLCanvasElement;
+    const renderer = new Renderer(canvas);
+    renderer.sidebarPowerProduced = 500;
+
+    renderer.updatePowerAnimation();
+    expect((renderer as any).powerHeight).toBe(1);
+    expect((renderer as any).desiredPowerHeight).toBe(cppPowerHeight(500));
+
+    for (let i = 1; i < cppPowerHeight(500); i++) {
+      renderer.updatePowerAnimation();
+    }
+
+    expect((renderer as any).powerHeight).toBe(cppPowerHeight(500));
+    expect(Renderer.powerBarHeight(500)).toBe(cppFinalPixelHeight(500));
   });
 });
 
@@ -402,17 +409,16 @@ describe('Power bar color thresholds (power.cpp:208-219)', () => {
     expect(Renderer.POWER_COLOR_CRITICAL).toBeDefined();
   });
 
-  it('normal power → green (C++ pal[3]/[4])', () => {
-    // C++ uses palette indices 3 and 4 (green)
-    expect(Renderer.POWER_COLOR_NORMAL).toHaveLength(2);
+  it('normal power → exact C++ pal[3]/[4] RGB', () => {
+    expect(Renderer.POWER_COLOR_NORMAL).toEqual(['rgb(0,168,0)', 'rgb(84,252,84)']);
   });
 
-  it('low power (drain > power) → orange (C++ pal[214]/[211])', () => {
-    expect(Renderer.POWER_COLOR_LOW).toHaveLength(2);
+  it('low power (drain > power) → exact C++ pal[214]/[211] RGB', () => {
+    expect(Renderer.POWER_COLOR_LOW).toEqual(['rgb(212,120,16)', 'rgb(236,172,84)']);
   });
 
-  it('critical power (drain > 2*power) → red (C++ pal[235]/[230])', () => {
-    expect(Renderer.POWER_COLOR_CRITICAL).toHaveLength(2);
+  it('critical power (drain > 2*power) → exact C++ pal[235]/[230] RGB', () => {
+    expect(Renderer.POWER_COLOR_CRITICAL).toEqual(['rgb(176,0,0)', 'rgb(252,0,0)']);
   });
 
   it('C++ color thresholds: drain > power (low), drain > 2*power (critical)', () => {

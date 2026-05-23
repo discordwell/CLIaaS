@@ -2,8 +2,8 @@
  * C++ Parity Tests — Fire/Napalm Animation Effects
  *
  * Tests Combat_Anim() for ExplosionSet=3 (Fire warhead), napalm variant selection,
- * fire overlay animations (FIRE_SMALL/MED/MED2/TINY), burning building overlays
- * (BURN-S/M/L), and weapon/barrel Fire warhead integration.
+ * fire animations (FIRE_SMALL/MED/MED2/TINY), burning building AnimClass
+ * sprites (BURN-S/M/L), and weapon/barrel Fire warhead integration.
  *
  * C++ references:
  *   - combat.cpp:295-366   Combat_Anim() — damage-scaled explosion sprite selection
@@ -487,42 +487,38 @@ describe('combatAnim() — non-fire sets never return napalm', () => {
 });
 
 // ============================================================
-// Section 14: TS renderer — damaged building fire effects
-// renderer.ts:1573-1599 renders fire overlays on damaged structures
-// C++ parity: buildings show increasing fire severity at damage thresholds
+// Section 14: Building fire effects are AnimClass objects
+// building.cpp:1416-1465 creates fire animations per occupied cell.
 // ============================================================
-describe('Building damage fire overlay thresholds (renderer.ts parity)', () => {
-  // C++ buildings show damage effects based on HP ratio:
-  // - <75% HP: light smoke
-  // - <50% HP: fire + smoke (BURN-M sprite)
-  // - <25% HP: intense fire (BURN-L sprite)
-  //
-  // TS renderer.ts:1573-1599 implements this with:
-  //   numFires: <25% → 3, <50% → 2, else 1
-  //   sprite: <25% → 'burn-l', <50% → 'burn-m'
+describe('Building damage fire animation creation (building.cpp parity)', () => {
+  function cppFireAnimForRoll(roll: number): 'none' | 'burn-s' | 'burn-m' | 'burn-l' {
+    switch (roll) {
+      case 1:
+      case 2:
+      case 3:
+      case 4:
+      case 5:
+        return 'burn-s';
+      case 6:
+      case 7:
+      case 8:
+        return 'burn-m';
+      case 9:
+        return 'burn-l';
+      default:
+        return 'none';
+    }
+  }
 
-  it('fire count increases at lower HP ratios', () => {
-    // C++ parity: more fires = more visual damage indication
-    // <25% HP → 3 fires, <50% HP → 2 fires, >=50% HP → 1 fire
-    const numFires = (hpRatio: number) =>
-      hpRatio < 0.25 ? 3 : hpRatio < 0.5 ? 2 : 1;
-
-    expect(numFires(0.1)).toBe(3);   // critical
-    expect(numFires(0.24)).toBe(3);  // boundary
-    expect(numFires(0.25)).toBe(2);  // yellow
-    expect(numFires(0.49)).toBe(2);  // above yellow
-    expect(numFires(0.5)).toBe(1);   // light damage
-    expect(numFires(0.74)).toBe(1);  // almost healthy
+  it('WARHEAD_FIRE building rolls map to ON_FIRE_SMALL/MED/BIG sprites', () => {
+    expect(cppFireAnimForRoll(0)).toBe('none');
+    expect(cppFireAnimForRoll(5)).toBe('burn-s');
+    expect(cppFireAnimForRoll(8)).toBe('burn-m');
+    expect(cppFireAnimForRoll(9)).toBe('burn-l');
   });
 
-  it('burn sprite selected by HP ratio: burn-l for critical, burn-m for damaged', () => {
-    const burnSprite = (hpRatio: number) =>
-      hpRatio < 0.25 ? 'burn-l' : 'burn-m';
-
-    expect(burnSprite(0.1)).toBe('burn-l');   // C++ BURN-L (large fire)
-    expect(burnSprite(0.24)).toBe('burn-l');
-    expect(burnSprite(0.25)).toBe('burn-m');  // C++ BURN-M (medium fire)
-    expect(burnSprite(0.49)).toBe('burn-m');
+  it('a single building can have mixed fire sprite sizes from independent cell rolls', () => {
+    expect([1, 7, 9].map(cppFireAnimForRoll)).toEqual(['burn-s', 'burn-m', 'burn-l']);
   });
 });
 

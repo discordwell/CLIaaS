@@ -131,8 +131,9 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['HIRES.MIX', 'E2.SHP', 'e2'],          // Grenadier
   ['HIRES.MIX', 'E3.SHP', 'e3'],          // Rocket soldier
   ['HIRES.MIX', 'E4.SHP', 'e4'],          // Flamethrower
-  ['HIRES.MIX', 'E5.SHP', 'e5'],          // Tanya
+  ['HIRES.MIX', 'E5.SHP', 'e5'],          // Expansion infantry sprite
   ['HIRES.MIX', 'E6.SHP', 'e6'],          // Engineer
+  ['HIRES.MIX', 'E7.SHP', 'e7'],          // Tanya (C++ idata.cpp ininame "E7")
   ['HIRES.MIX', 'DOG.SHP', 'dog'],        // Attack dog
   ['HIRES.MIX', 'SPY.SHP', 'spy'],        // Spy
   ['HIRES.MIX', 'MEDI.SHP', 'medi'],      // Medic
@@ -161,6 +162,9 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['CONQUER.MIX', 'LST.SHP', 'lst'],        // Landing ship transport
   ['CONQUER.MIX', 'MSUB.SHP', 'msub'],      // Missile Submarine (Aftermath)
   ['EXPAND2.MIX', 'CARR.SHP', 'carr'],      // Helicarrier (Aftermath)
+  ['CONQUER.MIX', 'MGUN.SHP', 'mgun'],      // PT boat turret (vessel.cpp MGunShapes)
+  ['CONQUER.MIX', 'SSAM.SHP', 'ssam'],      // Destroyer turret (vessel.cpp SamShapes)
+  ['CONQUER.MIX', 'TURR.SHP', 'turr'],      // Cruiser turret (vessel.cpp TurretShapes)
   // Aircraft (CONQUER.MIX)
   ['CONQUER.MIX', 'HIND.SHP', 'hind'],      // Hind attack helicopter
   ['CONQUER.MIX', 'HELI.SHP', 'heli'],      // Longbow helicopter
