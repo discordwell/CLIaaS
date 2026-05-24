@@ -682,7 +682,7 @@ describe('Gap generators', () => {
   it('updateGapGenerators is power-gated — underpowered gap unjams', () => {
     const map = createClearMap();
     map.revealAll();
-    const gap = mockStructure('GAP', 50, 50, House.Greece);
+    const gap = mockStructure('GAP', 50, 50, House.USSR);
     const gapCells = new Map<number, { cx: number; cy: number; radius: number }>();
 
     // First: full power — jams cells
@@ -696,7 +696,7 @@ describe('Gap generators', () => {
     });
     updateGapGenerators(ctx);
     expect(gapCells.size).toBe(1);
-    expect(map.getVisibility(50, 50)).toBe(0); // jammed to shroud
+    expect(map.getVisibility(50, 50)).toBe(0); // non-player jamming calls Shroud_Cell
 
     // Now underpowered: power ratio < 1.0 — should unjam
     ctx.powerProduced = 50;
@@ -736,7 +736,7 @@ describe('Gap generators', () => {
   it('gap generator jamming uses circular area', () => {
     const map = createClearMap();
     map.revealAll();
-    const gap = mockStructure('GAP', 64, 64, House.Greece);
+    const gap = mockStructure('GAP', 64, 64, House.USSR);
     const gapCells = new Map<number, { cx: number; cy: number; radius: number }>();
 
     const ctx = makeMockFogContext({
@@ -750,11 +750,11 @@ describe('Gap generators', () => {
 
     updateGapGenerators(ctx);
 
-    // GAP is 1x2 at (64,64), center = (64, 65) — cy + floor(2/2)
+    // GAP is BSIZE_12; Coord_Cell(Center_Coord()) stays on the top cell.
     // Cell at exact distance GAP_RADIUS along axis from center should be jammed
-    expect(map.getVisibility(64 + GAP_RADIUS, 65)).toBe(0);
+    expect(map.getVisibility(64 + GAP_RADIUS, 64)).toBe(0);
     // Cell just outside coord.cpp Distance radius should NOT be jammed.
-    expect(map.getVisibility(64 + GAP_RADIUS, 67)).toBe(2);
+    expect(map.getVisibility(64 + GAP_RADIUS, 66)).toBe(2);
   });
 });
 

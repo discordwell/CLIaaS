@@ -383,7 +383,7 @@ describe('Wall crush clears overlay AND marks structure dead', () => {
     expect(footprintCleared).toBe(true);
   });
 
-  it('adds a rubble decal at the wall cell', () => {
+  it('does not create TS-only rubble decals at the wall cell', () => {
     const wall = makeWall('SBAG', 10, 10);
     const tank = entityAtCell(UnitType.V_3TNK, House.Spain, 10, 10);
     const ctx = makeCombatCtx([wall], [tank]);
@@ -391,8 +391,7 @@ describe('Wall crush clears overlay AND marks structure dead', () => {
 
     checkWallCrush(ctx, tank);
 
-    const decal = ctx.map.decals.find(d => d.cx === 10 && d.cy === 10);
-    expect(decal).toBeDefined();
+    expect(ctx.map.decals).toHaveLength(0);
   });
 });
 

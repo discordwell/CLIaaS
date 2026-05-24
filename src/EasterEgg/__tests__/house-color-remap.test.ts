@@ -213,10 +213,9 @@ describe('getRemappedSheet algorithm — pixel-accurate swap for England/France'
   });
 });
 
-describe('Structure Blushing damage flash — FlasherClass parity (flasher.cpp:83-95)', () => {
-  // The building flash is driven by MapStructure.flashCount. On odd values the renderer
-  // draws a white "lightening" overlay (matches C++ IsBlushing toggling on FlashCount & 1).
-  // We validate the MapStructure type field is populated correctly by structureDamage.
+describe('Structure Blushing target flash — FlasherClass parity (flasher.cpp:83-95)', () => {
+  // The building flash is driven by MapStructure.flashCount for Clicked_As_Target-like
+  // effects. Ordinary structure damage does not populate this field.
   it('C++ FlashCount countdown produces alternating Blushing: 6→5(T)→4(F)→3(T)→2(F)→1(T)→0', () => {
     const ticks: number[] = [];
     for (let fc = 6; fc > 0; fc--) ticks.push(fc);

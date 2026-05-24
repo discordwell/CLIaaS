@@ -7,13 +7,14 @@
 import {
   type WorldPos, type CellPos, type WeaponStats, type ArmorType,
   type WarheadType, type WarheadMeta, type WarheadProps,
+  type DoInfo,
   CELL_SIZE, GAME_TICKS_PER_SEC, LEPTON_SIZE, MAP_CELLS,
   House, Mission, AnimState, UnitType, Stance, MISSION_CONTROL,
   leptonDist, pixelToLepton, directionTo, directionToLeptons, directionToLeptons256, worldToCell, DIR_DX, DIR_DY,
   COS_TABLE_256, SIN_TABLE_256,
   EXPLOSION_FRAMES, CONDITION_RED,
   calcProjectileTravelFrames, modifyDamage, projectileVisualConfig,
-  PRODUCTION_ITEMS, STRUCTURE_POINTS, WARHEAD_META,
+  PRODUCTION_ITEMS, STRUCTURE_POINTS, WARHEAD_META, INFANTRY_ANIMS,
   getWarheadMultiplier, coordTargetRoundTripLepton, cellTargetToLepton, cellToLepton,
 } from './types';
 import { Entity, CloakState, CLOAK_TRANSITION_FRAMES, dir256ToFacing8, dir256ToFacing32, threatScore as baseThreatScore } from './entity';
@@ -99,7 +100,6 @@ export interface MissionAIContext {
   damageStructure(s: MapStructure, damage: number): boolean;
   handleUnitDeath(victim: Entity, opts: {
     screenShake: number; explosionSize: number; debris: boolean;
-    decal: { infantry: number; vehicle: number; opacity: number } | null;
     explodeLgSound: boolean; attackerIsPlayer: boolean; trackLoss: boolean;
     attacker?: Entity;
   }): void;
@@ -497,6 +497,43 @@ function randomAnimateCaseScatter(ctx: MissionAIContext, entity: Entity, animPic
   }
 }
 
+function infantryAnimDoInfo(entity: Entity): typeof INFANTRY_ANIMS.E1 {
+  return INFANTRY_ANIMS[entity.type] ?? INFANTRY_ANIMS.E1;
+}
+
+function randomAnimateSpyIdleDoInfo(entity: Entity): DoInfo | undefined {
+  const anim = infantryAnimDoInfo(entity);
+  const idlePick = ScenarioRandom.nextInRange(0, 1);
+  return idlePick === 0 ? anim.idle : (anim.idle2 ?? anim.idle);
+}
+
+function applyRandomAnimateDoAction(ctx: MissionAIContext, entity: Entity, animPick: number): void {
+  const anim = infantryAnimDoInfo(entity);
+
+  if (animPick >= 1 && animPick <= 4) {
+    if (entity.type === UnitType.I_SPY) {
+      // C++ InfantryClass::Do_Action remaps SPY gesture/salute requests to
+      // DO_IDLE1/DO_IDLE2 and consumes Random_Pick(0,1).
+      entity.startIdleAnimDoing(ctx.tick, randomAnimateSpyIdleDoInfo(entity));
+      return;
+    }
+
+    const gestureDoInfo =
+      animPick === 1 ? anim.salute1 :
+      animPick === 2 ? anim.salute2 :
+      animPick === 3 ? anim.gesture1 :
+      anim.gesture2;
+    entity.startGestureDoing(ctx.tick, gestureDoInfo ?? null);
+    return;
+  }
+
+  if (animPick === 5 || (animPick === 0 && entity.type === UnitType.I_DOG)) {
+    entity.startIdleAnimDoing(ctx.tick, anim.idle ?? anim.ready);
+  } else if (animPick === 7) {
+    entity.startIdleAnimDoing(ctx.tick, anim.idle2 ?? anim.idle ?? anim.ready);
+  }
+}
+
 /** C++ InfantryClass::Random_Animate (infantry.cpp:1742-1838).
  *  Returns true when the idle animation gate was open and RNG was consumed. */
 function runInfantryRandomAnimate(ctx: MissionAIContext, entity: Entity): boolean {
@@ -512,18 +549,7 @@ function runInfantryRandomAnimate(ctx: MissionAIContext, entity: Entity): boolea
   const animPick = ScenarioRandom.nextInRange(0, 10);
   ScenarioRandom._sourceTag = saved;
 
-  if (animPick >= 1 && animPick <= 4) {
-    if (entity.type === UnitType.I_SPY) {
-      // C++ Do_Action: SPY gestures/salutes remap to DO_IDLE1/2 and consume
-      // Random_Pick(0,1) under the caller's saved source tag.
-      ScenarioRandom.nextInRange(0, 1);
-      entity.startIdleAnimDoing(ctx.tick);
-    } else {
-      entity.startGestureDoing(ctx.tick);
-    }
-  } else if (animPick === 5 || animPick === 7 || (animPick === 0 && entity.type === UnitType.I_DOG)) {
-    entity.startIdleAnimDoing(ctx.tick);
-  }
+  applyRandomAnimateDoAction(ctx, entity, animPick);
 
   if (animPick >= 6) {
     ScenarioRandom._sourceTag = 30003;
@@ -1589,7 +1615,6 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
           entity.creditKill();
           ctx.handleUnitDeath(entity.target, {
             screenShake: 8, explosionSize: 16, debris: true,
-            decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
             explodeLgSound: true,
             attackerIsPlayer: ctx.isPlayerControlled(entity),
             trackLoss: true,
@@ -3169,25 +3194,7 @@ export function updateGuard(ctx: MissionAIContext, entity: Entity, timerFired = 
       );
     }
     ScenarioRandom._sourceTag = saved;
-    if (animPick >= 1 && animPick <= 4) {
-      if (entity.type === UnitType.I_SPY) {
-        // C++ InfantryClass::Do_Action special-case (infantry.cpp:1975):
-        // SPY gesture/salute requests become DO_IDLE1 + Random_Pick(0,1).
-        ScenarioRandom.nextInRange(0, 1);
-        entity.startIdleAnimDoing(ctx.tick);
-      } else {
-        // C++ MasterDoControls: gestures and salutes (cases 1-4) are NOT interruptible.
-        // idata.cpp supplies per-infantry Count (Tanya/dogs/civilians=1,
-        // common combat infantry=3); MasterDoControls gesture Rate=2.
-        // Phase 7B: track Doing as a staged gesture so isDoingInterruptible()
-        // blocks Commence and FireLaunch reads the active StageClass stage.
-        entity.startGestureDoing(ctx.tick);
-      }
-    } else if (animPick === 5 || animPick === 7 || (animPick === 0 && entity.type === UnitType.I_DOG)) {
-      // C++ cases 5/7 and dog case 0 call Do_Action(DO_IDLE*).
-      // Cases 8-10 only turn facing; case 8 may additionally scatter below.
-      entity.startIdleAnimDoing(ctx.tick);
-    }
+    applyRandomAnimateDoAction(ctx, entity, animPick);
     randomAnimateCaseScatter(ctx, entity, animPick);
   }
 }
@@ -3359,19 +3366,7 @@ export function updateAreaGuard(ctx: MissionAIContext, entity: Entity, timerFire
     const animPick = ScenarioRandom.nextInRange(0, 10);
     ScenarioRandom._sourceTag = saved;
 
-    if (animPick >= 1 && animPick <= 4) {
-      if (entity.type === UnitType.I_SPY) {
-        // C++ Do_Action: SPY gestures/salutes are remapped to DO_IDLE1/2,
-        // consuming Random_Pick(0,1) under the caller's source tag.
-        ScenarioRandom.nextInRange(0, 1);
-        entity.startIdleAnimDoing(ctx.tick);
-      } else {
-        // Phase 7B: gestures/salutes are non-interruptible per C++ MasterDoControls.
-        entity.startGestureDoing(ctx.tick);
-      }
-    } else if (animPick === 5 || animPick === 7 || (animPick === 0 && entity.type === UnitType.I_DOG)) {
-      entity.startIdleAnimDoing(ctx.tick);
-    }
+    applyRandomAnimateDoAction(ctx, entity, animPick);
 
     if (animPick >= 6) {
       ScenarioRandom._sourceTag = 30003;

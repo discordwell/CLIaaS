@@ -15,7 +15,7 @@
  *  11. Ore/gem system — overlays, depletion, growth, spread
  *  12. Bridge system — template-based bridge detection/destruction
  *  13. Gap Generator — cell jamming for shroud
- *  14. Decals — scorch marks with FIFO cap
+ *  14. Smudges — CellClass scorch marks and craters
  *  15. Shore detection — land cells adjacent to water
  *  16. Adjacent water cell — naval spawn point discovery
  *
@@ -1113,46 +1113,26 @@ describe('updateFogOfWar — reveals around units with sight range', () => {
 });
 
 // =============================================================================
-//  17. Decals — addDecal with FIFO cap (map.cpp)
+//  17. Legacy decals are inert; C++ terrain scarring uses CellClass smudges
 // =============================================================================
 
-describe('Decals — scorch marks with FIFO cap at 200', () => {
+describe('Legacy decals — ignored in favor of CellClass smudges', () => {
 
-  it('addDecal adds a decal entry', () => {
+  it('addDecal is a compatibility no-op, not a renderable terrain state', () => {
     map.addDecal(15, 15, 2, 0.8);
-    expect(map.decals.length).toBe(1);
-    expect(map.decals[0]).toEqual({ cx: 15, cy: 15, size: 2, alpha: 0.8 });
+    expect(map.decals).toHaveLength(0);
   });
 
-  it('multiple decals accumulate', () => {
+  it('repeated addDecal calls do not accumulate TS-only state', () => {
     map.addDecal(15, 15, 1, 0.5);
     map.addDecal(16, 16, 2, 0.7);
     map.addDecal(17, 17, 3, 0.9);
-    expect(map.decals.length).toBe(3);
+    expect(map.decals).toHaveLength(0);
   });
 
-  it('cap at 200 — oldest removed when exceeding', () => {
-    for (let i = 0; i < 200; i++) {
-      map.addDecal(i % 128, Math.floor(i / 128), 1, 0.5);
-    }
-    expect(map.decals.length).toBe(200);
-
-    // Add 201st — oldest should be removed
-    map.addDecal(99, 99, 5, 1.0);
-    expect(map.decals.length).toBe(200);
-    // First decal should be the second original one (index 1), not the first (index 0)
-    expect(map.decals[0]).toEqual({ cx: 1, cy: 0, size: 1, alpha: 0.5 });
-    // Last should be the new one
-    expect(map.decals[199]).toEqual({ cx: 99, cy: 99, size: 5, alpha: 1.0 });
-  });
-
-  it('FIFO order is maintained', () => {
-    map.addDecal(1, 1, 1, 0.1);
-    map.addDecal(2, 2, 2, 0.2);
-    map.addDecal(3, 3, 3, 0.3);
-    expect(map.decals[0].cx).toBe(1);
-    expect(map.decals[1].cx).toBe(2);
-    expect(map.decals[2].cx).toBe(3);
+  it('addSmudge records the C++ CellClass terrain scar instead', () => {
+    expect(map.addSmudge('SC6', 15, 15)).toBe(true);
+    expect(map.smudges).toEqual([{ type: 'sc6', cx: 15, cy: 15, data: 0 }]);
   });
 });
 
@@ -1788,6 +1768,62 @@ describe('Smudges — pre-placed marks from scenario INI', () => {
     map.smudges.push({ type: 'CR3', cx: 20, cy: 20 });
     expect(map.smudges.length).toBe(2);
     expect(map.smudges[0]).toEqual({ type: 'SC1', cx: 15, cy: 15 });
+  });
+
+  it('addSmudge rejects non-terrestrial cells via Is_Clear_To_Move(SPEED_TRACK, true, true)', () => {
+    // C++ smudge.cpp:190-209 — non-bib SmudgeClass::Mark only writes a cell
+    // when CellClass::Is_Clear_To_Move(SPEED_TRACK, true, true) passes.
+    map.setTerrain(12, 12, Terrain.WATER);
+    map.setTerrain(13, 12, Terrain.ROCK);
+    map.setTerrain(14, 12, Terrain.RIVER);
+    map.setWallType(15, 12, 'FENC');
+    map.addTree({
+      type: 't01',
+      cx: 16,
+      cy: 12,
+      hp: 600,
+      maxHp: 600,
+      immune: false,
+      occupyCells: [12 * MAP_CELLS + 16],
+    });
+
+    expect(map.addSmudge('SC1', 11, 12)).toBe(true);
+    expect(map.addSmudge('SC1', 12, 12)).toBe(false);
+    expect(map.addSmudge('SC1', 13, 12)).toBe(false);
+    expect(map.addSmudge('SC1', 14, 12)).toBe(false);
+    expect(map.addSmudge('SC1', 15, 12)).toBe(false);
+    expect(map.addSmudge('SC1', 16, 12)).toBe(false);
+
+    expect(map.smudges).toEqual([{ type: 'sc1', cx: 11, cy: 12, data: 0 }]);
+  });
+
+  it('addSmudge expands existing craters instead of replacing the cell slot', () => {
+    // C++ smudge.cpp:195-206 — a crater on an existing crater increments
+    // SmudgeData up to frame 4; other existing smudges are left alone.
+    expect(map.addSmudge('CR1', 12, 12)).toBe(true);
+    expect(map.addSmudge('CR5', 12, 12)).toBe(true);
+    expect(map.addSmudge('CR2', 12, 12)).toBe(true);
+    expect(map.addSmudge('SC1', 12, 12)).toBe(false);
+
+    expect(map.smudges).toEqual([{ type: 'cr1', cx: 12, cy: 12, data: 2 }]);
+  });
+
+  it('addSmudge ignores building footprint occupancy but still uses the underlying land', () => {
+    // C++ cell.cpp:2766-2772 drops the vehicle/building occupy bit when
+    // Is_Clear_To_Move(..., ignorevehicles=true) is called from SmudgeClass.
+    map.setTerrain(12, 12, Terrain.CLEAR);
+    map.setStructureFootprintBlock(12, 12);
+    expect(map.isPassable(12, 12)).toBe(false);
+    expect(map.addSmudge('SC4', 12, 12)).toBe(true);
+
+    map.setTerrain(13, 12, Terrain.ROCK);
+    map.setStructureFootprintBlock(13, 12);
+    expect(map.addSmudge('SC4', 13, 12)).toBe(false);
+
+    map.setTerrain(14, 12, Terrain.CLEAR);
+    map.setWallType(14, 12, 'FENC');
+    map.setStructureFootprintBlock(14, 12);
+    expect(map.addSmudge('SC4', 14, 12)).toBe(false);
   });
 });
 

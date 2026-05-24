@@ -348,6 +348,15 @@ describe('damageStructure behavior', () => {
     expect(s.hp).toBe(0);
   });
 
+  it('ordinary structure damage does not start FlasherClass blushing', () => {
+    const s = makeStructure({ hp: 100, flashCount: 0 });
+    const ctx = makeMockCombatContext();
+    structureDamage(ctx, s, 30);
+    // C++ BuildingClass::Take_Damage delegates to ObjectClass::Take_Damage,
+    // which does not call Clicked_As_Target for ordinary damage.
+    expect(s.flashCount).toBe(0);
+  });
+
   it('sets alive=false and rubble=true on structure death', () => {
     const s = makeStructure({ hp: 50 });
     const ctx = makeMockCombatContext();
@@ -439,13 +448,20 @@ describe('damageStructure behavior', () => {
 
   it('destroyed structure fireball occupies a C++ AnimClass logic slot', () => {
     const s = makeStructure({ type: 'BRIK', hp: 10, cx: 5, cy: 5 });
-    const ctx = makeMockCombatContext();
+    let nextLogicHint = 300;
+    const ctx = makeMockCombatContext({
+      logicIndexHintForNewObject: () => nextLogicHint++,
+    });
 
     const destroyed = structureDamage(ctx, s, 100);
 
     expect(destroyed).toBe(true);
-    expect(ctx.logicAnims.filter(a => a.type === 'fball1')).toHaveLength(1);
-    expect(ctx.effects.filter(e => e.type === 'explosion' && e.sprite === 'fball1')).toHaveLength(1);
+    const anim = ctx.logicAnims.find(a => a.type === 'fball1');
+    const effect = ctx.effects.find(e => e.type === 'explosion' && e.sprite === 'fball1');
+    expect(anim).toBeDefined();
+    expect(effect).toBeDefined();
+    expect(anim!.logicIndexHint).toBeDefined();
+    expect(effect!.logicIndexHint).toBe(anim!.logicIndexHint);
   });
 
   it('destroyed structure fireball is skipped when the C++ AnimClass heap is full', () => {
@@ -1548,13 +1564,19 @@ describe('Fear system on damage', () => {
 });
 
 // =========================================================================
-// 18. Damage flash effect
+// 18. FlasherClass countdown
 // =========================================================================
-describe('Damage flash', () => {
-  it('takeDamage sets damageFlash to 4 ticks', () => {
+describe('FlasherClass countdown', () => {
+  it('takeDamage does not set Clicked_As_Target flash', () => {
     const target = makeEntity(UnitType.V_2TNK, House.USSR, 100, 100);
     expect(target.damageFlash).toBe(0);
     target.takeDamage(10, 'AP');
+    expect(target.damageFlash).toBe(0);
+  });
+
+  it('clickedAsTarget sets the C++ FlasherClass countdown', () => {
+    const target = makeEntity(UnitType.V_2TNK, House.USSR, 100, 100);
+    target.clickedAsTarget(4);
     expect(target.damageFlash).toBe(4);
   });
 

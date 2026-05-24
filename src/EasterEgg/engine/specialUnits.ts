@@ -73,7 +73,6 @@ export interface SpecialUnitsContext {
     screenShake: number;
     explosionSize: number;
     debris: boolean;
-    decal: { infantry: number; vehicle: number; opacity: number } | null;
     explodeLgSound: boolean;
     attackerIsPlayer: boolean;
     trackLoss: boolean;
@@ -340,7 +339,6 @@ function handleMineDamage(ctx: SpecialUnitsContext, target: Entity, amount: numb
     screenShake: target.stats.isInfantry ? 0 : 4,
     explosionSize: target.stats.isInfantry ? 8 : 12,
     debris: !target.stats.isInfantry,
-    decal: null,
     explodeLgSound: false,
     attackerIsPlayer: false,
     trackLoss: ctx.isPlayerControlled(target),

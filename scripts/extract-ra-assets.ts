@@ -106,6 +106,16 @@ function generateSmudgeAssets(): [string, string, string][] {
   return entries;
 }
 
+/** Infantry corpse AnimClass sprites: CORPSE1/2/3 are theatre-specific art. */
+function generateCorpseAssets(): [string, string, string][] {
+  const entries: [string, string, string][] = [];
+  for (let i = 1; i <= 3; i++) {
+    entries.push(['TEMPERAT.MIX', `CORPSE${i}.TEM`, `corpse${i}`]);
+    entries.push(['SNOW.MIX', `CORPSE${i}.SNO`, `corpse${i}_snow`]);
+  }
+  return entries;
+}
+
 // Assets to extract: [mixFile, internalFilename, outputName]
 // Asset locations verified by searching all MIX files
 const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
@@ -169,6 +179,8 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['CONQUER.MIX', 'HIND.SHP', 'hind'],      // Hind attack helicopter
   ['CONQUER.MIX', 'HELI.SHP', 'heli'],      // Longbow helicopter
   ['CONQUER.MIX', 'TRAN.SHP', 'tran'],      // Chinook transport helicopter
+  ['CONQUER.MIX', 'LROTOR.SHP', 'lrotor'],  // AircraftTypeClass::LRotorData
+  ['CONQUER.MIX', 'RROTOR.SHP', 'rrotor'],  // AircraftTypeClass::RRotorData
   ['CONQUER.MIX', 'MIG.SHP', 'mig'],        // MiG-29 fighter
   ['CONQUER.MIX', 'YAK.SHP', 'yak'],        // Yak attack plane
   ['CONQUER.MIX', 'BADR.SHP', 'badr'],      // Badger bomber
@@ -312,6 +324,8 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['HIRES.MIX', 'POWER.SHP', 'power_marker'], // Power bar drain level marker
   ['HIRES.MIX', 'NATORADR.SHP', 'natoradr'],   // Allied radar cover animation
   ['HIRES.MIX', 'USSRRADR.SHP', 'ussrradr'],   // Soviet radar cover animation
+  ['HIRES.MIX', 'NRADRFRM.SHP', 'nradrfrm'],   // Allied active radar frame
+  ['HIRES.MIX', 'URADRFRM.SHP', 'uradrfrm'],   // Soviet active radar frame
   ['HIRES.MIX', 'SIDE1NA.SHP', 'side1na'],   // Allied sidebar top section
   ['HIRES.MIX', 'SIDE2NA.SHP', 'side2na'],   // Allied sidebar middle section
   ['HIRES.MIX', 'SIDE3NA.SHP', 'side3na'],   // Allied sidebar bottom section
@@ -390,6 +404,7 @@ const SPRITE_ASSETS: [string, string, string][] = [
   ...generateMakeAssets(),
   ...generateIconAssets(),
   ...generateSmudgeAssets(),
+  ...generateCorpseAssets(),
 ];
 
 function log(msg: string): void {
@@ -641,6 +656,7 @@ async function main(): Promise<void> {
   log('Extracting bitmap fonts...');
   for (const [fntName, outPrefix] of [
     ['6POINT.FNT', '6point-font'],
+    ['GRAD6FNT.FNT', 'grad6-font'],
     ['8POINT.FNT', '8point-font'],
     ['12METFNT.FNT', 'metal12-font'],
   ] as const) {

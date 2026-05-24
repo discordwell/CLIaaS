@@ -8,8 +8,9 @@
  *
  * G8: Gesture/Salute Animation Fields
  * C++ idata.cpp: E1DoControls, E2DoControls, etc. define DO_GESTURE1/2, DO_SALUTE1/2.
- * C++ infantry.cpp:886-888: Random_Animate triggers gesture on transport unload.
- * TS triggers gesture as a rare idle fidget variant (~5% chance).
+ * C++ infantry.cpp:1742-1838: Random_Animate starts DO_IDLE/DO_GESTURE actions.
+ * The rendered frame comes from InfantryClass::Doing, not from a free-running
+ * visual fidget timer.
  *
  * C++ reference files:
  *   - src/EasterEgg/CnC_and_Red_Alert/RA/idata.cpp (DoControls tables)
@@ -17,9 +18,9 @@
  *   - src/EasterEgg/CnC_and_Red_Alert/RA/defines.h:2293-2319 (DoType enum)
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Entity } from '../engine/entity';
+import { Entity, dir256ToFacing32 } from '../engine/entity';
 import {
-  AnimState, UnitType, House, INFANTRY_ANIMS, INFANTRY_SHAPE,
+  AnimState, UnitType, House, INFANTRY_ANIMS, INFANTRY_SHAPE, INFANTRY_HUMAN_SHAPE,
   type InfantryAnim, type DoInfo,
 } from '../engine/types';
 
@@ -238,6 +239,168 @@ describe('C++ Parity: G3 — LIE_DOWN/GET_UP Transition Animations', () => {
     // C1 has no lieDown defined
     expect(e.animState).not.toBe(AnimState.LIE_DOWN);
   });
+
+  it('death animation frames take precedence over stale prone/lie-down Doing state', () => {
+    // C++ InfantryClass::Shape_Number follows the death Doing sequence until
+    // the object is deleted; a stale transition action must not render a living
+    // lie-down frame for dead infantry.
+    const e = makeInfantry('E1');
+    e.alive = false;
+    e.animState = AnimState.DIE;
+    e.doing = 'lie_down';
+    e.deathVariant = 1;
+    e.animFrame = 3;
+    expect(e.spriteFrame).toBe(INFANTRY_ANIMS.E1.die1.frame + 3);
+  });
+});
+
+
+// ========== DOING_AI WALK/CRAWL SELECTION ==========
+
+describe('C++ Parity: Doing_AI — driving walk/crawl selection', () => {
+  it('driving dogs with legal TarCom use DO_CRAWL frames, not DO_WALK frames', () => {
+    // C++ infantry.cpp:3714-3721: for DOG, Target_Legal(TarCom)
+    // selects DO_CRAWL. DogDoControls uses crawl as the run animation.
+    const dog = makeInfantry('DOG');
+    const target = makeInfantry('E1');
+    dog.isDriving = true;
+    dog.target = target;
+    dog.bodyFacing256 = 32;
+    dog.doing = 'stand_ready';
+
+    dog.doingAI(100);
+
+    const anim = INFANTRY_ANIMS.DOG;
+    const sdir = INFANTRY_HUMAN_SHAPE[dir256ToFacing32(dog.bodyFacing256)];
+    expect(dog.doing).toBe('crawl');
+    expect(dog.spriteFrame).toBe(anim.crawl!.frame + sdir * anim.crawl!.jump);
+    expect(dog.spriteFrame).not.toBe(anim.walk.frame + sdir * anim.walk.jump);
+  });
+
+  it('driving dogs without TarCom stay on DO_WALK frames', () => {
+    const dog = makeInfantry('DOG');
+    dog.isDriving = true;
+    dog.target = null;
+    dog.targetStructure = null;
+    dog.forceFirePos = null;
+    dog.bodyFacing256 = 32;
+    dog.doing = 'stand_ready';
+
+    dog.doingAI(100);
+
+    const anim = INFANTRY_ANIMS.DOG;
+    const sdir = INFANTRY_HUMAN_SHAPE[dir256ToFacing32(dog.bodyFacing256)];
+    expect(dog.doing).toBe('walk');
+    expect(dog.spriteFrame).toBe(anim.walk.frame + sdir * anim.walk.jump);
+  });
+
+  it('driving prone non-dog infantry use DO_CRAWL rather than DO_WALK', () => {
+    // C++ infantry.cpp:3723-3726: non-dogs choose DO_CRAWL while IsProne.
+    const e1 = makeInfantry('E1');
+    e1.isDriving = true;
+    e1.isProne = true;
+    e1.bodyFacing256 = 128;
+    e1.doing = 'stand_ready';
+
+    e1.doingAI(100);
+
+    const anim = INFANTRY_ANIMS.E1;
+    const sdir = INFANTRY_HUMAN_SHAPE[dir256ToFacing32(e1.bodyFacing256)];
+    expect(e1.doing).toBe('crawl');
+    expect(e1.spriteFrame).toBe(anim.crawl!.frame + sdir * anim.crawl!.jump);
+    expect(e1.spriteFrame).not.toBe(anim.walk.frame + sdir * anim.walk.jump);
+  });
+
+  it('Start_Driver action selects DO_CRAWL for dogs with legal TarCom', () => {
+    // C++ infantry.cpp:3975-3985: after Start_Driver succeeds, dogs with a
+    // legal TarCom immediately Do_Action(DO_CRAWL), not a temporary DO_WALK.
+    const dog = makeInfantry('DOG');
+    const target = makeInfantry('E1');
+    dog.isDriving = true;
+    dog.target = target;
+
+    dog.doWalkAction(100);
+
+    expect(dog.doing).toBe('crawl');
+    expect(dog.doingStage).toBe(0);
+    expect(dog.doingRate).toBe(2);
+    expect(dog.doingRateTimer).toBe(2);
+  });
+
+  it('dog TarCom legality follows C++ TARGET_NONE semantics, not target health', () => {
+    // C++ function.h: Target_Legal(target) only checks target != TARGET_NONE.
+    // A retained TarCom reference still drives dog DO_CRAWL selection.
+    const dog = makeInfantry('DOG');
+    const target = makeInfantry('E1');
+    target.alive = false;
+    dog.isDriving = true;
+    dog.target = target;
+
+    dog.doWalkAction(100);
+
+    expect(dog.doing).toBe('crawl');
+  });
+
+  it('Start_Driver action selects DO_CRAWL for prone non-dog infantry', () => {
+    const e1 = makeInfantry('E1');
+    e1.isDriving = true;
+    e1.isProne = true;
+
+    e1.doWalkAction(100);
+
+    expect(e1.doing).toBe('crawl');
+  });
+
+  it('does not restart an incomplete DO_WALK sequence while still driving', () => {
+    // C++ infantry.cpp:3714 is only reached when Fetch_Stage() has completed
+    // the current DoControls entry; mid-walk stages must continue rendering.
+    const e1 = makeInfantry('E1');
+    e1.isDriving = true;
+    e1.doing = 'walk';
+    e1.doingStage = INFANTRY_ANIMS.E1.walk.count - 1;
+    e1.doingRate = 2;
+    e1.doingRateTimer = 1;
+
+    e1.doingAI(100);
+
+    expect(e1.doing).toBe('walk');
+    expect(e1.doingStage).toBe(INFANTRY_ANIMS.E1.walk.count - 1);
+    expect(e1.doingRate).toBe(2);
+    expect(e1.doingRateTimer).toBe(1);
+  });
+
+  it('restarts DO_WALK only after the C++ DoControls count has completed', () => {
+    const e1 = makeInfantry('E1');
+    e1.isDriving = true;
+    e1.doing = 'walk';
+    e1.doingStage = INFANTRY_ANIMS.E1.walk.count;
+    e1.doingRate = 2;
+    e1.doingRateTimer = 1;
+
+    e1.doingAI(100);
+
+    expect(e1.doing).toBe('walk');
+    expect(e1.doingStage).toBe(0);
+    expect(e1.doingRate).toBe(2);
+    expect(e1.doingRateTimer).toBe(2);
+  });
+
+  it('does not restart an incomplete DO_CRAWL sequence while still driving', () => {
+    const e1 = makeInfantry('E1');
+    e1.isDriving = true;
+    e1.isProne = true;
+    e1.doing = 'crawl';
+    e1.doingStage = INFANTRY_ANIMS.E1.crawl!.count - 1;
+    e1.doingRate = 2;
+    e1.doingRateTimer = 1;
+
+    e1.doingAI(100);
+
+    expect(e1.doing).toBe('crawl');
+    expect(e1.doingStage).toBe(INFANTRY_ANIMS.E1.crawl!.count - 1);
+    expect(e1.doingRate).toBe(2);
+    expect(e1.doingRateTimer).toBe(1);
+  });
 });
 
 
@@ -289,39 +452,82 @@ describe('C++ Parity: G8 — Gesture/Salute Animation Fields', () => {
     }
   });
 
-  it('GESTURE state triggers during idle fidget when fidgetVariant < 0.05', () => {
+  it('free-running idle fidget counters do not start C++ gesture actions', () => {
     const e = makeInfantry('E1');
     e.animState = AnimState.IDLE;
-    // Set fidget conditions: past delay, variant in gesture range
     e.fidgetDelay = 5;
     e.animFrame = 10; // > fidgetDelay
-    e.fidgetVariant = 0.02; // < 0.05 threshold
-    e.tickAnimation();
-    expect(e.animState).toBe(AnimState.GESTURE);
-    expect(e.gestureDoInfo).not.toBeNull();
-    expect(e.animFrame).toBe(0); // reset on transition
-  });
-
-  it('GESTURE does NOT trigger when fidgetVariant >= 0.05', () => {
-    const e = makeInfantry('E1');
-    e.animState = AnimState.IDLE;
-    e.fidgetDelay = 5;
-    e.animFrame = 10;
-    e.fidgetVariant = 0.5; // well above threshold
-    e.tickAnimation();
-    expect(e.animState).not.toBe(AnimState.GESTURE);
-  });
-
-  it('GESTURE does NOT trigger when infantry is prone', () => {
-    const e = makeInfantry('E1');
-    e.animState = AnimState.IDLE;
-    e.isProne = true;
-    e.prevIsProne = true;
-    e.fidgetDelay = 5;
-    e.animFrame = 10;
     e.fidgetVariant = 0.02;
+    e.doing = 'stand_ready';
     e.tickAnimation();
-    expect(e.animState).not.toBe(AnimState.GESTURE);
+    expect(e.animState).toBe(AnimState.IDLE);
+    expect(e.gestureDoInfo).toBeNull();
+  });
+
+  it('DO_STAND_READY renders ready frames even when legacy fidget counters are past delay', () => {
+    const e = makeInfantry('E1');
+    e.animState = AnimState.IDLE;
+    e.doing = 'stand_ready';
+    e.bodyFacing256 = 128;
+    e.bodyFacing32 = 16;
+    e.idleAnimTimer = 27;
+    e.fidgetDelay = 5;
+    e.animFrame = 25;
+    e.fidgetVariant = 0.9;
+    const expected = INFANTRY_ANIMS.E1.ready.frame + INFANTRY_SHAPE[4] * INFANTRY_ANIMS.E1.ready.jump;
+    expect(e.spriteFrame).toBe(expected);
+  });
+
+  it('Random_Animate-started gesture Doing drives gesture sprite frames', () => {
+    const e = makeInfantry('E1');
+    const anim = INFANTRY_ANIMS.E1;
+    e.startGestureDoing(10, anim.gesture1!);
+    e.doingStage = 1;
+    e.bodyFacing256 = 64;
+    e.bodyFacing32 = 8;
+    const expected = anim.gesture1!.frame + INFANTRY_SHAPE[2] * anim.gesture1!.jump + 1;
+    expect(e.spriteFrame).toBe(expected);
+  });
+
+  it('Random_Animate-started DO_IDLE2 drives idle2 frames independent of legacy fidget variant', () => {
+    const e = makeInfantry('E1');
+    const anim = INFANTRY_ANIMS.E1;
+    e.fidgetVariant = 0.01;
+    e.startIdleAnimDoing(10, anim.idle2!);
+    e.doingStage = 5;
+
+    expect(e.spriteFrame).toBe(anim.idle2!.frame + 5);
+  });
+
+  it('does not clear an incomplete DO_IDLE2 sequence during Doing_AI', () => {
+    // C++ infantry.cpp:3716 only transitions the current Doing after
+    // Fetch_Stage() reaches the DoControls Count. An idle action started by
+    // Random_Animate must be visible for its full staged duration.
+    const e = makeInfantry('E1');
+    const anim = INFANTRY_ANIMS.E1;
+    e.startIdleAnimDoing(10, anim.idle2!);
+    e.doingStage = anim.idle2!.count - 1;
+    e.doingRate = 2;
+    e.doingRateTimer = 1;
+
+    e.doingAI(20);
+
+    expect(e.doing).toBe('idle_anim');
+    expect(e.doingStage).toBe(anim.idle2!.count - 1);
+    expect(e.idleDoInfo).toBe(anim.idle2);
+  });
+
+  it('returns to DO_STAND_READY after a DO_IDLE2 sequence completes', () => {
+    const e = makeInfantry('E1');
+    const anim = INFANTRY_ANIMS.E1;
+    e.startIdleAnimDoing(10, anim.idle2!);
+    e.doingStage = anim.idle2!.count;
+
+    e.doingAI(20);
+
+    expect(e.doing).toBe('stand_ready');
+    expect(e.doingStage).toBe(0);
+    expect(e.idleDoInfo).toBeNull();
   });
 
   it('GESTURE completes and returns to IDLE after count frames', () => {

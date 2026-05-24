@@ -576,11 +576,11 @@ describe('APC damage and speed interaction (techno.cpp)', () => {
     expect(apc.fear).toBe(0);
   });
 
-  it('APC shows damage flash when hit', () => {
+  it('ordinary damage does not start FlasherClass blushing', () => {
     const apc = entityAtCell(UnitType.V_APC, House.Spain, 10, 10);
     expect(apc.damageFlash).toBe(0);
     apc.takeDamage(50, 'AP');
-    expect(apc.damageFlash).toBe(4);
+    expect(apc.damageFlash).toBe(0);
   });
 
   it('invulnerable APC takes no damage (Iron Curtain or crate)', () => {

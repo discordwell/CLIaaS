@@ -32,6 +32,7 @@ import {
   updateStructureCombat,
   updateInflightProjectiles,
 } from '../engine/combat';
+import { logicAnimRenderSpec } from '../engine/logicAnim';
 import { GameMap } from '../engine/map';
 import { type MapStructure, STRUCTURE_WEAPONS } from '../engine/scenario';
 import type { Effect } from '../engine/renderer';
@@ -609,8 +610,8 @@ describe('Invisible projectile Coord_Scatter (bullet.cpp:1012-1014)', () => {
 
   it('flame-equipped bullets submit delayed FBALL_FADE Logic anim slots', () => {
     // C++ bullet.cpp:380-388 toggles IsToAnimate and submits ANIM_FBALL_FADE
-    // for FB1 flame bullets. TS tracks that as a real Logic anim for same-tick
-    // bullet ordering, then renders it with the closest available napalm1 sprite.
+    // for FB1 flame bullets. TS tracks and renders that as a real Logic anim,
+    // not as a detached legacy Effect.
     const ctx = makeCombatCtx();
     ctx.inflightProjectiles.push(makeProjectile({
       weapon: WEAPON_STATS.Flamer,
@@ -631,14 +632,15 @@ describe('Invisible projectile Coord_Scatter (bullet.cpp:1012-1014)', () => {
 
     updateInflightProjectiles(ctx);
 
-    const trail = ctx.effects.find(e => e.type === 'explosion' && e.sprite === 'napalm1');
-    expect(trail).toBeDefined();
-    expect(trail?.maxFrames).toBe(14);
-    expect(trail?.cppLogicSlot).toBeUndefined();
     const logicTrail = ctx.logicAnims.find(a => a.type === 'fball_fade');
     expect(logicTrail).toBeDefined();
     expect(logicTrail?.delay).toBe(1);
     expect(logicTrail?.isBrandNew).toBe(true);
+    expect(logicAnimRenderSpec(logicTrail!.type)).toMatchObject({
+      sprite: 'napalm1',
+      groundLayer: false,
+    });
+    expect(ctx.effects.some(e => e.type === 'explosion' && e.sprite === 'napalm1')).toBe(false);
     expect(ctx.inflightProjectiles).toHaveLength(1);
   });
 
@@ -935,7 +937,6 @@ describe('Invisible projectile Coord_Scatter (bullet.cpp:1012-1014)', () => {
       screenShake: 0,
       explosionSize: 0,
       debris: false,
-      decal: null,
       explodeLgSound: false,
       attackerIsPlayer: false,
       trackLoss: false,

@@ -9,7 +9,7 @@ import {
   radiusCellOffsets,
 } from './types';
 import { type Entity, CloakState, CLOAK_TRANSITION_FRAMES } from './entity';
-import { type MapStructure, STRUCTURE_SIZE } from './scenario';
+import { type MapStructure, structureCenterCell } from './scenario';
 import { type GameMap } from './map';
 
 // ---------------------------------------------------------------------------
@@ -246,8 +246,6 @@ export function revealZoneFloodFill(map: GameMap, cx: number, cy: number): Uint8
  * When unpowered (or destroyed), jamming is removed.
  */
 export function updateGapGenerators(ctx: FogContext): void {
-  if (ctx.tick % GAP_UPDATE_INTERVAL !== 0) return;
-
   // C++ house.cpp:4164: if (Power >= Drain || Drain == 0) return(1);
   // C++ house.cpp:4166-4168: if (Power) return fixed(Power, Drain); else return 0;
   const pf = ctx.powerConsumed === 0 || ctx.powerProduced >= ctx.powerConsumed
@@ -265,7 +263,7 @@ export function updateGapGenerators(ctx: FogContext): void {
     if (pf < 1.0) {
       if (ctx.gapGeneratorCells.has(si)) {
         const prev = ctx.gapGeneratorCells.get(si)!;
-        ctx.map.unjamRadius(prev.cx, prev.cy, prev.radius);
+        ctx.map.unjamRadius(prev.cx, prev.cy, prev.radius, false);
         ctx.gapGeneratorCells.delete(si);
       }
       continue;
@@ -274,13 +272,15 @@ export function updateGapGenerators(ctx: FogContext): void {
     activeGaps.add(si);
     if (ctx.gapGeneratorCells.has(si)) continue;
 
-    const [gw, gh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-    const cx = s.cx + Math.floor(gw / 2);
-    const cy = s.cy + Math.floor(gh / 2);
+    // C++ building.cpp:997-999 uses Coord_Cell(Center_Coord()). For even-sized
+    // foundations CenterOffset uses 0xff, so the cell remains north/west of the
+    // mathematical midpoint.
+    const { cx, cy } = structureCenterCell(s);
     const r = GAP_RADIUS;
+    const shouldShroud = s.house !== ctx.playerHouse;
 
     for (const { dx, dy } of radiusCellOffsets(r)) {
-      ctx.map.jamCell(cx + dx, cy + dy);
+      ctx.map.jamCell(cx + dx, cy + dy, shouldShroud);
     }
 
     ctx.gapGeneratorCells.set(si, { cx, cy, radius: r });
@@ -288,7 +288,7 @@ export function updateGapGenerators(ctx: FogContext): void {
 
   for (const [si, prev] of ctx.gapGeneratorCells) {
     if (!activeGaps.has(si)) {
-      ctx.map.unjamRadius(prev.cx, prev.cy, prev.radius);
+      ctx.map.unjamRadius(prev.cx, prev.cy, prev.radius, false);
       ctx.gapGeneratorCells.delete(si);
     }
   }

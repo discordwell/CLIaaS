@@ -124,6 +124,8 @@ export interface MapTerrainObject {
   occupyCells: number[];
 }
 
+export type MapTerrainRadarObject = MapTree | MapTerrainObject;
+
 /** C++ RA tdata.cpp Occupy_List per tree type — cells blocked by each tree, as [dx,dy] offsets
  *  from the origin cell. Decoded from C++ cell offset arrays (_List0010, _List10, etc.)
  *  where MAP_CELL_W=128 encodes row offsets.
@@ -154,6 +156,33 @@ export const TREE_OCCUPY: Record<string, [number, number][]> = {
   'tc03': [[0, 0], [1, 0], [0, 1], [1, 1]],                           // _List110110
   'tc04': [[0, 1], [1, 1], [2, 1], [0, 2]],                           // _List000011101000
   'tc05': [[2, 0], [0, 1], [1, 1], [2, 1], [1, 2], [2, 2]],          // _List001011100110
+};
+
+/** C++ RA tdata.cpp Overlap_List per tree type — cells where TerrainClass is
+ *  registered as a visual overlapper. RadarClass::Render_Terrain checks both
+ *  Cell_Occupier and Overlapper, so these cells draw tree radar icons without
+ *  becoming movement blockers. */
+export const TREE_OVERLAP: Record<string, [number, number][]> = {
+  't01': [[0, 0], [1, 1]],             // _List1001
+  't02': [[0, 0], [1, 1]],             // _List1001
+  't03': [[0, 0], [1, 1]],             // _List1001
+  't05': [[0, 0], [1, 1]],             // _List1001
+  't06': [[0, 0], [1, 1]],             // _List1001
+  't07': [[0, 0], [1, 1]],             // _List1001
+  't08': [[1, 0]],                     // _List01
+  't10': [[0, 0], [1, 0]],             // _List1100
+  't11': [[0, 0], [1, 0]],             // _List1100
+  't12': [[0, 0], [1, 1]],             // _List1001
+  't13': [[0, 0], [1, 0], [1, 1]],    // _List1101
+  't14': [[0, 0], [1, 0]],             // _List1100
+  't15': [[0, 0], [1, 0]],             // _List1100
+  't16': [[0, 0], [1, 1]],             // _List1001
+  't17': [[0, 0], [1, 1]],             // _List1001
+  'tc01': [[0, 0], [1, 0], [2, 1]],                                 // _List110001
+  'tc02': [[0, 0], [2, 0], [2, 1]],                                 // _List101001
+  'tc03': [[2, 0]],                                                   // _List001
+  'tc04': [[0, 0], [1, 0], [2, 0], [3, 1], [1, 2], [2, 2]],          // _List111000010110
+  'tc05': [[0, 0], [1, 0], [3, 1], [0, 2], [3, 2]],                  // _List110000011001
 };
 
 /** C++ RA tdata.cpp non-tree TerrainTypeClass Occupy_List entries.
@@ -264,6 +293,9 @@ export class GameMap {
   /** Reverse lookup: cell index → MapTree that occupies it (for damage routing) */
   private treeCellToTree = new Map<number, MapTree>();
 
+  /** Reverse lookup: cell index → MapTree objects in C++ CellClass::Overlapper. */
+  private treeCellToOverlappingTrees = new Map<number, MapTree[]>();
+
   /** Non-tree TerrainClass objects keyed by origin cell.
    *  cpp-parity: RA tdata.cpp BOXES/MINE Occupy_List cells block movement. */
   terrainObjects = new Map<number, MapTerrainObject>();
@@ -276,20 +308,47 @@ export class GameMap {
 
   /** Non-rendered movement blockers for explicit impassable cells. */
   private movementBlocked = new Set<number>();
+  /** Underlying land for cells temporarily encoded as WALL by structure footprints. */
+  private structureFootprintTerrain = new Map<number, Terrain>();
   /** C++ building bib smudges. They block building placement, not movement. */
   private bibSmudges = new Set<number>();
 
-  /** Terrain decals: scorch marks and craters from explosions (capped at 200) */
+  /** Legacy TS-only decal buffer. C++ terrain scarring is represented by CellClass smudges. */
   decals: Array<{ cx: number; cy: number; size: number; alpha: number }> = [];
-  private static readonly MAX_DECALS = 200;
 
-  /** Add a terrain decal (capped to prevent memory growth) */
-  addDecal(cx: number, cy: number, size: number, alpha: number): void {
-    if (this.decals.length >= GameMap.MAX_DECALS) {
-      // Remove oldest decal (FIFO)
-      this.decals.shift();
+  /** Deprecated compatibility hook for older tests/mocks. Use addSmudge for C++ parity state. */
+  addDecal(_cx: number, _cy: number, _size: number, _alpha: number): void {
+    return;
+  }
+
+  /** C++ CellClass::Is_Clear_To_Move(SPEED_TRACK, true, true) for smudge placement.
+   *  SmudgeClass ignores infantry and vehicle/building occupancy, but still
+   *  rejects monolith TerrainClass objects, impassable land, and wall overlays.
+   *  TS encodes live building occupancy as WALL terrain, so this uses the saved
+   *  underlying land there. */
+  isClearToMoveTrackIgnoringOccupants(cx: number, cy: number): boolean {
+    if (cx < 0 || cy < 0 || cx >= MAP_CELLS || cy >= MAP_CELLS) return false;
+    const idx = cy * MAP_CELLS + cx;
+    if (this.wallType[idx] !== '') return false;
+    if (this.isTreeOccupied(cx, cy) || this.isTerrainObjectOccupied(cx, cy)) return false;
+    const terrain = this.structureFootprintTerrain.get(idx) ?? this.cells[idx];
+    const terrainKey = TERRAIN_NAME_MAP[terrain];
+    const entry = TERRAIN_SPEED[terrainKey];
+    return (entry?.[SpeedClass.TRACK] ?? 0) > 0;
+  }
+
+  /** Place a C++ CellClass smudge. Non-bib smudges occupy one slot per cell. */
+  addSmudge(type: string, cx: number, cy: number, data = 0): boolean {
+    if (!this.isClearToMoveTrackIgnoringOccupants(cx, cy)) return false;
+    const smudgeType = type.toLowerCase();
+    const existing = this.smudges.find(s => s.cx === cx && s.cy === cy);
+    if (existing && existing.type.toLowerCase().startsWith('cr') && smudgeType.startsWith('cr')) {
+      existing.data = Math.min((existing.data ?? 0) + 1, 4);
+      return true;
     }
-    this.decals.push({ cx, cy, size, alpha });
+    if (existing) return false;
+    this.smudges.push({ type: smudgeType, cx, cy, data });
+    return true;
   }
 
   /** Cell triggers: maps cell index to trigger name (set by scenario loader) */
@@ -299,7 +358,7 @@ export class GameMap {
   activatedCellTriggers = new Set<string>();
 
   /** Pre-placed smudge marks (scorch, craters) from scenario INI */
-  smudges: Array<{ type: string; cx: number; cy: number }> = [];
+  smudges: Array<{ type: string; cx: number; cy: number; data?: number }> = [];
 
   /** Indices of cells currently marked visible (for efficient downgrade) */
   private visibleCells: number[] = [];
@@ -422,6 +481,20 @@ export class GameMap {
     return this.movementBlocked.has(cy * MAP_CELLS + cx);
   }
 
+  setStructureFootprintBlock(cx: number, cy: number, underlyingTerrain = this.getTerrain(cx, cy)): void {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return;
+    const idx = cy * MAP_CELLS + cx;
+    if (!this.structureFootprintTerrain.has(idx)) {
+      this.structureFootprintTerrain.set(idx, underlyingTerrain);
+    }
+    this.cells[idx] = Terrain.WALL;
+  }
+
+  clearStructureFootprintBlock(cx: number, cy: number): void {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return;
+    this.structureFootprintTerrain.delete(cy * MAP_CELLS + cx);
+  }
+
   setBibSmudge(cx: number, cy: number, present: boolean): void {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return;
     const idx = cy * MAP_CELLS + cx;
@@ -490,6 +563,15 @@ export class GameMap {
         this.treeCellToTree.set(cellIdx, tree);
       }
     }
+    for (const [dx, dy] of TREE_OVERLAP[tree.type] ?? []) {
+      const ocx = tree.cx + dx;
+      const ocy = tree.cy + dy;
+      if (ocx < 0 || ocx >= MAP_CELLS || ocy < 0 || ocy >= MAP_CELLS) continue;
+      const cellIdx = ocy * MAP_CELLS + ocx;
+      const overlap = this.treeCellToOverlappingTrees.get(cellIdx) ?? [];
+      if (!overlap.includes(tree)) overlap.push(tree);
+      this.treeCellToOverlappingTrees.set(cellIdx, overlap);
+    }
   }
 
   /** Register a non-tree TerrainClass object on the map.
@@ -533,6 +615,20 @@ export class GameMap {
       this.treeOccupied.delete(cellIdx);
       this.treeCellToTree.delete(cellIdx);
     }
+    for (const [dx, dy] of TREE_OVERLAP[tree.type] ?? []) {
+      const ocx = tree.cx + dx;
+      const ocy = tree.cy + dy;
+      if (ocx < 0 || ocx >= MAP_CELLS || ocy < 0 || ocy >= MAP_CELLS) continue;
+      const cellIdx = ocy * MAP_CELLS + ocx;
+      const overlap = this.treeCellToOverlappingTrees.get(cellIdx);
+      if (!overlap) continue;
+      const filtered = overlap.filter(t => t !== tree);
+      if (filtered.length) {
+        this.treeCellToOverlappingTrees.set(cellIdx, filtered);
+      } else {
+        this.treeCellToOverlappingTrees.delete(cellIdx);
+      }
+    }
     // Clear tree type on all cells this tree covers. Do not change Terrain:
     // C++ TerrainClass objects sit on top of the underlying template Land_Type.
     const originIdx = tree.cy * MAP_CELLS + tree.cx;
@@ -567,6 +663,31 @@ export class GameMap {
   getTerrainObjectAtCell(cx: number, cy: number): MapTerrainObject | undefined {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return undefined;
     return this.terrainObjectCellToObject.get(cy * MAP_CELLS + cx);
+  }
+
+  /** TerrainClass objects that C++ RadarClass::Render_Terrain sees for a cell:
+   *  first the terrain Cell_Occupier, then TerrainClass entries in Overlapper. */
+  getTerrainObjectsForRadarCell(cx: number, cy: number): MapTerrainRadarObject[] {
+    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return [];
+    const idx = cy * MAP_CELLS + cx;
+    const objects: MapTerrainRadarObject[] = [];
+    const add = (object: MapTerrainRadarObject | undefined): void => {
+      if (object && !objects.includes(object)) objects.push(object);
+    };
+
+    add(this.treeCellToTree.get(idx));
+    for (const tree of this.treeCellToOverlappingTrees.get(idx) ?? []) add(tree);
+    add(this.terrainObjectCellToObject.get(idx));
+
+    objects.sort((a, b) => this.terrainRadarSortKey(a) - this.terrainRadarSortKey(b));
+    return objects;
+  }
+
+  private terrainRadarSortKey(object: MapTerrainRadarObject): number {
+    const center = TREE_CENTER_OFFSET[object.type] ?? [CELL_SIZE / 2, CELL_SIZE];
+    const sortX = object.cx * CELL_SIZE + center[0];
+    const sortY = object.cy * CELL_SIZE + center[1];
+    return sortY * MAP_CELLS * CELL_SIZE + sortX;
   }
 
   /** Check if a cell is passable (terrain + occupancy).
@@ -1727,37 +1848,39 @@ export class GameMap {
   /** Jammed cells tracking — maps cell index to jam count (allows overlapping GAPs) */
   jammedCells = new Map<number, number>();
 
-  /** Jam a cell — set visibility to 0 (shrouded) for enemy view.
-   *  Increments jam count so overlapping Gap Generators work correctly. */
-  jamCell(cx: number, cy: number): void {
+  /** Jam a cell. C++ RadarClass::Jam_Cell always sets the radar jam bit, but
+   *  only calls Shroud_Cell when the jamming house is not PlayerPtr. */
+  jamCell(cx: number, cy: number, shroud = true): void {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return;
     const idx = cy * MAP_CELLS + cx;
     const count = this.jammedCells.get(idx) ?? 0;
     this.jammedCells.set(idx, count + 1);
-    // Shroud the cell for enemy view
-    if (this.visibility[idx] > 0) {
+    if (shroud && this.visibility[idx] > 0) {
       this.visibility[idx] = 0;
     }
   }
 
   /** Unjam a cell — decrements jam count, restores visibility when fully unjammed. */
-  unjamCell(cx: number, cy: number): void {
+  unjamCell(cx: number, cy: number, restoreVisibility = true): void {
     if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return;
     const idx = cy * MAP_CELLS + cx;
     const count = this.jammedCells.get(idx) ?? 0;
     if (count <= 1) {
       this.jammedCells.delete(idx);
-      // Restore to fog (explored but not visible) — updateFogOfWar will handle the rest
-      this.visibility[idx] = 1;
+      if (restoreVisibility) {
+        // Legacy callers expect fog restoration; C++ GAP UnJam_Cell paths pass
+        // false and leave visibility to normal Sight_From/Look calls.
+        this.visibility[idx] = 1;
+      }
     } else {
       this.jammedCells.set(idx, count - 1);
     }
   }
 
   /** Unjam all cells in a radius around a position using C++ coord.cpp Distance(). */
-  unjamRadius(cx: number, cy: number, radius: number): void {
+  unjamRadius(cx: number, cy: number, radius: number, restoreVisibility = true): void {
     for (const { dx, dy } of radiusCellOffsets(radius)) {
-      this.unjamCell(cx + dx, cy + dy);
+      this.unjamCell(cx + dx, cy + dy, restoreVisibility);
     }
   }
 

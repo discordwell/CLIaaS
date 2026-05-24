@@ -24,7 +24,7 @@ import {
 import { GameMap } from '../engine/map';
 import {
   type MapStructure, STRUCTURE_SIZE, STRUCTURE_MAX_HP,
-  STRUCTURE_WEAPONS,
+  STRUCTURE_WEAPONS, getStructureOccupyCells,
 } from '../engine/scenario';
 import {
   calculatePowerGrid, sellRefund, repairCostPerStep,
@@ -317,6 +317,13 @@ describe('ATEK 2x2 footprint', () => {
       }
     }
     expect(cells).toEqual([[10, 10], [11, 10], [10, 11], [11, 11]]);
+  });
+
+  it('active Occupy_List is the full 2x2 foundation (bdata.cpp List22)', () => {
+    expect(getStructureOccupyCells('ATEK', 58, 95)).toEqual([
+      { cx: 58, cy: 95 }, { cx: 59, cy: 95 },
+      { cx: 58, cy: 96 }, { cx: 59, cy: 96 },
+    ]);
   });
 });
 

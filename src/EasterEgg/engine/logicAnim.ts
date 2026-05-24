@@ -1,4 +1,4 @@
-import { CELL_SIZE, LEPTON_SIZE, EXPLOSION_FRAMES, COS_TABLE_256, SIN_TABLE_256 } from './types';
+import { CELL_SIZE, LEPTON_SIZE, COS_TABLE_256, SIN_TABLE_256, SUBCELL_LEPTON_OFFSETS, leptonDist } from './types';
 import { type Effect } from './renderer';
 import { ScenarioRandom } from './random';
 import { TREE_CENTER_OFFSET, type GameMap, type MapTree } from './map';
@@ -68,6 +68,21 @@ interface LogicAnimDef {
   chainTo?: LogicAnimType;
   damageRawPerTick?: number;
 }
+
+const GROUND_LAYER_LOGIC_ANIMS = new Set<LogicAnimType>([
+  'elect_die',
+  'fire_small',
+  'fire_med',
+  'fire_med2',
+  'burn_small',
+  'burn_med',
+  'burn_big',
+  'on_fire_small',
+  'on_fire_med',
+  'on_fire_big',
+  'oilfield_burn',
+  'smoke_m',
+]);
 
 const LOGIC_ANIM_DEFS: Record<LogicAnimType, LogicAnimDef> = {
   // C++ adata.cpp ANIM_NAPALM1/2/3: Biggest=5, Delay=1, Loops=1, IsScorcher=true.
@@ -144,6 +159,13 @@ export function logicAnimTypeForSprite(sprite: string | undefined): LogicAnimTyp
   }
 }
 
+export function logicAnimRenderSpec(type: LogicAnimType): { sprite: string; groundLayer: boolean } {
+  return {
+    sprite: LOGIC_ANIM_DEFS[type].sprite,
+    groundLayer: GROUND_LAYER_LOGIC_ANIMS.has(type),
+  };
+}
+
 export function spawnLogicAnimForSprite(
   logicAnims: LogicAnim[],
   effects: Effect[],
@@ -200,20 +222,7 @@ export function spawnLogicAnim(
     createdLogicTick,
   };
   logicAnims.push(anim);
-  if (render) {
-    effects.push({
-      type: 'explosion',
-      x,
-      y,
-      frame: -delay,
-      maxFrames: EXPLOSION_FRAMES[def.sprite] ?? def.stages,
-      size: type === 'fire_med' || type === 'fire_med2' ? 12 : 8,
-      sprite: def.sprite,
-      spriteStart: 0,
-      logicIndexHint,
-      attachedStructureIndex,
-    } as Effect);
-  }
+  void render;
   if (delay === 0) logicAnimStart(anim, logicAnims, effects, undefined, allocateLogicIndex, reserveAnimSlot, createdLogicTick);
   return true;
 }
@@ -385,14 +394,17 @@ function logicAnimMiddle(
 
   // C++ anim.cpp:954-956 — scorcher animations create a random scorch smudge.
   if (def.scorcher) {
-    ScenarioRandom.nextInRange(1, 6);
+    const scorch = ScenarioRandom.nextInRange(1, 6);
+    if (map) {
+      map.addSmudge(`sc${scorch}`, Math.floor(anim.x / CELL_SIZE), Math.floor(anim.y / CELL_SIZE));
+    }
   }
 
   if (def.crater && map) {
     const cx = Math.floor(anim.x / CELL_SIZE);
     const cy = Math.floor(anim.y / CELL_SIZE);
     map.reduceOreLevels(cx, cy, 6);
-    map.addDecal(cx, cy, 10, 0.4);
+    map.addSmudge(craterSmudgeTypeForCoord(anim.x, anim.y), cx, cy);
   }
 
   switch (anim.type) {
@@ -463,7 +475,7 @@ function spawnScatteredLogicAnim(
   // inline to new AnimClass(...). Allocation failure therefore skips both RNG
   // arguments while the surrounding Percent_Chance gates still run.
   if (reserveAnimSlot && !reserveAnimSlot()) return false;
-  const point = coordScatter(x, y, radiusLeptons);
+  const point = closestFreeSpotAny(coordScatter(x, y, radiusLeptons));
   const loop = ScenarioRandom.nextInRange(1, 2);
   return spawnLogicAnim(
     logicAnims,
@@ -534,8 +546,56 @@ function coordScatter(x: number, y: number, radiusLeptons: number): { x: number;
   const startLY = Math.trunc(y * LEPTON_SIZE / CELL_SIZE);
   const lx = startLX + ((COS_TABLE_256[dir] * radiusLeptons) >> 7);
   const ly = startLY - ((SIN_TABLE_256[dir] * radiusLeptons) >> 7);
+  if (lx < 0 || ly < 0 || lx >= 0x8000 || ly >= 0x8000) {
+    return { x, y };
+  }
   return {
     x: lx * CELL_SIZE / LEPTON_SIZE,
     y: ly * CELL_SIZE / LEPTON_SIZE,
   };
+}
+
+function closestFreeSpotAny(point: { x: number; y: number }): { x: number; y: number } {
+  // C++ DisplayClass::Closest_Free_Spot(COORDINATE, true) ignores occupancy
+  // but still converts the coordinate to the nearest legal infantry stopping
+  // sub-cell via CellClass::Spot_Index and StoppingCoordAbs.
+  const lx = Math.trunc(point.x * LEPTON_SIZE / CELL_SIZE);
+  const ly = Math.trunc(point.y * LEPTON_SIZE / CELL_SIZE);
+  if (lx < 0 || ly < 0 || lx >= 0x8000 || ly >= 0x8000) {
+    return {
+      x: (LEPTON_SIZE / 2) * CELL_SIZE / LEPTON_SIZE,
+      y: (LEPTON_SIZE / 2) * CELL_SIZE / LEPTON_SIZE,
+    };
+  }
+
+  const fracX = ((lx % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+  const fracY = ((ly % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+  let spotIndex = 0;
+  if (leptonDist(fracX, fracY, 0x80, 0x80) >= 60) {
+    if (fracX > 0x80) spotIndex |= 0x01;
+    if (fracY > 0x80) spotIndex |= 0x02;
+    spotIndex += 1;
+  }
+
+  const cellX = Math.floor(lx / LEPTON_SIZE);
+  const cellY = Math.floor(ly / LEPTON_SIZE);
+  const spot = SUBCELL_LEPTON_OFFSETS[spotIndex];
+  return {
+    x: (cellX * LEPTON_SIZE + spot.lx) * CELL_SIZE / LEPTON_SIZE,
+    y: (cellY * LEPTON_SIZE + spot.ly) * CELL_SIZE / LEPTON_SIZE,
+  };
+}
+
+function craterSmudgeTypeForCoord(x: number, y: number): string {
+  const lx = Math.trunc(x * LEPTON_SIZE / CELL_SIZE);
+  const ly = Math.trunc(y * LEPTON_SIZE / CELL_SIZE);
+  const fracX = ((lx % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+  const fracY = ((ly % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+  let spotIndex = 0;
+  if (leptonDist(fracX, fracY, 0x80, 0x80) >= 60) {
+    if (fracX > 0x80) spotIndex |= 0x01;
+    if (fracY > 0x80) spotIndex |= 0x02;
+    spotIndex += 1;
+  }
+  return `cr${spotIndex + 1}`;
 }

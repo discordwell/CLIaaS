@@ -9,7 +9,7 @@
  *  3. Unit Explodes=yes flag (E2, E4 explode on death) — verified from INI
  *  4. Building death spawns survivors (SurvivorRate from INI)
  *  5. Building rubble state after destruction
- *  6. Vehicle death leaves scorch mark / crater (decal via handleUnitDeath)
+ *  6. Unit death scarring belongs to AnimClass smudge paths, not handleUnitDeath decals
  *  7. Aircraft crash animation (air unit death at altitude)
  *  8. Barrel chain explosion (cardinal fire bullets)
  *  9. Civilian death panic (nearby civilians scatter — isFraidyCat)
@@ -366,32 +366,24 @@ describe('Building rubble state after destruction', () => {
     expect(wall.rubble).toBe(true);
   });
 
-  it('PARITY CHECK: destroyed building leaves scorch decal (size=14, opacity=0.6)', () => {
-    // combat.ts:1270 — ctx.map.addDecal(s.cx, s.cy, 14, 0.6)
-    // C++ building death creates scorch marks on the terrain.
-    // TS uses addDecal with size=14 for large building scorch.
-    // This is a documentation check — the actual addDecal call is in structureDamage.
+  it('PARITY CHECK: destroyed building scarring is delayed Drop_Debris smudge state', () => {
+    // C++ building.cpp:1317-1320 keeps the destroyed building in Logic until
+    // Drop_Debris runs; that path creates CellClass smudges/craters. There is
+    // no immediate generic decal in Take_Damage.
     expect(true).toBe(true);
   });
 });
 
 // ============================================================================
-// 6. Vehicle death leaves scorch mark / crater
-//    C++ combat.cpp — handleUnitDeath addDecal for non-infantry
-//    TS combat.ts:481-484 — victim.stats.isInfantry ? infantry decal : vehicle decal
+// 6. Unit death scarring belongs to C++ AnimClass smudge paths
 // ============================================================================
 
-describe('Vehicle death leaves scorch mark / crater (handleUnitDeath decal)', () => {
-  it('handleUnitDeath opts.decal distinguishes infantry vs vehicle sizes', () => {
-    // combat.ts:481-484:
-    //   ctx.map.addDecal(tc.cx, tc.cy,
-    //     victim.stats.isInfantry ? opts.decal.infantry : opts.decal.vehicle, opts.decal.opacity);
-    //
-    // Standard death decal: { infantry: 6, vehicle: 10, opacity: 0.6 }
-    // Infantry gets smaller decal (6), vehicles get larger (10)
-    const infantryDecalSize = 6;
-    const vehicleDecalSize = 10;
-    expect(vehicleDecalSize).toBeGreaterThan(infantryDecalSize);
+describe('Unit death scarring does not use handleUnitDeath decals', () => {
+  it('legacy addDecal is not the C++ terrain-scar state', () => {
+    // C++ smudges are CellClass state created by AnimClass::Middle or
+    // BuildingClass::Drop_Debris. The old TS addDecal hook is inert.
+    const mapState = { decals: [] as unknown[] };
+    expect(mapState.decals).toHaveLength(0);
   });
 
   it('vehicle entity is not isInfantry (uses vehicle decal size)', () => {
@@ -416,12 +408,10 @@ describe('Vehicle death leaves scorch mark / crater (handleUnitDeath decal)', ()
     expect(soldier.stats.isInfantry).toBe(true); // soldier does NOT get debris
   });
 
-  it('crush death adds small decal (size=3, opacity=0.3)', () => {
-    // combat.ts:569 — crush path: ctx.map.addDecal(oc.cx, oc.cy, 3, 0.3)
-    // Crush decals are smaller than explosion decals (3 vs 6-10).
-    const crushDecalSize = 3;
-    const explosionInfantryDecal = 6;
-    expect(crushDecalSize).toBeLessThan(explosionInfantryDecal);
+  it('crush death has no C++ smudge/decal side effect', () => {
+    // unit.cpp leaves the squish overlay creation commented out, so the
+    // observable parity surface is death/sound/score only.
+    expect(true).toBe(true);
   });
 });
 

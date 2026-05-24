@@ -164,7 +164,6 @@ describe('handleUnitDeath — direct behavioral tests', () => {
 
     handleUnitDeath(ctx, victim, {
       screenShake: 8, explosionSize: 16, debris: true,
-      decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
       explodeLgSound: false,
       attackerIsPlayer: false,
       trackLoss: false,
@@ -185,7 +184,7 @@ describe('handleUnitDeath — direct behavioral tests', () => {
 
     handleUnitDeath(ctx, tank, {
       screenShake: 8, explosionSize: 16, debris: true,
-      decal: null, explodeLgSound: false,
+      explodeLgSound: false,
       attackerIsPlayer: false, trackLoss: false,
     });
 
@@ -200,7 +199,7 @@ describe('handleUnitDeath — direct behavioral tests', () => {
 
     handleUnitDeath(ctx, inf, {
       screenShake: 8, explosionSize: 16, debris: true,
-      decal: null, explodeLgSound: false,
+      explodeLgSound: false,
       attackerIsPlayer: false, trackLoss: false,
     });
 
@@ -214,7 +213,7 @@ describe('handleUnitDeath — direct behavioral tests', () => {
 
     handleUnitDeath(ctx, victim, {
       screenShake: 4, explosionSize: 12, debris: false,
-      decal: null, explodeLgSound: false,
+      explodeLgSound: false,
       attackerIsPlayer: true, trackLoss: false,
     });
 
@@ -227,7 +226,7 @@ describe('handleUnitDeath — direct behavioral tests', () => {
 
     handleUnitDeath(ctx, victim, {
       screenShake: 4, explosionSize: 12, debris: false,
-      decal: null, explodeLgSound: false,
+      explodeLgSound: false,
       attackerIsPlayer: false, trackLoss: false,
     });
 
@@ -240,7 +239,7 @@ describe('handleUnitDeath — direct behavioral tests', () => {
 
     handleUnitDeath(ctx, playerUnit, {
       screenShake: 8, explosionSize: 16, debris: true,
-      decal: null, explodeLgSound: false,
+      explodeLgSound: false,
       attackerIsPlayer: false, trackLoss: true,
     });
 
@@ -255,7 +254,7 @@ describe('handleUnitDeath — direct behavioral tests', () => {
 
     handleUnitDeath(ctx, enemy, {
       screenShake: 8, explosionSize: 16, debris: true,
-      decal: null, explodeLgSound: false,
+      explodeLgSound: false,
       attackerIsPlayer: false, trackLoss: true,
     });
 
@@ -268,7 +267,7 @@ describe('handleUnitDeath — direct behavioral tests', () => {
 
     handleUnitDeath(ctx, ant, {
       screenShake: 4, explosionSize: 12, debris: false,
-      decal: null, explodeLgSound: false,
+      explodeLgSound: false,
       attackerIsPlayer: true, trackLoss: false,
     });
 
@@ -282,7 +281,7 @@ describe('handleUnitDeath — direct behavioral tests', () => {
 
     handleUnitDeath(ctx, inf, {
       screenShake: 4, explosionSize: 12, debris: false,
-      decal: null, explodeLgSound: false,
+      explodeLgSound: false,
       attackerIsPlayer: false, trackLoss: false,
     });
 
@@ -295,7 +294,7 @@ describe('handleUnitDeath — direct behavioral tests', () => {
 
     handleUnitDeath(ctx, tank, {
       screenShake: 4, explosionSize: 12, debris: false,
-      decal: null, explodeLgSound: false,
+      explodeLgSound: false,
       attackerIsPlayer: false, trackLoss: false,
     });
 
@@ -308,7 +307,7 @@ describe('handleUnitDeath — direct behavioral tests', () => {
 
     handleUnitDeath(ctx, victim, {
       screenShake: 8, explosionSize: 16, debris: true,
-      decal: null, explodeLgSound: true,
+      explodeLgSound: true,
       attackerIsPlayer: false, trackLoss: false,
     });
 
@@ -321,7 +320,7 @@ describe('handleUnitDeath — direct behavioral tests', () => {
 
     handleUnitDeath(ctx, victim, {
       screenShake: 8, explosionSize: 16, debris: false,
-      decal: null, explodeLgSound: false,
+      explodeLgSound: false,
       attackerIsPlayer: false, trackLoss: false,
     });
 
@@ -334,47 +333,41 @@ describe('handleUnitDeath — direct behavioral tests', () => {
 
     handleUnitDeath(ctx, victim, {
       screenShake: 4, explosionSize: 12, debris: false,
-      decal: null, explodeLgSound: false,
+      explodeLgSound: false,
       attackerIsPlayer: false, trackLoss: false,
     });
 
     expect(ctx.screenShake).toBe(12);
   });
 
-  it('adds decal at victim cell when decal option is provided', () => {
+  it('does not add TS-only decals during unit death aftermath', () => {
     const ctx = makeCombatContext();
     const addDecalSpy = vi.spyOn(ctx.map, 'addDecal');
     const victim = makeEntity(UnitType.V_2TNK, House.USSR, 100, 100);
 
     handleUnitDeath(ctx, victim, {
       screenShake: 4, explosionSize: 12, debris: false,
-      decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
       explodeLgSound: false,
       attackerIsPlayer: false, trackLoss: false,
     });
 
-    expect(addDecalSpy).toHaveBeenCalled();
-    const call = addDecalSpy.mock.calls[0];
-    // Vehicle decal size = 10
-    expect(call[2]).toBe(10);
-    expect(call[3]).toBe(0.6);
+    expect(addDecalSpy).not.toHaveBeenCalled();
+    expect(ctx.map.decals).toHaveLength(0);
   });
 
-  it('uses infantry decal size for infantry victims', () => {
+  it('infantry death also does not use the legacy decal path', () => {
     const ctx = makeCombatContext();
     const addDecalSpy = vi.spyOn(ctx.map, 'addDecal');
     const inf = makeEntity(UnitType.I_E1, House.USSR, 100, 100);
 
     handleUnitDeath(ctx, inf, {
       screenShake: 4, explosionSize: 12, debris: false,
-      decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
       explodeLgSound: false,
       attackerIsPlayer: false, trackLoss: false,
     });
 
-    expect(addDecalSpy).toHaveBeenCalled();
-    const call = addDecalSpy.mock.calls[0];
-    expect(call[2]).toBe(6); // infantry decal
+    expect(addDecalSpy).not.toHaveBeenCalled();
+    expect(ctx.map.decals).toHaveLength(0);
   });
 
   it('friendlyFireLoss increments lossCount independently of trackLoss', () => {
@@ -383,7 +376,7 @@ describe('handleUnitDeath — direct behavioral tests', () => {
 
     handleUnitDeath(ctx, victim, {
       screenShake: 4, explosionSize: 12, debris: false,
-      decal: null, explodeLgSound: false,
+      explodeLgSound: false,
       attackerIsPlayer: true, trackLoss: false,
       friendlyFireLoss: true,
     });

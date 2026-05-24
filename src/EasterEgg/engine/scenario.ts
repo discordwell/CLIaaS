@@ -592,7 +592,7 @@ interface ScenarioData {
   toCarryOver: boolean; // surviving units carry to next mission
   toInherit: boolean;   // next mission inherits carry-over units
   baseStructures: Array<{ type: string; cell: number; house: string }>; // [Base] section pre-placed structures
-  smudges: Array<{ type: string; cell: number }>; // [SMUDGE] section scorch/crater marks
+  smudges: Array<{ type: string; cell: number; data?: number }>; // [SMUDGE] section scorch/crater marks
   theatre: string; // TEMPERATE, INTERIOR, etc.
   rawSections: Map<string, Map<string, string>>; // all INI sections for per-scenario overrides
   playerHouse: string; // house name from [Basic] Player= (e.g. 'Spain')
@@ -959,7 +959,8 @@ export function parseScenarioINI(text: string, scenarioId = ''): ScenarioData {
     for (const [, value] of smudgeSection) {
       const parts = value.split(',');
       if (parts.length >= 2) {
-        smudges.push({ type: parts[0], cell: parseInt(parts[1]) });
+        const data = parts[2] !== undefined ? parseInt(parts[2]) : undefined;
+        smudges.push({ type: parts[0], cell: parseInt(parts[1]), data });
       }
     }
   }
@@ -1532,7 +1533,8 @@ export interface MapStructure {
   desiredTurretFacing256?: number; // C++ PrimaryFacing.Desired() DirType
   turretRotAccum?: number;   // legacy/debug: remaining 256-step facing delta
   firingFlash?: number;      // ticks remaining for muzzle flash frame
-  flashCount?: number;        // C++ flasher.cpp:83 — Blushing damage-flash countdown (ticks). Odd values = white tint visible.
+  /** C++ FlasherClass FlashCount from Clicked_As_Target/electric zap, not ordinary damage. */
+  flashCount?: number;
   ironCurtainTicks?: number; // ticks remaining for Iron Curtain invulnerability (C++ house.cpp:2751)
   spiedBy?: number;           // C++ infantry.cpp:656 — bitmask of houses that have spied this building (1 << houseIndex), default 0
   originalHouse?: House;       // C++ building.cpp:3509 — original house before capture (for survivor halving on sell)
@@ -1728,6 +1730,19 @@ export const STRUCTURE_IMAGES: Record<string, string> = {
   FACF: 'fact', DOMF: 'dome', WEAF: 'weap',
 };
 
+// Structures whose body SHP is drawn through the owning house color remap.
+// C++ techno.cpp:4471-4478 calls House->Remap_Table only when the type has
+// IsRemappable=true; house.cpp:2310 then returns null for REMAP_NONE. Civilian
+// buildings such as V19 have REMAP_ALTERNATE but IsRemappable=false, so they
+// keep the source/gold art instead of taking the owner's color.
+export const OWNER_REMAPPED_STRUCTURE_TYPES = new Set([
+  'IRON', 'FCOM', 'ATEK', 'PDOX', 'WEAP', 'SYRD', 'SPEN',
+  'PBOX', 'HBOX', 'TSLA', 'GUN', 'AGUN', 'FTUR',
+  'FACT', 'FACF', 'WEAF', 'PROC', 'SILO', 'HPAD', 'DOME', 'GAP', 'SAM',
+  'MSLO', 'AFLD', 'POWR', 'APWR', 'STEK', 'HOSP', 'BIO',
+  'BARR', 'TENT', 'KENN', 'SYRF', 'SPEF', 'DOMF', 'FIX', 'MISS', 'QUEE',
+]);
+
 // C++ BuildingTypeClass::IsLegalTarget. Most structures are legal targets;
 // mines are BuildingClass technos but bdata.cpp marks them false, so
 // TechnoClass::Evaluate_Object must reject them for auto-acquisition.
@@ -1825,6 +1840,14 @@ export function structureCenterLeptons(s: Pick<MapStructure, 'cx' | 'cy'> & { ty
   return {
     lx: s.cx * 256 + off.lx,
     ly: s.cy * 256 + off.ly,
+  };
+}
+
+export function structureCenterCell(s: Pick<MapStructure, 'cx' | 'cy'> & { type?: string }): CellPos {
+  const center = structureCenterLeptons(s);
+  return {
+    cx: Math.floor(center.lx / 256),
+    cy: Math.floor(center.ly / 256),
   };
 }
 
@@ -1935,7 +1958,7 @@ export const STRUCTURE_OCCUPY_OFFSETS: Record<string, readonly StructureOffset[]
   AFLD: RECT_3X2,
   APWR: [[0, 1], [1, 1], [2, 1], [0, 2], [1, 2], [2, 2]],
   STEK: [[0, 1], [1, 1], [2, 1], [0, 2], [1, 2], [2, 2]],
-  ATEK: [[0, 1], [1, 1], [2, 1], [0, 2], [1, 2], [2, 2]],
+  ATEK: RECT_2X2,
   PROC: [[1, 0], [0, 1], [1, 1], [2, 1], [0, 2]],
   HPAD: RECT_2X2,
   GAP: [[0, 1]],
@@ -2476,7 +2499,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     // them before those rules can run.
     if (!isMineStructureType(s.type)) {
       for (const cell of getStructureOccupyCells(s.type, pos.cx, pos.cy)) {
-        map.setTerrain(cell.cx, cell.cy, Terrain.WALL);
+        map.setStructureFootprintBlock(cell.cx, cell.cy);
       }
     }
     // C++ building.cpp:785-790 creates a BIB smudge. Bibs reject building
@@ -2512,11 +2535,14 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
   // We store baseBlueprint (line 1597) for the AI rebuild system but do NOT create
   // duplicate visible structures here.
 
-  // Store smudge marks on the map for rendering
-  map.smudges = data.smudges.map(s => ({
-    type: s.type,
-    ...cellIndexToPos(s.cell),
-  }));
+  // Store smudge marks on the map for rendering. C++ SmudgeClass::Read_INI
+  // constructs real SmudgeClass objects, so scenario smudges still go through
+  // SmudgeClass::Mark and its Is_Clear_To_Move(SPEED_TRACK, true, true) gate.
+  map.smudges = [];
+  for (const smudge of data.smudges) {
+    const pos = cellIndexToPos(smudge.cell);
+    map.addSmudge(smudge.type, pos.cx, pos.cy, smudge.data ?? 0);
+  }
 
   // Store cell triggers on the map for runtime checks
   map.cellTriggers = data.cellTriggers;

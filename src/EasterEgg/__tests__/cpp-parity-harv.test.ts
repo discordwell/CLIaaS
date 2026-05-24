@@ -300,10 +300,10 @@ describe('HARV takeDamage (C++ techno.cpp TakeDamage)', () => {
     expect(harv.animState).toBe(AnimState.DIE);
   });
 
-  it('damageFlash is set on hit', () => {
+  it('ordinary damage does not start FlasherClass blushing', () => {
     const harv = makeHarv();
     harv.takeDamage(50);
-    expect(harv.damageFlash).toBe(4);
+    expect(harv.damageFlash).toBe(0);
   });
 
   it('invulnerable when ironCurtainTick > 0', () => {

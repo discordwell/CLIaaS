@@ -7,19 +7,54 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { UnitType, House, BODY_SHAPE } from '../engine/types';
-import { shadowTransAlphaForRGBA } from '../engine/shadow';
+import { RA_COLOR_BLACK, makeFadingTable, nearestPaletteIndex, shadowGhostRemapColor, shadowTransFadeForRGBA } from '../engine/shadow';
 
 beforeEach(() => resetEntityIds());
 
 describe('Shadow rendering prerequisites', () => {
-  it('SHADOW.SHP white/gray source pixels are remapped to black alpha like C++ ShadowTrans', () => {
+  it('classifies SHADOW.SHP source control pixels like display.cpp ShadowCols', () => {
     // C++ display.cpp:351-355,420 draws SHADOW.SHP with SHAPE_GHOST + ShadowTrans.
-    // Raw extracted white/gray pixels must not be rendered as visible white outlines.
-    expect(shadowTransAlphaForRGBA(16, 12, 12, 255)).toBe(130);
-    expect(shadowTransAlphaForRGBA(255, 255, 255, 255)).toBe(170);
-    expect(shadowTransAlphaForRGBA(170, 170, 170, 255)).toBe(250);
-    expect(shadowTransAlphaForRGBA(85, 85, 85, 255)).toBe(250);
-    expect(shadowTransAlphaForRGBA(0, 0, 0, 0)).toBe(0);
+    // Raw extracted white/gray pixels select a fading table; they are not
+    // browser alpha values.
+    expect(shadowTransFadeForRGBA(16, 12, 12, 255)).toBe(130);
+    expect(shadowTransFadeForRGBA(255, 255, 255, 255)).toBe(170);
+    expect(shadowTransFadeForRGBA(170, 170, 170, 255)).toBe(250);
+    expect(shadowTransFadeForRGBA(85, 85, 85, 255)).toBe(250);
+    expect(shadowTransFadeForRGBA(0, 0, 0, 0)).toBeNull();
+  });
+
+  it('SHADOW.SHP ghost remaps the destination palette index instead of alpha-blending black', () => {
+    const palette = Array.from({ length: 256 }, () => [255, 0, 255, 255]);
+    palette[0] = [0, 0, 0, 0];
+    palette[4] = [88, 252, 84, 130];
+    palette[12] = [0, 0, 0, 255];
+    palette[79] = [228, 216, 228, 255];
+    palette[137] = [112, 112, 112, 255];
+
+    const expectedTable = makeFadingTable(palette, RA_COLOR_BLACK, 130);
+    const destIndex = nearestPaletteIndex(palette, 228, 216, 228);
+    const expected = palette[expectedTable[destIndex]].slice(0, 3);
+    const remapped = shadowGhostRemapColor(palette, 228, 216, 228, 16, 12, 12, 255);
+
+    expect(remapped?.slice(0, 3)).toEqual(expected);
+    expect(remapped?.slice(0, 3)).toEqual([112, 112, 112]);
+    expect(remapped?.slice(0, 3)).not.toEqual([120, 113, 120]);
+  });
+
+  it('matches Build_Fading_Table black handling instead of skipping ColorType slots', () => {
+    const palette = Array.from({ length: 256 }, () => [255, 0, 255, 255]);
+    palette[0] = [0, 0, 0, 0];
+    palette[4] = [88, 252, 84, 130];
+    palette[12] = [0, 0, 0, 255];
+    palette[16] = [16, 12, 12, 255];
+    palette[79] = [228, 216, 228, 255];
+    const table = makeFadingTable(palette, RA_COLOR_BLACK, 250);
+
+    expect(table[0]).toBe(0);
+    expect(table[12]).toBe(16);
+    expect(table[79]).toBe(16);
+    expect(shadowGhostRemapColor(palette, 0, 0, 0, 168, 168, 168, 255)?.slice(0, 3)).toEqual([16, 12, 12]);
+    expect(shadowGhostRemapColor(palette, 228, 216, 228, 168, 168, 168, 255)?.slice(0, 3)).toEqual([16, 12, 12]);
   });
 
   it('vehicle spriteFrame uses BODY_SHAPE with bodyFacing32 index', () => {

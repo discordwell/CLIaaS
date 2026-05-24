@@ -1,6 +1,6 @@
 /**
  * Tests for bug fixes:
- * 1. Green shadows — palette index 4 must be transparent (shadow/remap marker)
+ * 1. Green shadows — palette index 4 must be a detectable shadow/remap marker
  * 2. Production filtering — expansion units need techPrereq so they don't appear in ant missions
  */
 import { describe, it, expect } from 'vitest';
@@ -8,10 +8,10 @@ import { getCanonicalProductionItems } from '../engine/rulesIniPipeline';
 const PRODUCTION_ITEMS = getCanonicalProductionItems();
 
 // ============================================================
-// Palette index 4 transparency (green shadow fix)
+// Palette index 4 shadow marker (green shadow fix)
 // Inline parsePalette logic since scripts/ is outside tsconfig
 // ============================================================
-describe('Palette index 4 transparency', () => {
+describe('Palette index 4 shadow marker', () => {
   /** Minimal parsePalette matching scripts/ra-assets/palette.ts */
   function parsePalette(data: Buffer): { colors: Uint8Array } {
     const colors = new Uint8Array(256 * 4);
@@ -19,14 +19,14 @@ describe('Palette index 4 transparency', () => {
       const r6 = data[i * 3];
       const g6 = data[i * 3 + 1];
       const b6 = data[i * 3 + 2];
-      colors[i * 4] = (r6 << 2) | (r6 >> 4);
-      colors[i * 4 + 1] = (g6 << 2) | (g6 >> 4);
-      colors[i * 4 + 2] = (b6 << 2) | (b6 >> 4);
+      colors[i * 4] = r6 << 2;
+      colors[i * 4 + 1] = g6 << 2;
+      colors[i * 4 + 2] = b6 << 2;
       if (i === 0) {
         colors[i * 4 + 3] = 0; // transparent background
       } else if (i === 4) {
-        // Shadow pixel: semi-transparent black (C++ SHAPE_GHOST, UShadowCols 130/255)
-        colors[i * 4] = 0; colors[i * 4 + 1] = 0; colors[i * 4 + 2] = 0;
+        // Shadow pixel sentinel: preserve LTGREEN RGB for palette-table
+        // lookups; alpha marks it for C++ UnitShadow at draw time.
         colors[i * 4 + 3] = 130;
       } else {
         colors[i * 4 + 3] = 255;
@@ -48,17 +48,24 @@ describe('Palette index 4 transparency', () => {
     expect(pal.colors[0 * 4 + 3]).toBe(0);
   });
 
-  it('index 4 is semi-transparent black (C++ SHAPE_GHOST shadow)', () => {
+  it('index 4 is encoded as the runtime shadow sentinel', () => {
     const pal = parsePalette(makePalette());
-    expect(pal.colors[4 * 4 + 0]).toBe(0);   // R = black
-    expect(pal.colors[4 * 4 + 1]).toBe(0);   // G = black
-    expect(pal.colors[4 * 4 + 2]).toBe(0);   // B = black
-    expect(pal.colors[4 * 4 + 3]).toBe(130); // A = 130/255 (C++ UShadowCols factor)
+    expect(pal.colors[4 * 4 + 0]).toBe(88);  // R = LTGREEN
+    expect(pal.colors[4 * 4 + 1]).toBe(252); // G = LTGREEN
+    expect(pal.colors[4 * 4 + 2]).toBe(84);  // B = LTGREEN
+    expect(pal.colors[4 * 4 + 3]).toBe(130); // sentinel alpha, not final shadow color
   });
 
   it('index 5 (regular color) is opaque', () => {
     const pal = parsePalette(makePalette());
     expect(pal.colors[5 * 4 + 3]).toBe(255);
+  });
+
+  it('regular colors use C++ RGBClass component scaling', () => {
+    const pal = parsePalette(makePalette());
+    expect(pal.colors[5 * 4 + 0]).toBe(252);
+    expect(pal.colors[5 * 4 + 1]).toBe(0);
+    expect(pal.colors[5 * 4 + 2]).toBe(0);
   });
 
   it('index 1 through 3 are opaque', () => {

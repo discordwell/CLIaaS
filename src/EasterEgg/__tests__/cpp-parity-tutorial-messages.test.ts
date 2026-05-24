@@ -98,9 +98,9 @@ describe('MessageListClass visual placement', () => {
       'Find Einstein.',
       0,
       8 * RESFACTOR,
-      PCOLOR_GREEN_FONT_RAMP[0],
-      '6pt',
-      { align: 'left', fullShadow: '#000000', gradient: PCOLOR_GREEN_FONT_RAMP },
+      PCOLOR_GREEN_FONT_RAMP[2],
+      'grad6',
+      { align: 'left', indexedPalette: expect.any(Array), letterSpacing: -1 },
     ]);
     expect(drawBitmapText.mock.calls[1][3]).toBe(15 * RESFACTOR);
     expect(drawBitmapText.mock.calls[2][3]).toBe(22 * RESFACTOR);

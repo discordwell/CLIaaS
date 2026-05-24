@@ -22,7 +22,7 @@
  */
 
 import { Entity, CloakState, threatScore as computeThreatScore, type TeamMissionEntry } from './entity';
-import { House, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, type CellPos, type LeptonPos, CELL_SIZE, LEPTON_SIZE, MAP_CELLS, UNIT_STATS, UnitType, SpeedClass, pixelToLepton, leptonToPixel, cellTargetToLepton, coordTargetRoundTripLepton, cellIndexToPos, PRODUCTION_ITEMS } from './types';
+import { House, Mission, MISSION_CONTROL, worldDist, worldDistLeptons, leptonDist, STRAY_DISTANCE, type WorldPos, type CellPos, type LeptonPos, CELL_SIZE, LEPTON_SIZE, MAP_CELLS, UNIT_STATS, UnitType, SpeedClass, pixelToLepton, leptonToPixel, cellTargetToLepton, coordTargetRoundTripLepton, cellIndexToPos, PRODUCTION_ITEMS, INFANTRY_ANIMS } from './types';
 import {
   type MapStructure,
   STRUCTURE_WEAPONS,
@@ -913,8 +913,9 @@ export class Team {
             // C++ InfantryClass::Do_Action special-case (infantry.cpp:1975):
             // team activation DO_GESTURE1/2 maps spies to DO_IDLE1/2 and
             // consumes Random_Pick(0,1), keeping the animation interruptible.
-            ScenarioRandom.nextInRange(0, 1);
-            m.startIdleAnimDoing(ctx?.tick ?? -1);
+            const idlePick = ScenarioRandom.nextInRange(0, 1);
+            const anim = INFANTRY_ANIMS[m.type] ?? INFANTRY_ANIMS.E1;
+            m.startIdleAnimDoing(ctx?.tick ?? -1, idlePick === 0 ? anim.idle : (anim.idle2 ?? anim.idle));
             continue;
           }
           // Phase 7B — track Doing state for C++-faithful Commence gate

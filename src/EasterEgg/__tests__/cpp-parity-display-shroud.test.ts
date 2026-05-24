@@ -1,4 +1,6 @@
 /**
+ * @vitest-environment jsdom
+ *
  * C++ visual parity: display shroud is Map_Cell state, not current gameplay sight.
  *
  * Red Alert stores CellClass::IsMapped and CellClass::IsVisible for rendering
@@ -6,10 +8,19 @@
  * sight still downgrades visible cells to fog for targeting/discovery behavior.
  */
 
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { Game } from '../engine/index';
+import { Entity } from '../engine/entity';
 import { GameMap } from '../engine/map';
-import { CELL_SIZE } from '../engine/types';
+import { CELL_SIZE, House, RESFACTOR, UnitType } from '../engine/types';
 import { revealAroundCell } from '../engine/fog';
+
+class FakeAudio {
+  src = ''; preload = ''; volume = 1; currentTime = 0; muted = false; loop = false;
+  addEventListener(): void {} removeEventListener(): void {}
+  play(): Promise<void> { return Promise.resolve(); } pause(): void {}
+  cloneNode(): FakeAudio { return new FakeAudio(); }
+}
 
 function unit(cx: number, cy: number, sight: number): { x: number; y: number; sight: number } {
   return {
@@ -18,6 +29,20 @@ function unit(cx: number, cy: number, sight: number): { x: number; y: number; si
     sight,
   };
 }
+
+function createCanvas(): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 320 * RESFACTOR;
+  canvas.height = 200 * RESFACTOR;
+  return canvas;
+}
+
+beforeAll(() => {
+  vi.stubGlobal('Audio', FakeAudio);
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => (
+    { imageSmoothingEnabled: false } as unknown as CanvasRenderingContext2D
+  ));
+});
 
 describe('DisplayClass::Map_Cell shroud state', () => {
   it('seeds the visible perimeter ring around scenario bounds', () => {
@@ -108,6 +133,38 @@ describe('DisplayClass::Map_Cell shroud state', () => {
     expect(map.getVisibility(65, 65)).toBe(0);
     expect(map.getVisibility(64, 62)).toBe(2);
     expect(map.getVisibility(64, 60)).toBe(2);
+  });
+
+  it('uses full Look once after C++ DriveClass F_D two-cell tracks', () => {
+    // drive.cpp:1247 sets IsPlanningToLook when an F_D track shifts Path[] by
+    // two cells. unit.cpp/vessel.cpp then call Look(false) for that next
+    // PCP_END only, revealing the center/interior that incremental Look skips.
+    const game = new Game(createCanvas());
+    const lst = new Entity(
+      UnitType.V_LST,
+      House.Spain,
+      64 * CELL_SIZE + CELL_SIZE / 2,
+      64 * CELL_SIZE + CELL_SIZE / 2,
+    );
+
+    (game as unknown as {
+      runMobileLookForPlayer(entity: Entity): void;
+    }).runMobileLookForPlayer(lst);
+
+    expect(game.map.getVisibility(64, 64)).toBe(0);
+    expect(game.map.getDisplayVisibility(64, 64)).toBe(0);
+    expect(game.map.getVisibility(64, 58)).toBe(2);
+
+    game.map.shroudAll();
+    lst.isPlanningToLook = true;
+
+    (game as unknown as {
+      runMobileLookForPlayer(entity: Entity): void;
+    }).runMobileLookForPlayer(lst);
+
+    expect(game.map.getVisibility(64, 64)).toBe(2);
+    expect(game.map.getDisplayVisibility(64, 64)).toBe(2);
+    expect(lst.isPlanningToLook).toBe(false);
   });
 
   it('does not erase display mapping when current gameplay sight downgrades', () => {

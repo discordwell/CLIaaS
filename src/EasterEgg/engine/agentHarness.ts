@@ -71,6 +71,13 @@ export interface AgentWeapon {
   sup: boolean;
 }
 
+export interface AgentSmudge {
+  type: string;
+  cx: number;
+  cy: number;
+  data: number;
+}
+
 export interface AgentQueueItem {
   t: string;       // item type
   name: string;    // display name
@@ -137,6 +144,7 @@ export interface AgentState {
   allowWin: boolean;
   globals: number[];
   weapons: AgentWeapon[];
+  smudges: AgentSmudge[];
   unitsLeftMap: number;
   civiliansEvacuated: number;
   triggers: { name: string; fired: boolean; house: number; e1: number; e1d: number; a1: number; a1d: number }[];
@@ -339,6 +347,12 @@ export function serializeState(game: Game): AgentState {
     name,
     sup: !!stats.isSupressed,
   }));
+  const smudges: AgentSmudge[] = game.map.smudges.map(s => ({
+    type: s.type,
+    cx: s.cx,
+    cy: s.cy,
+    data: s.data ?? 0,
+  }));
 
   return {
     tick: game.tick,
@@ -373,6 +387,7 @@ export function serializeState(game: Game): AgentState {
     allowWin: ((game as unknown as Record<string, unknown>).allowWin as number) <= 0,
     globals: [...((game as unknown as Record<string, unknown>).globals as Set<number> ?? [])],
     weapons,
+    smudges,
     unitsLeftMap: ((game as unknown as Record<string, unknown>).unitsLeftMap as number) ?? 0,
     civiliansEvacuated: ((game as unknown as Record<string, unknown>).civiliansEvacuated as number) ?? 0,
     rngState: ScenarioRandom.seed, // RNG seed for parity comparison

@@ -85,7 +85,7 @@ describe('C++ agent-step render phase', () => {
     expect(powerAiSpy).toHaveBeenCalledTimes(3);
   });
 
-  it('advances credit display before the captured frame, like CreditClass::AI before Map.Render', () => {
+  it('does not advance credit display on C++ Frame 0', () => {
     const game = new Game(createCanvas());
     let renderedDisplayCredits = -1;
 
@@ -102,6 +102,27 @@ describe('C++ agent-step render phase', () => {
     };
 
     game.step(1);
+
+    expect(renderedDisplayCredits).toBe(0);
+  });
+
+  it('advances credit display before captured frames after C++ Frame 0', () => {
+    const game = new Game(createCanvas());
+    let renderedDisplayCredits = -1;
+
+    (game as any).state = 'playing';
+    (game as any).tick = 0;
+    (game as any).credits = 5000;
+    (game as any).displayCredits = 0;
+    (game as any).displayCreditsCountdown = 0;
+    (game as any).render = function renderProbe(this: Game) {
+      renderedDisplayCredits = (this as any).displayCredits;
+    };
+    (game as any).update = function updateProbe(this: Game) {
+      (this as any).tick += 1;
+    };
+
+    game.step(2);
 
     expect(renderedDisplayCredits).toBe(143);
   });

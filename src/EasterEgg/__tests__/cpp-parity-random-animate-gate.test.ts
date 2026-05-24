@@ -237,6 +237,7 @@ describe('C++ Random_Animate gate (Phase 7A contract)', () => {
     it('flag ON: doing === "walk" transitions to "stand_ready" when not driving', () => {
       const e = mkInfantry();
       e.doing = 'walk';
+      e.doingStage = e.infantryWalkDoingCount();
       e.isDriving = false;
       e.doingAI();
       if (RANDOM_ANIMATE_CPP_FAITHFUL) {

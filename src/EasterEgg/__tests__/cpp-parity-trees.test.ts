@@ -5,7 +5,7 @@
  * clump immunity, and destruction behavior against C++ Red Alert source code.
  *
  * Source references:
- *   RA/tdata.cpp:57-77       — Occupy_List offset arrays (_List0010, _List10, etc.)
+ *   RA/tdata.cpp:57-77       — Occupy_List/Overlap_List offset arrays (_List0010, _List10, etc.)
  *   RA/tdata.cpp:246-424     — Tree type definitions (T01-T17, TC01-TC05)
  *   TD/tdata.cpp:50-52       — #define TREE_NORMAL 600, TREE_WEAK 400, TREE_STRONG 800
  *   RA/terrain.cpp:108-151   — Take_Damage: SA immunity, IsImmune check, HP reduction
@@ -20,7 +20,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   GameMap, Terrain, MoveResult,
-  TREE_OCCUPY, TREE_MAX_HP, TREE_CENTER_OFFSET,
+  TREE_OCCUPY, TREE_OVERLAP, TREE_MAX_HP, TREE_CENTER_OFFSET,
   type MapTree,
 } from '../engine/map';
 import { applySplashDamage, SPLASH_RADIUS, type CombatContext } from '../engine/combat';
@@ -172,6 +172,44 @@ describe('Tree Occupy_List patterns — C++ RA/tdata.cpp:57-77, 246-424', () => 
     expect(TREE_OCCUPY['t09']).toBeUndefined();
     expect(TREE_OCCUPY['t18']).toBeUndefined();
   });
+});
+
+describe('Tree Overlap_List patterns — C++ RA/tdata.cpp:57-77, 246-424', () => {
+  it.each([
+    ['t01', [[0, 0], [1, 1]]],
+    ['t02', [[0, 0], [1, 1]]],
+    ['t03', [[0, 0], [1, 1]]],
+    ['t05', [[0, 0], [1, 1]]],
+    ['t06', [[0, 0], [1, 1]]],
+    ['t07', [[0, 0], [1, 1]]],
+    ['t08', [[1, 0]]],
+    ['t10', [[0, 0], [1, 0]]],
+    ['t11', [[0, 0], [1, 0]]],
+    ['t12', [[0, 0], [1, 1]]],
+    ['t13', [[0, 0], [1, 0], [1, 1]]],
+    ['t14', [[0, 0], [1, 0]]],
+    ['t15', [[0, 0], [1, 0]]],
+    ['t16', [[0, 0], [1, 1]]],
+    ['t17', [[0, 0], [1, 1]]],
+  ] as [string, [number, number][]][])(
+    '%s overlap list matches C++ tdata.cpp',
+    (type, expected) => {
+      expect(TREE_OVERLAP[type]).toEqual(expected);
+    },
+  );
+
+  it.each([
+    ['tc01', [[0, 0], [1, 0], [2, 1]]],
+    ['tc02', [[0, 0], [2, 0], [2, 1]]],
+    ['tc03', [[2, 0]]],
+    ['tc04', [[0, 0], [1, 0], [2, 0], [3, 1], [1, 2], [2, 2]]],
+    ['tc05', [[0, 0], [1, 0], [3, 1], [0, 2], [3, 2]]],
+  ] as [string, [number, number][]][])(
+    '%s clump overlap list matches C++ tdata.cpp',
+    (type, expected) => {
+      expect(TREE_OVERLAP[type]).toEqual(expected);
+    },
+  );
 });
 
 // ════════════════════════════════════════════════════════════════════
@@ -521,6 +559,25 @@ describe('Tree destruction — C++ terrain.cpp Start_To_Crumble + destructor', (
     expect(map.getTreeAtCell(10, 11)).toBe(tree);
     map.destroyTree(tree);
     expect(map.getTreeAtCell(10, 11)).toBeUndefined();
+  });
+
+  it('terrain radar lookup uses C++ Overlap_List without changing movement occupancy', () => {
+    const map = new GameMap();
+    map.setBounds(0, 0, 128, 128);
+    const occupyCells = TREE_OCCUPY['tc04']!.map(([dx, dy]) => (29 + dx) + (80 + dy) * 128);
+    const tree: MapTree = {
+      type: 'tc04', cx: 29, cy: 80,
+      hp: TREE_MAX_HP, maxHp: TREE_MAX_HP,
+      immune: true, occupyCells,
+    };
+    map.addTree(tree);
+
+    expect(map.isTreeOccupied(31, 80)).toBe(false);
+    expect(map.getTreeAtCell(31, 80)).toBeUndefined();
+    expect(map.getTerrainObjectsForRadarCell(31, 80)).toEqual([tree]);
+
+    map.destroyTree(tree);
+    expect(map.getTerrainObjectsForRadarCell(31, 80)).toEqual([]);
   });
 });
 

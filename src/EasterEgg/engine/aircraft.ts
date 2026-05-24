@@ -251,6 +251,21 @@ function setDesiredAircraftSecondaryFacing256(entity: Entity, dir256: number): v
   entity.desiredTurretFacing = dir256ToFacing8(dir);
 }
 
+function aircraftPoseDir256(entity: Entity): number {
+  // C++ AircraftClass::Pose_Dir: TRAN lands facing north, fixed-wing faces
+  // east down the runway, other helicopters use northeast.
+  if (entity.type === UnitType.V_TRAN) return 0;
+  if (entity.isFixedWing) return 64;
+  return 32;
+}
+
+function aircraftTargetFacing256(entity: Entity): number | null {
+  const targetPos = getAircraftTargetPos(entity);
+  if (targetPos) return directionTo256(entity.pos, targetPos);
+  if (entity.forceFirePos) return directionTo256(entity.pos, entity.forceFirePos);
+  return null;
+}
+
 function rotateAircraftSecondaryFacing(entity: Entity): void {
   if (!entity.stats.isAircraft || entity.isFixedWing) return;
 
@@ -2102,6 +2117,17 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
           }
 
           const distance = leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly);
+          if (distance < 0x0080) {
+            setDesiredAircraftSecondaryFacing256(
+              entity,
+              aircraftTargetFacing256(entity) ?? aircraftPoseDir256(entity),
+            );
+          } else {
+            setDesiredAircraftSecondaryFacing256(
+              entity,
+              directionToLeptons256(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly),
+            );
+          }
           aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity), 1);
           if (distance < 0x0080) {
             if (distance < 0x0010) {
@@ -2191,6 +2217,17 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       // The slowdown approximates WASM's ~139 tick total deployment time (search
       // 14 + approach 104 + land 24 + eject 1 = 143 ≈ WASM's 139).
       if (!entity.moveTarget) { entity.aircraftState = 'returning'; return true; }
+      const distance = leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly);
+      if (distance < 0x0100) {
+        setDesiredAircraftSecondaryFacing256(entity, aircraftPoseDir256(entity));
+      } else {
+        setDesiredAircraftSecondaryFacing256(
+          entity,
+          entity.desiredFacing256 >= 0
+            ? entity.desiredFacing256
+            : directionToLeptons256(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly),
+        );
+      }
       const arrived = aircraftFlyInFacing(entity, entity.moveTarget, ctx.movementSpeed(entity));
       if (arrived) {
         entity.aircraftState = 'unload_land';

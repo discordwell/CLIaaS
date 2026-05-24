@@ -576,11 +576,11 @@ describe('MRJ takeDamage behavior', () => {
     expect(mrj.hp).toBe(0);
   });
 
-  it('damage flash activates on hit', () => {
+  it('ordinary damage does not start FlasherClass blushing', () => {
     const mrj = makeEntity(UnitType.V_MRJ, House.Spain, 100, 100);
     expect(mrj.damageFlash).toBe(0);
     mrj.takeDamage(10, 'SA');
-    expect(mrj.damageFlash).toBe(4);
+    expect(mrj.damageFlash).toBe(0);
   });
 
   it('does not take damage when invulnerable (Iron Curtain)', () => {

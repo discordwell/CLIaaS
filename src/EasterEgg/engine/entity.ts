@@ -5,6 +5,7 @@
 import {
   type WorldPos, type CellPos, type UnitStats, type WeaponStats,
   type WarheadProps, type WarheadType, type ArmorType, type LeptonPos,
+  type DoInfo,
   Dir, Mission, AnimState, House, UnitType, Stance,
   UNIT_STATS, WEAPON_STATS, CELL_SIZE, MPH_TO_PX,
   SpeedClass,
@@ -262,7 +263,10 @@ export class Entity {
   // Death / visual
   deathTick = 0;       // ticks since death (for corpse fade + cleanup)
   deathVariant = 0;    // C++ InfantryDeath: 0=instant, 1=twirl, 2=explode, 3=flying, 4=burn, 5=electro
-  damageFlash = 0;     // ticks remaining for damage flash effect
+  cppCorpseCreated = false; // C++ follow-up CORPSE AnimClass allocation has been attempted
+  cppDeathFinalized = false; // C++ delete-this death cleanup has run
+  /** C++ FlasherClass FlashCount. Set by Clicked_As_Target/electric zap, not ordinary damage. */
+  damageFlash = 0;
 
   // C++ MissionClass::Timer — gates when mission handler fires.
   // Counts down each tick. Handler runs when timer reaches 0.
@@ -283,7 +287,7 @@ export class Entity {
   // C++ MasterDoControls.Interrupt=false for all gesture types. Used by the
   // STAGE A/E Commence gate to defer MissionQueue pop until animation
   // completes (infantry.cpp:1208 — `Doing == DO_NOTHING || Interrupt`).
-  doing: 'nothing' | 'stand_ready' | 'walk' | 'fire' | 'idle_anim' | 'gesture' | 'lie_down' | 'prone' | 'get_up' | 'dog_maul' = 'nothing';
+  doing: 'nothing' | 'stand_ready' | 'walk' | 'crawl' | 'fire' | 'idle_anim' | 'gesture' | 'lie_down' | 'prone' | 'get_up' | 'dog_maul' = 'nothing';
   // C++ StageClass backing the current infantry Doing animation. Only a subset
   // of Doing values currently need logic, but the fields mirror Stage/Rate/Timer
   // so Firing_AI can read Fetch_Stage() even when Do_Action(DO_FIRE_*) is blocked
@@ -461,6 +465,20 @@ export class Entity {
     }
   }
 
+  private drivingDoingAction(): 'walk' | 'crawl' {
+    // C++ Target_Legal is a raw TARGET_NONE check (function.h:933), so a
+    // dog's TarCom is legal when TS still has any target reference, regardless
+    // of the target object's current health bookkeeping.
+    const hasLegalTarCom =
+      this.target !== null ||
+      this.targetStructure !== null ||
+      this.forceFirePos !== null;
+    const shouldCrawl = this.type === UnitType.I_DOG
+      ? hasLegalTarCom
+      : this.isProne;
+    return shouldCrawl ? 'crawl' : 'walk';
+  }
+
   doingAI(tick = -1): void {
     if (!this.stats.isInfantry) return;
     if (this.doing === 'lie_down' && this.doingStage >= this.infantryLieDownDoingCount()) {
@@ -516,20 +534,31 @@ export class Entity {
       this.isFiringAnim = false;
       this.firingAnimTicks = 0;
     }
+    const walkAnimComplete =
+      this.doing === 'walk' && this.doingStage >= this.infantryWalkDoingCount();
+    const crawlAnimComplete =
+      this.doing === 'crawl' && this.doingStage >= this.infantryCrawlDoingCount();
+    const idleAnimComplete =
+      this.doing === 'idle_anim' && this.doingStage >= this.infantryIdleDoingCount();
     const canTransition =
       this.doing === 'nothing' ||
-      this.doing === 'idle_anim' ||
+      idleAnimComplete ||
       fireAnimComplete ||
       this.doing === 'stand_ready' ||
-      (RANDOM_ANIMATE_CPP_FAITHFUL && this.doing === 'walk') ||
+      (RANDOM_ANIMATE_CPP_FAITHFUL && (walkAnimComplete || crawlAnimComplete)) ||
       (this.doing === 'gesture' && this.nonInterruptAnimTicks <= 0);
     if (canTransition) {
       const previous = this.doing;
       if (this.doing === 'gesture') {
         this.clearFirePrepLatchedToBlockedDoing();
       }
+      if (this.doing === 'idle_anim') {
+        this.idleDoInfo = null;
+      }
       if (this.isDriving) {
-        this.doing = 'walk';
+        // C++ infantry.cpp:3714-3726 chooses DO_CRAWL for dogs with a legal
+        // TarCom and for prone non-dogs; dog crawl art is the run animation.
+        this.doing = this.drivingDoingAction();
         this.doingStage = 0;
         this.doingRate = 2;
         this.doingRateTimer = 2;
@@ -574,12 +603,12 @@ export class Entity {
     this.noteDoingOverlapDown(previous, tick);
   }
 
-  /** C++ InfantryClass::Start_Driver -> Do_Action(DO_WALK). */
+  /** C++ InfantryClass::Movement_AI after Start_Driver -> Do_Action(DO_WALK/DO_CRAWL). */
   doWalkAction(tick: number): void {
     if (!this.stats.isInfantry) return;
     if (this.doing !== 'nothing' && !this.isDoingInterruptible()) return;
     const previous = this.doing;
-    this.doing = 'walk';
+    this.doing = this.drivingDoingAction();
     this.doingStage = 0;
     this.doingRate = 2;
     this.doingRateTimer = 2;
@@ -605,7 +634,8 @@ export class Entity {
   startGestureDoing(tick: number, gestureDoInfo?: { frame: number; count: number; jump: number } | null): void {
     if (!this.stats.isInfantry) return;
     const previous = this.doing;
-    this.gestureDoInfo = gestureDoInfo ?? this.gestureDoInfo;
+    this.gestureDoInfo = gestureDoInfo ?? null;
+    this.idleDoInfo = null;
     this.nonInterruptAnimTicks = this.infantryGestureDurationTicks();
     this.nonInterruptAnimSetTick = tick;
     this.doing = 'gesture';
@@ -617,10 +647,12 @@ export class Entity {
   }
 
   /** C++ InfantryClass::Do_Action(DO_IDLE1/DO_IDLE2). */
-  startIdleAnimDoing(tick: number): void {
+  startIdleAnimDoing(tick: number, idleDoInfo?: DoInfo | null): void {
     if (!this.stats.isInfantry) return;
     if (this.doing !== 'nothing' && !this.isDoingInterruptible()) return;
     const previous = this.doing;
+    const anim = INFANTRY_ANIMS[this.type] ?? INFANTRY_ANIMS.E1;
+    this.idleDoInfo = idleDoInfo ?? anim.idle ?? anim.ready;
     this.doing = 'idle_anim';
     this.doingStage = 0;
     this.doingRate = 2;
@@ -642,8 +674,9 @@ export class Entity {
     if (this.type === UnitType.I_SPY) {
       // C++ InfantryClass::Do_Action special-case: spy gesture/salute requests
       // remap to DO_IDLE1/2 and consume Random_Pick(0,1).
-      ScenarioRandom.nextInRange(0, 1);
-      this.startIdleAnimDoing(tick);
+      const anim = INFANTRY_ANIMS[this.type] ?? INFANTRY_ANIMS.E1;
+      const idlePick = ScenarioRandom.nextInRange(0, 1);
+      this.startIdleAnimDoing(tick, idlePick === 0 ? anim.idle : (anim.idle2 ?? anim.idle));
       return;
     }
 
@@ -671,6 +704,23 @@ export class Entity {
     if (!anim) return 0;
     if (this.isProne) return (anim.fireProne ?? anim.fire).count;
     return anim.fire.count;
+  }
+
+  /** C++ per-type DoControls[DO_WALK].Count. */
+  infantryWalkDoingCount(): number {
+    return INFANTRY_ANIMS[this.type]?.walk.count ?? 1;
+  }
+
+  /** C++ per-type DoControls[DO_CRAWL].Count; dogs use crawl as their run art. */
+  infantryCrawlDoingCount(): number {
+    const anim = INFANTRY_ANIMS[this.type];
+    return anim?.crawl?.count ?? anim?.walk.count ?? 1;
+  }
+
+  /** C++ per-type DoControls[DO_IDLE1/DO_IDLE2].Count. */
+  infantryIdleDoingCount(): number {
+    const anim = INFANTRY_ANIMS[this.type];
+    return this.idleDoInfo?.count ?? anim?.idle?.count ?? anim?.ready.count ?? 1;
   }
 
   /** C++ DOG DoControls[DO_DOG_MAUL] at idata.cpp:77: {106, 12, 14}. */
@@ -841,6 +891,9 @@ export class Entity {
   trackFlags = 0;      // TrackControl flags (F_T|F_X|F_Y) for Smooth_Turn transformation
   trackCellSpan = 1;   // cells covered by current track: 1=short, 2=long 2-cell track
   trackControlIndex = -1; // C++ TrackNumber: index into TrackControl[] table (0-66), for track jumping
+  // C++ DriveClass::IsPlanningToLook — F_D two-cell tracks force the next
+  // UnitClass/VesselClass PCP_END Look() to run a full Sight_From pass.
+  isPlanningToLook = false;
   speedAccum = 0;      // C++ SpeedAccum: sub-pixel movement remainder (leptons)
   // C++ FootClass::Speed throttle for active DriveClass tracks. Start_Of_Move
   // sets this from destination terrain; track jumps preserve it via
@@ -1014,6 +1067,7 @@ export class Entity {
   fear = 0;
   isProne = false;
   prevIsProne = false; // G3: track prone transitions for LIE_DOWN/GET_UP animations
+  idleDoInfo: DoInfo | null = null; // Active C++ DO_IDLE1/DO_IDLE2 selected by Random_Animate.
   gestureDoInfo: { frame: number; count: number; jump: number } | null = null; // G8: active gesture/salute DoInfo
   static readonly FEAR_ANXIOUS = 10;
   static readonly FEAR_SCARED = 100;
@@ -1111,6 +1165,10 @@ export class Entity {
    *  Applied when at FLIGHT_ALTITUDE and speed < 3 (hovering). Pattern repeats every 16 ticks.
    *  cpp-parity: {0,0,0,0,1,1,1,0,0,0,0,0,-1,-1,-1,0} indexed by frame%16. */
   hoverJitter = 0;
+  /** C++ AircraftClass rotor StageClass.
+   *  Constructors Set_Rate(1)/Set_Stage(0), and the first Graphic_Logic pass
+   *  leaves Fetch_Stage()==0. Start at -1 so the first TS tick reaches 0. */
+  aircraftRotorStage = -1;
   /** C++ building.cpp:1298 — IsTechnician flag on infantry survivors.
    *  Set when infantry is spawned from building sell/destruction (E1 only).
    *  cpp-parity: building.cpp:3473 — IsNominal infantry get IsTechnician=true. */
@@ -1371,53 +1429,100 @@ export class Entity {
       const anim = INFANTRY_ANIMS[this.type] ?? INFANTRY_ANIMS.E1;
       const facing256 = this.bodyFacing256 >= 0 ? this.bodyFacing256 & 0xff : (dir * 32) & 0xff;
       const sdir = INFANTRY_HUMAN_SHAPE[dir256ToFacing32(facing256)] ?? 0;
+      const frameFromDoInfo = (d: { frame: number; count: number; jump: number }, stage: number, clamp = false) => {
+        const count = Math.max(d.count, 1);
+        const stageFrame = clamp ? Math.min(stage, count - 1) : stage % count;
+        return d.frame + (d.jump ? sdir * d.jump : 0) + stageFrame;
+      };
+
+      if (this.animState === AnimState.DIE || !this.alive) {
+        // C++ InfantryClass::Shape_Number uses death Doing sequences until the
+        // infantry object is deleted; stale movement/prone Doing state must not
+        // override the death visual.
+        let d: { frame: number; count: number; jump: number } | undefined;
+        switch (this.deathVariant) {
+          case 1: d = anim.die1; break;
+          case 2: d = anim.die2 ?? anim.die1; break;
+          case 3: d = anim.die4 ?? anim.die2 ?? anim.die1; break;
+          case 4: d = anim.die5 ?? anim.die2 ?? anim.die1; break;
+          case 5: d = anim.die5 ?? anim.die2 ?? anim.die1; break;
+          default: d = anim.die1;
+        }
+        return d.frame + Math.min(this.animFrame, Math.max(d.count - 1, 0));
+      }
+
+      if (this.doing !== 'nothing') {
+        switch (this.doing) {
+          case 'stand_ready': {
+            const d = (this.isProne && anim.prone) ? anim.prone : anim.ready;
+            return frameFromDoInfo(d, 0);
+          }
+          case 'walk': {
+            const d = anim.walk;
+            return frameFromDoInfo(d, this.doingStage);
+          }
+          case 'crawl': {
+            const d = anim.crawl ?? anim.walk;
+            return frameFromDoInfo(d, this.doingStage);
+          }
+          case 'fire': {
+            const d = (this.isProne && anim.fireProne) ? anim.fireProne : anim.fire;
+            if (!d.count) return 0;
+            return frameFromDoInfo(d, this.doingStage);
+          }
+          case 'idle_anim': {
+            const d = this.idleDoInfo ?? anim.idle ?? anim.ready;
+            return frameFromDoInfo(d, this.doingStage);
+          }
+          case 'gesture': {
+            const d = this.gestureDoInfo ?? anim.gesture1 ?? anim.salute1 ?? anim.gesture2 ?? anim.salute2 ?? anim.ready;
+            return frameFromDoInfo(d, this.doingStage, true);
+          }
+          case 'lie_down': {
+            const d = anim.lieDown ?? anim.ready;
+            return frameFromDoInfo(d, this.doingStage, true);
+          }
+          case 'prone': {
+            const d = anim.prone ?? anim.ready;
+            return frameFromDoInfo(d, 0);
+          }
+          case 'get_up': {
+            const d = anim.getUp ?? anim.ready;
+            return frameFromDoInfo(d, this.doingStage, true);
+          }
+          case 'dog_maul':
+            break;
+        }
+      }
+
       switch (this.animState) {
         case AnimState.WALK: {
           // Prone crawl if isProne and crawl animation exists
           const d = (this.isProne && anim.crawl) ? anim.crawl : anim.walk;
-          return d.frame + sdir * d.jump + (this.animFrame % Math.max(d.count, 1));
+          return frameFromDoInfo(d, this.animFrame);
         }
         case AnimState.ATTACK: {
           // Prone fire if isProne and fireProne animation exists
           const d = (this.isProne && anim.fireProne) ? anim.fireProne : anim.fire;
           if (!d.count) return 0; // no fire animation (engineer)
-          return d.frame + sdir * d.jump + (this.animFrame % d.count);
-        }
-        case AnimState.DIE: {
-          // C++ infantry.cpp:383-416 InfDeath mapping:
-          //   0=delete immediately, 1=DO_GUN_DEATH, 2=DO_EXPLOSION_DEATH,
-          //   3=DO_GRENADE_DEATH, 4=DO_FIRE_DEATH, 5=electro anim + delete.
-          // The DIE state should normally only render variants 1..4.
-          let d: { frame: number; count: number; jump: number } | undefined;
-          switch (this.deathVariant) {
-            case 1: d = anim.die1; break;
-            case 2: d = anim.die2 ?? anim.die1; break;
-            case 3: d = anim.die4 ?? anim.die2 ?? anim.die1; break;
-            case 4: d = anim.die5 ?? anim.die2 ?? anim.die1; break;
-            case 5: d = anim.die5 ?? anim.die2 ?? anim.die1; break;
-            default: d = anim.die1;
-          }
-          return d.frame + Math.min(this.animFrame, Math.max(d.count - 1, 0));
+          return frameFromDoInfo(d, this.animFrame);
         }
         // G3: LIE_DOWN transition animation — plays while going from standing to prone
         case AnimState.LIE_DOWN: {
           const d = anim.lieDown ?? anim.ready;
-          return d.frame + sdir * d.jump + Math.min(this.animFrame, Math.max(d.count - 1, 0));
+          return frameFromDoInfo(d, this.animFrame, true);
         }
         // G3: GET_UP transition animation — plays while going from prone to standing
         case AnimState.GET_UP: {
           const d = anim.getUp ?? anim.ready;
-          return d.frame + sdir * d.jump + Math.min(this.animFrame, Math.max(d.count - 1, 0));
+          return frameFromDoInfo(d, this.animFrame, true);
         }
         // G8: Gesture/Salute animation — triggered during idle fidget
         case AnimState.GESTURE: {
           if (this.gestureDoInfo) {
             const d = this.gestureDoInfo;
             // Directional gestures (jump > 0) use facing, non-directional (jump == 0) don't
-            if (d.jump > 0) {
-              return d.frame + sdir * d.jump + Math.min(this.animFrame, Math.max(d.count - 1, 0));
-            }
-            return d.frame + Math.min(this.animFrame, Math.max(d.count - 1, 0));
+            return frameFromDoInfo(d, this.animFrame, true);
           }
           // Fallback to ready if gestureDoInfo somehow null
           const d = anim.ready;
@@ -1427,24 +1532,10 @@ export class Entity {
           // Prone idle
           if (this.isProne && anim.prone) {
             const d = anim.prone;
-            return d.frame + sdir * d.jump;
-          }
-          // IA1: Idle fidget after random delay (C++ infantry.cpp:1748-1821 — Random_Pick timing)
-          if (anim.idle && this.animFrame > this.fidgetDelay) {
-            // C++ selects between idle1 and idle2 randomly
-            const useIdle2 = anim.idle2 && this.fidgetVariant >= 0.5;
-            const d = useIdle2 ? anim.idle2! : anim.idle;
-            return d.frame + (this.animFrame % d.count);
-          }
-          // G5: DO_STAND_GUARD uses anim.guard when unit is in guard/area-guard mission.
-          // C++ infantry.cpp Shape_Number reads DoControls[DO_STAND_GUARD] when Doing==DO_STAND_GUARD.
-          // Falls back to ready for types without a separate guard pose.
-          if ((this.mission === Mission.GUARD || this.mission === Mission.AREA_GUARD) && anim.guard) {
-            const d = anim.guard;
-            return d.frame + sdir * d.jump;
+            return frameFromDoInfo(d, 0);
           }
           const d = anim.ready;
-          return d.frame + sdir * d.jump;
+          return frameFromDoInfo(d, 0);
         }
       }
     }
@@ -1497,7 +1588,6 @@ export class Entity {
     this.hp -= amount;
     // C++ object.cpp:1614 — Strength capped at MaxStrength (healing cannot exceed max HP)
     if (this.hp > this.maxHp) this.hp = this.maxHp;
-    this.damageFlash = 4;
     // Force-uncloak cloaked subs on damage
     if (this.stats.isCloakable && (this.cloakState === CloakState.CLOAKED || this.cloakState === CloakState.CLOAKING)) {
       this.cloakState = CloakState.UNCLOAKING;
@@ -1525,6 +1615,8 @@ export class Entity {
       this.animFrame = 0;
       this.animTick = 0;
       this.deathTick = 0;
+      this.cppCorpseCreated = false;
+      this.cppDeathFinalized = false;
       // R7: Use warhead's infantryDeath property from C++ warhead.cpp InfantryDeath.
       // Pass through the full C++ InfDeath value:
       //   0=instant delete, 1=DO_GUN_DEATH, 2=DO_EXPLOSION_DEATH,
@@ -1551,6 +1643,11 @@ export class Entity {
       return true;
     }
     return false;
+  }
+
+  /** C++ techno.cpp:2328 Clicked_As_Target sets the flasher countdown directly. */
+  clickedAsTarget(count = 7): void {
+    this.damageFlash = Math.max(0, Math.trunc(count));
   }
 
   /** C++ ObjectClass::Height for targeting and Fire_Coord gates. */
@@ -1808,6 +1905,10 @@ export class Entity {
 
   /** Update animation frame — uses per-type rate overrides from C++ MasterDoControls */
   tickAnimation(): void {
+    if (this.isRotorEquipped) {
+      this.aircraftRotorStage++;
+    }
+
     // G3: Detect prone transitions for LIE_DOWN/GET_UP animations.
     // C++ infantry.cpp: Do_Action(DO_LIE_DOWN) before entering prone, DO_GET_UP before standing.
     // Only trigger on actual transitions, not every tick while prone.
@@ -1911,28 +2012,6 @@ export class Entity {
     if (this.animTick >= rate) {
       this.animTick = 0;
       this.animFrame++;
-    }
-
-    // G8: Gesture/salute trigger during idle fidget (~5% chance, C++ infantry.cpp:886-888).
-    // When idle fidget delay expires and fidgetVariant lands in the gesture range,
-    // transition to GESTURE state instead of playing idle1/idle2.
-    if (this.stats.isInfantry && !this.isProne
-        && (this.animState === AnimState.IDLE || this.animState === AnimState.GUARD_IDLE)
-        && this.animFrame > this.fidgetDelay && this.fidgetVariant < 0.05) {
-      const ta = INFANTRY_ANIMS[this.type];
-      if (ta && (ta.gesture1 || ta.gesture2 || ta.salute1 || ta.salute2)) {
-        const candidates: { frame: number; count: number; jump: number }[] = [];
-        if (ta.gesture1) candidates.push(ta.gesture1);
-        if (ta.gesture2) candidates.push(ta.gesture2);
-        if (ta.salute1) candidates.push(ta.salute1);
-        if (ta.salute2) candidates.push(ta.salute2);
-        // Use fidgetVariant to deterministically select which gesture
-        const idx = Math.floor((this.fidgetVariant / 0.05) * candidates.length) % candidates.length;
-        this.gestureDoInfo = candidates[idx];
-        this.animState = AnimState.GESTURE;
-        this.animFrame = 0;
-        this.animTick = 0;
-      }
     }
 
     if (!this.alive) this.deathTick++;

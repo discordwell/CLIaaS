@@ -668,10 +668,10 @@ describe('4TNK takeDamage (techno.cpp)', () => {
     expect(mammoth.hp).toBe(600);
   });
 
-  it('damage flash triggers on hit', () => {
+  it('ordinary damage does not start FlasherClass blushing', () => {
     const mammoth = entityAtCell(UnitType.V_4TNK, House.USSR, 10, 10);
     mammoth.takeDamage(50, 'AP');
-    expect(mammoth.damageFlash).toBe(4);
+    expect(mammoth.damageFlash).toBe(0);
   });
 });
 

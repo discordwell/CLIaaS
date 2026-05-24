@@ -404,6 +404,24 @@
     "sheetWidth": 768,
     "sheetHeight": 144
   },
+  "lrotor": {
+    "frameWidth": 29,
+    "frameHeight": 15,
+    "frameCount": 12,
+    "columns": 12,
+    "rows": 1,
+    "sheetWidth": 348,
+    "sheetHeight": 15
+  },
+  "rrotor": {
+    "frameWidth": 29,
+    "frameHeight": 15,
+    "frameCount": 12,
+    "columns": 12,
+    "rows": 1,
+    "sheetWidth": 348,
+    "sheetHeight": 15
+  },
   "mig": {
     "frameWidth": 56,
     "frameHeight": 56,
@@ -1528,6 +1546,24 @@
     "rows": 3,
     "sheetWidth": 2560,
     "sheetHeight": 423
+  },
+  "nradrfrm": {
+    "frameWidth": 160,
+    "frameHeight": 160,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 320,
+    "sheetHeight": 160
+  },
+  "uradrfrm": {
+    "frameWidth": 160,
+    "frameHeight": 160,
+    "frameCount": 2,
+    "columns": 2,
+    "rows": 1,
+    "sheetWidth": 320,
+    "sheetHeight": 160
   },
   "side1na": {
     "frameWidth": 160,
@@ -3292,6 +3328,60 @@
     "rows": 1,
     "sheetWidth": 120,
     "sheetHeight": 24
+  },
+  "corpse1": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 6,
+    "columns": 6,
+    "rows": 1,
+    "sheetWidth": 300,
+    "sheetHeight": 39
+  },
+  "corpse1_snow": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 6,
+    "columns": 6,
+    "rows": 1,
+    "sheetWidth": 300,
+    "sheetHeight": 39
+  },
+  "corpse2": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 6,
+    "columns": 6,
+    "rows": 1,
+    "sheetWidth": 300,
+    "sheetHeight": 39
+  },
+  "corpse2_snow": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 6,
+    "columns": 6,
+    "rows": 1,
+    "sheetWidth": 300,
+    "sheetHeight": 39
+  },
+  "corpse3": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 6,
+    "columns": 6,
+    "rows": 1,
+    "sheetWidth": 300,
+    "sheetHeight": 39
+  },
+  "corpse3_snow": {
+    "frameWidth": 50,
+    "frameHeight": 39,
+    "frameCount": 6,
+    "columns": 6,
+    "rows": 1,
+    "sheetWidth": 300,
+    "sheetHeight": 39
   },
   "ant1": {
     "frameWidth": 24,

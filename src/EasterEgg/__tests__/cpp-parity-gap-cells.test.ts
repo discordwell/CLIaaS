@@ -25,7 +25,7 @@ import {
   updateGapGenerators, GAP_RADIUS, GAP_UPDATE_INTERVAL,
   type FogContext,
 } from '../engine/fog';
-import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_MAX_HP } from '../engine/scenario';
+import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_MAX_HP, structureCenterCell } from '../engine/scenario';
 import { House, buildDefaultAlliances } from '../engine/types';
 import { GameMap } from '../engine/map';
 
@@ -110,8 +110,8 @@ describe('C++ parity: GAP generator activates when powered (building.cpp:996-999
 
     updateGapGenerators(ctx);
 
-    // Center of GAP (1x2 building at 30,30) = (30, 31) — cy + floor(2/2)
-    const centerY = 31;
+    // CenterOffset[BSIZE_12] floors back to the top cell.
+    const centerY = 30;
     expect(isCellJammed(ctx.map, 30, centerY)).toBe(true);
 
     // Cells within GAP_RADIUS should be jammed
@@ -134,8 +134,8 @@ describe('C++ parity: GAP generator activates when powered (building.cpp:996-999
 
     updateGapGenerators(ctx);
 
-    // GAP is 1x2, center = (50, 51)
-    const cY = 51;
+    // GAP is 1x2; Coord_Cell(Center_Coord()) stays on cy.
+    const cY = 50;
     const r = GAP_RADIUS;
     // Corner of bounding box: (r, r) big=10,small=10 => 20+10=30 > 20 → NOT jammed
     expect(isCellJammed(ctx.map, 50 + r, cY + r)).toBe(false);
@@ -452,14 +452,13 @@ describe('C++ parity: overlapping GAP jam counts (cell.h:124 bitmask vs counter)
 // =============================================================================
 // Section 6: GAP center offset from structure position
 // C++ building.cpp:998 — Coord_Cell(Center_Coord()) for jam origin
-// TS fog.ts:265-266 — cx = s.cx + Math.floor(gw / 2), cy = s.cy + Math.floor(gh / 2)
+// TS fog.ts delegates to structureCenterCell(), which mirrors C++ CenterOffset.
 // =============================================================================
 
 describe('C++ parity: GAP jam center calculation', () => {
-  it('1x2 GAP: center is offset by floor(h/2) in Y', () => {
-    // C++ Center_Coord() for a 1x2 building returns center of the footprint
-    // Coord_Cell() converts back to cell coords
-    // TS: STRUCTURE_SIZE['GAP'] = [1,2], so cx + floor(1/2)=0 = cx, cy + floor(2/2)=1 = cy+1
+  it('1x2 GAP: Coord_Cell(Center_Coord()) stays on the top foundation cell', () => {
+    // C++ CenterOffset[BSIZE_12] is (0x80,0xff). Coord_Cell floors that back
+    // to the top foundation cell, so the jam origin is the building's INI cell.
     const [gw, gh] = STRUCTURE_SIZE['GAP'] ?? [1, 2];
     expect(gw).toBe(1);
     expect(gh).toBe(2);
@@ -473,8 +472,9 @@ describe('C++ parity: GAP jam center calculation', () => {
 
     updateGapGenerators(ctx);
 
-    // The center of jamming should be at (40, 41) — cy + floor(2/2) = 41
-    const centerY = 41;
+    const center = structureCenterCell(ctx.structures[0]);
+    expect(center).toEqual({ cx: 40, cy: 40 });
+    const centerY = center.cy;
     // Verify by checking symmetry: cells at +r and -r from center should both be jammed
     expect(isCellJammed(ctx.map, 40 + GAP_RADIUS, centerY)).toBe(true);
     expect(isCellJammed(ctx.map, 40 - GAP_RADIUS, centerY)).toBe(true);
@@ -637,8 +637,8 @@ describe('C++ parity: GAP near map edge clips to bounds', () => {
 
     updateGapGenerators(ctx);
 
-    // GAP is 1x2 at (0,0), center = (0, 1)
-    const centerY = 1;
+    // GAP is 1x2; Coord_Cell(Center_Coord()) stays on the top cell.
+    const centerY = 0;
     // Center and nearby cells should be jammed (others are out of bounds)
     expect(isCellJammed(ctx.map, 0, centerY)).toBe(true);
     expect(isCellJammed(ctx.map, 5, 5)).toBe(true);

@@ -2,7 +2,7 @@
  * Visual Parity Tests: D5 (Scorch marks from fire warheads) and E7 (Damage fire lifecycle)
  *
  * D5: C++ anim.cpp — IsScorcher=true animations (napalm, fire) plant SMUDGE_SCORCH on ground.
- *     Verifies that fire/napalm warhead projectile impacts leave scorch decals on the map.
+ *     Verifies that fire/napalm terrain scarring uses CellClass smudges, not TS-only decals.
  *
  * E7: C++ building.cpp:1372-1435 — Damaged buildings spawn AnimClass fire objects
  *     during damage/destruction events. The renderer must not invent structure fire
@@ -93,7 +93,7 @@ function makeCombatCtx(
 //  D5: Fire/napalm warhead scorch marks
 // =============================================================================
 
-describe('D5: Fire warhead projectile impacts leave scorch marks', () => {
+describe('D5: Fire warhead projectile impacts leave CellClass smudges', () => {
 
   it('Fire warhead explosion set is 3 (napalm)', () => {
     // Verify the Fire warhead uses explosion set 3, which is the napalm/fire set
@@ -104,23 +104,12 @@ describe('D5: Fire warhead projectile impacts leave scorch marks', () => {
     expect(WARHEAD_PROPS.Nuke.infantryDeath).toBe(4);
   });
 
-  it('applySplashDamage with Fire warhead creates scorch decal at impact cell', () => {
-    const ctx = makeCombatCtx();
-    const decalsBefore = ctx.map.decals.length;
+  it('legacy addDecal does not create a renderable scorch mark', () => {
+    const map = new GameMap();
 
-    // Fire a Fire-warhead projectile at cell (10, 10)
-    // We simulate the projectile impact handling by checking that when
-    // the impact routine runs, a scorch decal is placed.
-    // The actual scorch placement is in processInflightProjectiles, which
-    // processes projectiles with weapon.warhead === 'Fire'. For the test,
-    // we verify the map.addDecal API works for scorch marks.
-    ctx.map.addDecal(10, 10, 7, 0.3);
-    expect(ctx.map.decals.length).toBe(decalsBefore + 1);
-    const decal = ctx.map.decals[ctx.map.decals.length - 1];
-    expect(decal.cx).toBe(10);
-    expect(decal.cy).toBe(10);
-    expect(decal.size).toBe(7);  // scorch decal size
-    expect(decal.alpha).toBe(0.3);
+    map.addDecal(10, 10, 7, 0.3);
+
+    expect(map.decals).toHaveLength(0);
   });
 
   it('HE warhead impact does NOT leave scorch mark (only Fire/Nuke do)', () => {
@@ -129,13 +118,11 @@ describe('D5: Fire warhead projectile impacts leave scorch marks', () => {
     expect(WARHEAD_PROPS.HE.infantryDeath).toBe(2); // explode, not burn(4)
   });
 
-  it('scorch decal size (7) is smaller than crater decal size (10)', () => {
-    // C++ parity: scorch marks are smaller/subtler than craters
-    // Crater decals use size 10 (see building destruction in combat.ts)
-    // Scorch decals use size 7
-    const scorchSize = 7;
-    const craterSize = 10;
-    expect(scorchSize).toBeLessThan(craterSize);
+  it('scorch marks are represented by CellClass smudge types', () => {
+    const map = new GameMap();
+
+    expect(map.addSmudge('SC6', 10, 10)).toBe(true);
+    expect(map.smudges).toEqual([{ type: 'sc6', cx: 10, cy: 10, data: 0 }]);
   });
 });
 

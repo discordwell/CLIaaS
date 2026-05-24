@@ -232,6 +232,7 @@ test(`${SCENARIO} region trace ${REGION.minX},${REGION.minY}-${REGION.maxX},${RE
           bullets?: Array<Record<string, unknown>>;
           inflightProjectiles?: Array<Record<string, unknown>>;
           anims?: Array<Record<string, unknown>>;
+          logicAnims?: Array<Record<string, unknown>>;
           isAllied?: (a: string, b: string) => boolean;
         };
         const state = (window as unknown as { __agentState?: () => Record<string, unknown> }).__agentState?.() ?? {};
@@ -384,10 +385,14 @@ test(`${SCENARIO} region trace ${REGION.minX},${REGION.minY}-${REGION.maxX},${RE
             cy: (p.targetStructure as Record<string, unknown>).cy,
           } : null,
         }));
-        const animRows = (game.anims ?? []).filter((a) => {
-          const c = a.cell as { cx?: number; cy?: number } | undefined;
-          return c && inBox(Number(c.cx), Number(c.cy));
-        });
+        const animRows = (game.logicAnims ?? game.anims ?? [])
+          .map((a) => {
+            const c = a.cell as { cx?: number; cy?: number } | undefined;
+            const cx = c?.cx ?? Math.trunc(Number(a.x) / 24);
+            const cy = c?.cy ?? Math.trunc(Number(a.y) / 24);
+            return { ...a, cell: { cx, cy } };
+          })
+          .filter((a) => inBox(Number((a.cell as { cx: number }).cx), Number((a.cell as { cy: number }).cy)));
         const effectRows = (game.effects ?? []).filter((e) => {
           const cx = Math.trunc(Number(e.x) / 24);
           const cy = Math.trunc(Number(e.y) / 24);

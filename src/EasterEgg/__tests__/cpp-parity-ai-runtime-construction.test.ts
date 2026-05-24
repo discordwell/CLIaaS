@@ -23,7 +23,7 @@ import {
   captureStructureFootprintTerrain,
   getStructureOccupyCells,
 } from '../engine/scenario';
-import { House, Mission, RESFACTOR, UnitType, WEAPON_STATS } from '../engine/types';
+import { AnimState, House, Mission, RESFACTOR, UnitType, WEAPON_STATS } from '../engine/types';
 import { Entity, resetEntityIds } from '../engine/entity';
 import { ScenarioRandom } from '../engine/random';
 
@@ -551,6 +551,57 @@ describe('runtime AI construction path', () => {
 
     const access = game as unknown as { logicIndexHintForNewObject(): number };
     expect(access.logicIndexHintForNewObject()).toBe(1);
+  });
+
+  it('combat logic-index hints keep corpse AnimClass slots for the full six-frame decay', () => {
+    // Live WASM SCG12EA tick trace: CORPSE3 created at tick 41 remains active
+    // through elapsed 179 (stage 5) and disappears once elapsed reaches 180.
+    const game = new Game(createCanvas());
+    game.corpses.push({
+      x: 100,
+      y: 100,
+      type: UnitType.I_E2,
+      facing: 0,
+      isInfantry: true,
+      isAnt: false,
+      alpha: 0.5,
+      deathVariant: 2,
+      cppAnimStartTick: 0,
+    });
+
+    const access = game as unknown as { logicIndexHintForNewObject(): number };
+    game.tick = 179;
+    expect(access.logicIndexHintForNewObject()).toBe(1);
+    game.tick = 180;
+    expect(access.logicIndexHintForNewObject()).toBe(0);
+  });
+
+  it('creates the C++ corpse AnimClass during the terminal infantry AI slot', () => {
+    // C++ infantry.cpp constructs the CORPSE AnimClass before `delete this`.
+    // The new AnimClass is appended immediately, before later same-tick
+    // AnimClass allocations can overtake it.
+    const game = new Game(createCanvas());
+    const infantry = new Entity(UnitType.I_E2, House.USSR, 100, 100);
+    infantry.alive = false;
+    infantry.hp = 0;
+    infantry.mission = Mission.DIE;
+    infantry.deathVariant = 2;
+    infantry.animState = AnimState.DIE;
+    infantry.deathTick = infantry.infantryDeathDurationTicks() - 1;
+    infantry.logicIndexHint = 5;
+    game.entities.push(infantry);
+    game.entityById.set(infantry.id, infantry);
+
+    const access = game as unknown as { _processGroundEntity(entity: Entity): boolean };
+    expect(access._processGroundEntity(infantry)).toBe(true);
+    expect(game.corpses).toHaveLength(1);
+    expect(game.corpses[0]).toMatchObject({
+      deathVariant: 2,
+      cppAnimStartTick: game.tick,
+      logicIndexHint: 0,
+    });
+    expect(infantry.logicIndexHint).toBeUndefined();
+    expect(infantry.cppDeathFinalized).toBe(true);
   });
 
   it('combat logic-index hints do not count fire-death corpses as C++ AnimClass slots', () => {

@@ -56,7 +56,11 @@ export function parseFnt(data: Buffer): FntFont {
     const topBlank = heightVal & 0xFF;
     const charHeight = (heightVal >> 8) & 0xFF;
 
-    if (charHeight === 0 || charDataOff >= data.length) continue;
+    if (charHeight === 0) {
+      glyphs.set(ch, { width: charWidth, height: 0, topBlank, bitmap: new Uint8Array(0) });
+      continue;
+    }
+    if (charDataOff >= data.length) continue;
 
     // Decode 4-bit packed nibble data → font palette indices.
     const bitmap = new Uint8Array(charWidth * charHeight);

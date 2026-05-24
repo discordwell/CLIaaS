@@ -68,6 +68,8 @@ next-env.d.ts
 !/src/EasterEgg/CnC_and_Red_Alert/RA/input_inject.cpp
 !/src/EasterEgg/CnC_and_Red_Alert/RA/agent_harness.cpp
 !/src/EasterEgg/CnC_and_Red_Alert/RA/CMakeLists.txt
+!/src/EasterEgg/CnC_and_Red_Alert/SDLLIB/
+!/src/EasterEgg/CnC_and_Red_Alert/SDLLIB/misc.cpp
 
 # Easter Egg - Red Alert music (downloaded separately, ~122MB)
 /public/ra/music/

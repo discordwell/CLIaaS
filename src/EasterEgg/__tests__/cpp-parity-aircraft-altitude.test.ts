@@ -70,7 +70,7 @@ import {
   UnitType, House, CELL_SIZE, Mission,
   UNIT_STATS,
 pixelToLepton, } from '../engine/types';
-import { Entity, resetEntityIds } from '../engine/entity';
+import { Entity, resetEntityIds, dir256ToFacing8, dir256ToFacing32 } from '../engine/entity';
 import {
   type AircraftContext,
   findLandingPad,
@@ -210,6 +210,64 @@ describe('aircraft Mission_Move dispatch', () => {
     expect(tran.missionTimer).toBeGreaterThan(0);
     expect(tran.desiredFacing256).toBe(162);
     expect(tran.aircraftState).toBe('flying');
+  });
+
+  it('helicopter MOVE FLY_TO_LZ turns SecondaryFacing toward the NavCom while far away', () => {
+    // C++ aircraft.cpp:1797-1821: after Process_Fly_To(true, NavCom),
+    // distance >= 0x0080 sets SecondaryFacing.Desired(Direction(NavCom)).
+    const tran = makeEntity(UnitType.V_TRAN, House.Greece, 63 * CELL_SIZE + 12, 44 * CELL_SIZE + 12);
+    tran.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    tran.aircraftState = 'flying';
+    tran.mission = Mission.MOVE;
+    tran.missionQueue = null;
+    tran.missionTimer = 0;
+    tran.aircraftMoveStatus = 2;
+    tran.facing256 = 162;
+    tran.desiredFacing256 = 162;
+    tran.turretFacing256 = 162;
+    tran.desiredTurretFacing256 = 162;
+    tran.turretFacing = dir256ToFacing8(162);
+    tran.desiredTurretFacing = tran.turretFacing;
+    tran.turretFacing32 = dir256ToFacing32(162);
+    tran.prevTurretFacing32 = tran.turretFacing32;
+    tran.moveTarget = {
+      lx: pixelToLepton(63 * CELL_SIZE + CELL_SIZE / 2),
+      ly: pixelToLepton(47 * CELL_SIZE + CELL_SIZE / 2),
+    };
+
+    updateAircraft(makeAircraftCtx({ tick: 20 }), tran);
+
+    expect(tran.desiredTurretFacing256).toBe(tran.desiredFacing256);
+    expect(tran.turretFacing256).toBe((162 - tran.stats.rot + 256) & 0xff);
+  });
+
+  it('helicopter MOVE FLY_TO_LZ turns SecondaryFacing to TRAN Pose_Dir near landing', () => {
+    // C++ AircraftClass::Pose_Dir returns DIR_N for AIRCRAFT_TRANSPORT, and
+    // Mission_Move applies it once distance < 0x0080.
+    const tran = makeEntity(UnitType.V_TRAN, House.Greece, 63 * CELL_SIZE + 12, 47 * CELL_SIZE + 8);
+    tran.flightAltitude = Entity.FLIGHT_ALTITUDE;
+    tran.aircraftState = 'flying';
+    tran.mission = Mission.MOVE;
+    tran.missionQueue = null;
+    tran.missionTimer = 0;
+    tran.aircraftMoveStatus = 2;
+    tran.facing256 = 82;
+    tran.desiredFacing256 = 82;
+    tran.turretFacing256 = 82;
+    tran.desiredTurretFacing256 = 82;
+    tran.turretFacing = dir256ToFacing8(82);
+    tran.desiredTurretFacing = tran.turretFacing;
+    tran.turretFacing32 = dir256ToFacing32(82);
+    tran.prevTurretFacing32 = tran.turretFacing32;
+    tran.moveTarget = {
+      lx: pixelToLepton(63 * CELL_SIZE + CELL_SIZE / 2),
+      ly: pixelToLepton(47 * CELL_SIZE + CELL_SIZE / 2),
+    };
+
+    updateAircraft(makeAircraftCtx({ tick: 60 }), tran);
+
+    expect(tran.desiredTurretFacing256).toBe(0);
+    expect(tran.turretFacing256).toBe(82 - tran.stats.rot);
   });
 });
 

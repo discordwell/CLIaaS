@@ -579,11 +579,11 @@ describe('TRUK takeDamage behavior', () => {
     expect(truk.animState).toBe(AnimState.DIE);
   });
 
-  it('damage flash activates on hit', () => {
+  it('ordinary damage does not start FlasherClass blushing', () => {
     const truk = entityAtCell(UnitType.V_TRUK, House.Spain, 10, 10);
     expect(truk.damageFlash).toBe(0);
     truk.takeDamage(10, 'SA');
-    expect(truk.damageFlash).toBe(4);
+    expect(truk.damageFlash).toBe(0);
   });
 
   it('does not take damage when invulnerable (Iron Curtain)', () => {

@@ -5,6 +5,7 @@
  */
 
 import { BitmapFont, type BitmapFontMeta } from './bitmapFont';
+import { RA_COLOR_BLACK, conquerBuildFadingTable, nearestPaletteIndex } from './shadow';
 
 export interface SpriteSheetMeta {
   frameWidth: number;
@@ -19,6 +20,20 @@ export interface SpriteSheetMeta {
 export interface SpriteSheet {
   image: HTMLImageElement;
   meta: SpriteSheetMeta;
+}
+
+export interface GhostShadowOptions {
+  palette: number[][] | null;
+  frac: number;
+  destColorIndex?: number;
+}
+
+export interface DrawFrameOptions {
+  centerX?: boolean;
+  centerY?: boolean;
+  scale?: number;
+  flip?: boolean;
+  ghostShadow?: GhostShadowOptions;
 }
 
 export interface AssetManifest {
@@ -74,6 +89,12 @@ export class AssetManager {
   private palette: number[][] | null = null;
   private loaded = false;
   private loadPromise: Promise<void> | null = null;
+  private sourcePixelCache = new WeakMap<object, {
+    width: number;
+    height: number;
+    data: Uint8ClampedArray;
+  }>();
+  private fadingTableCache = new WeakMap<object, Map<string, Uint8Array>>();
 
   /** Per-theatre palettes (SNOW, INTERIOR — TEMPERATE uses default palette) */
   private theatrePalettes = new Map<string, number[][]>();
@@ -192,8 +213,8 @@ export class AssetManager {
       ),
       // House color remap data (optional — falls back to tint overlay)
       this.loadRemapColors(cacheBust),
-      // Bitmap fonts (C++ 6POINT.FNT / 8POINT.FNT / 12METFNT.FNT — optional, falls back to ctx.fillText)
-      ...['6point-font', '8point-font', 'metal12-font'].map(name =>
+      // Bitmap fonts (C++ 6POINT.FNT / GRAD6FNT.FNT / 8POINT.FNT / 12METFNT.FNT — optional, falls back to ctx.fillText)
+      ...['6point-font', 'grad6-font', '8point-font', 'metal12-font'].map(name =>
         Promise.all([
           fetch(`${BASE_URL}/${name}.json${cacheBust}`).then(r => r.ok ? r.json() : null).catch(() => null),
           loadImage(`${BASE_URL}/${name}.png${cacheBust}`).catch(() => null),
@@ -266,19 +287,22 @@ export class AssetManager {
     frameIndex: number,
     x: number,
     y: number,
-    options?: { centerX?: boolean; centerY?: boolean; scale?: number; flip?: boolean },
+    options?: DrawFrameOptions,
   ): void {
     const col = frameIndex % meta.columns;
     const row = Math.floor(frameIndex / meta.columns);
     const sx = col * meta.frameWidth;
     const sy = row * meta.frameHeight;
-    let dx = x;
-    let dy = y;
+    let dx = Math.round(x);
+    let dy = Math.round(y);
     const scale = options?.scale ?? 1;
     const dw = meta.frameWidth * scale;
     const dh = meta.frameHeight * scale;
-    if (options?.centerX) dx -= dw / 2;
-    if (options?.centerY) dy -= dh / 2;
+    if (options?.centerX) dx -= Math.floor(dw / 2);
+    if (options?.centerY) dy -= Math.floor(dh / 2);
+    if (options?.ghostShadow && this.drawFrameWithGhostShadow(ctx, source, meta, frameIndex, dx, dy, options)) {
+      return;
+    }
     if (options?.flip) {
       ctx.save();
       ctx.scale(-1, 1);
@@ -289,6 +313,217 @@ export class AssetManager {
     }
   }
 
+  private getSourcePixels(source: CanvasImageSource): {
+    width: number;
+    height: number;
+    data: Uint8ClampedArray;
+  } | null {
+    const key = source as object;
+    const cached = this.sourcePixelCache.get(key);
+    if (cached) return cached;
+
+    const sized = source as CanvasImageSource & {
+      naturalWidth?: number; naturalHeight?: number;
+      width?: number; height?: number;
+    };
+    const width = sized.naturalWidth || Number(sized.width) || 0;
+    const height = sized.naturalHeight || Number(sized.height) || 0;
+    if (width <= 0 || height <= 0 || typeof document === 'undefined') return null;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const cctx = canvas.getContext('2d');
+    if (!cctx) return null;
+    cctx.imageSmoothingEnabled = false;
+    cctx.drawImage(source, 0, 0);
+    const image = cctx.getImageData(0, 0, width, height);
+    const pixels = { width, height, data: image.data };
+    this.sourcePixelCache.set(key, pixels);
+    return pixels;
+  }
+
+  private getFadingTable(palette: number[][], destColorIndex: number, frac: number): Uint8Array {
+    const key = palette as object;
+    let tables = this.fadingTableCache.get(key);
+    if (!tables) {
+      tables = new Map<string, Uint8Array>();
+      this.fadingTableCache.set(key, tables);
+    }
+    const tableKey = `${destColorIndex}:${frac}`;
+    const cached = tables.get(tableKey);
+    if (cached) return cached;
+    const table = conquerBuildFadingTable(palette, destColorIndex, frac);
+    tables.set(tableKey, table);
+    return table;
+  }
+
+  private drawFrameWithGhostShadow(
+    ctx: CanvasRenderingContext2D,
+    source: CanvasImageSource,
+    meta: SpriteSheetMeta,
+    frameIndex: number,
+    dx: number,
+    dy: number,
+    options: DrawFrameOptions,
+  ): boolean {
+    const ghost = options.ghostShadow;
+    if (!ghost?.palette || options.flip || (options.scale ?? 1) !== 1) return false;
+    if (!ctx.getImageData || !ctx.putImageData || !ctx.canvas) return false;
+
+    const src = this.getSourcePixels(source);
+    if (!src) return false;
+
+    const destX = Math.round(dx);
+    const destY = Math.round(dy);
+    const clipX0 = Math.max(0, destX);
+    const clipY0 = Math.max(0, destY);
+    const clipX1 = Math.min(ctx.canvas.width, destX + meta.frameWidth);
+    const clipY1 = Math.min(ctx.canvas.height, destY + meta.frameHeight);
+    const clipW = clipX1 - clipX0;
+    const clipH = clipY1 - clipY0;
+    if (clipW <= 0 || clipH <= 0) return true;
+
+    const col = frameIndex % meta.columns;
+    const row = Math.floor(frameIndex / meta.columns);
+    const sx = col * meta.frameWidth;
+    const sy = row * meta.frameHeight;
+    const dest = ctx.getImageData(clipX0, clipY0, clipW, clipH);
+    const table = this.getFadingTable(ghost.palette, ghost.destColorIndex ?? RA_COLOR_BLACK, ghost.frac);
+    const globalAlpha = Math.max(0, Math.min(1, ctx.globalAlpha ?? 1));
+
+    for (let y = 0; y < clipH; y++) {
+      const frameY = clipY0 - destY + y;
+      for (let x = 0; x < clipW; x++) {
+        const frameX = clipX0 - destX + x;
+        const srcOff = ((sy + frameY) * src.width + (sx + frameX)) * 4;
+        const sr = src.data[srcOff];
+        const sg = src.data[srcOff + 1];
+        const sb = src.data[srcOff + 2];
+        const sa = src.data[srcOff + 3];
+        if (sa === 0) continue;
+
+        const destOff = (y * clipW + x) * 4;
+        if (sa === 130) {
+          const dstIndex = nearestPaletteIndex(
+            ghost.palette,
+            dest.data[destOff],
+            dest.data[destOff + 1],
+            dest.data[destOff + 2],
+          );
+          const shadow = ghost.palette[table[dstIndex]];
+          if (!shadow) continue;
+          dest.data[destOff] = shadow[0];
+          dest.data[destOff + 1] = shadow[1];
+          dest.data[destOff + 2] = shadow[2];
+          dest.data[destOff + 3] = 255;
+          continue;
+        }
+
+        const alpha = (sa / 255) * globalAlpha;
+        if (alpha >= 1) {
+          dest.data[destOff] = sr;
+          dest.data[destOff + 1] = sg;
+          dest.data[destOff + 2] = sb;
+          dest.data[destOff + 3] = 255;
+        } else {
+          const inv = 1 - alpha;
+          dest.data[destOff] = Math.round(sr * alpha + dest.data[destOff] * inv);
+          dest.data[destOff + 1] = Math.round(sg * alpha + dest.data[destOff + 1] * inv);
+          dest.data[destOff + 2] = Math.round(sb * alpha + dest.data[destOff + 2] * inv);
+          dest.data[destOff + 3] = Math.round(255 * alpha + dest.data[destOff + 3] * inv);
+        }
+      }
+    }
+
+    ctx.putImageData(dest, clipX0, clipY0);
+    return true;
+  }
+
+  /** Draw a shape through C++ DisplayClass::SpecialGhost.
+   *
+   * RA/conquer.cpp converts SHAPE_FADING|SHAPE_PREDATOR into SHAPE_GHOST with
+   * DisplayClass::SpecialGhost. display.cpp builds that ghost table with every
+   * source color active and a BLACK,100 fading table, so the source frame is a
+   * mask that darkens the already-rendered destination pixels. */
+  drawFrameSpecialGhost(
+    ctx: CanvasRenderingContext2D,
+    sheetName: string,
+    frameIndex: number,
+    x: number,
+    y: number,
+    palette: number[][] | null,
+    options?: DrawFrameOptions,
+  ): void {
+    if (!palette || !ctx.getImageData || !ctx.putImageData || !ctx.canvas) {
+      this.drawFrame(ctx, sheetName, frameIndex, x, y, options);
+      return;
+    }
+
+    const sheet = this.getSheet(sheetName);
+    if (!sheet) {
+      this.drawMissingAsset(ctx, sheetName, x, y, options);
+      return;
+    }
+    const src = this.getSourcePixels(sheet.image);
+    if (!src) {
+      this.drawFrame(ctx, sheetName, frameIndex, x, y, options);
+      return;
+    }
+
+    const meta = sheet.meta;
+    const scale = options?.scale ?? 1;
+    if (options?.flip || scale !== 1) {
+      this.drawFrame(ctx, sheetName, frameIndex, x, y, options);
+      return;
+    }
+
+    let destX = Math.round(x);
+    let destY = Math.round(y);
+    if (options?.centerX) destX -= Math.floor(meta.frameWidth / 2);
+    if (options?.centerY) destY -= Math.floor(meta.frameHeight / 2);
+
+    const clipX0 = Math.max(0, destX);
+    const clipY0 = Math.max(0, destY);
+    const clipX1 = Math.min(ctx.canvas.width, destX + meta.frameWidth);
+    const clipY1 = Math.min(ctx.canvas.height, destY + meta.frameHeight);
+    const clipW = clipX1 - clipX0;
+    const clipH = clipY1 - clipY0;
+    if (clipW <= 0 || clipH <= 0) return;
+
+    const col = frameIndex % meta.columns;
+    const row = Math.floor(frameIndex / meta.columns);
+    const sx = col * meta.frameWidth;
+    const sy = row * meta.frameHeight;
+    const dest = ctx.getImageData(clipX0, clipY0, clipW, clipH);
+    const table = this.getFadingTable(palette, RA_COLOR_BLACK, 100);
+
+    for (let py = 0; py < clipH; py++) {
+      const frameY = clipY0 - destY + py;
+      for (let px = 0; px < clipW; px++) {
+        const frameX = clipX0 - destX + px;
+        const srcOff = ((sy + frameY) * src.width + (sx + frameX)) * 4;
+        if (src.data[srcOff + 3] === 0) continue;
+
+        const destOff = (py * clipW + px) * 4;
+        const dstIndex = nearestPaletteIndex(
+          palette,
+          dest.data[destOff],
+          dest.data[destOff + 1],
+          dest.data[destOff + 2],
+        );
+        const ghost = palette[table[dstIndex]];
+        if (!ghost) continue;
+        dest.data[destOff] = ghost[0];
+        dest.data[destOff + 1] = ghost[1];
+        dest.data[destOff + 2] = ghost[2];
+        dest.data[destOff + 3] = 255;
+      }
+    }
+
+    ctx.putImageData(dest, clipX0, clipY0);
+  }
+
   /** Draw a single frame from a sprite sheet onto a canvas context */
   drawFrame(
     ctx: CanvasRenderingContext2D,
@@ -296,7 +531,7 @@ export class AssetManager {
     frameIndex: number,
     x: number,
     y: number,
-    options?: { centerX?: boolean; centerY?: boolean; scale?: number; flip?: boolean },
+    options?: DrawFrameOptions,
   ): void {
     const resolved = this.resolveName(sheetName);
     const sheet = this.sheets.get(resolved);
@@ -316,7 +551,7 @@ export class AssetManager {
     frameIndex: number,
     x: number,
     y: number,
-    options?: { centerX?: boolean; centerY?: boolean; scale?: number; flip?: boolean },
+    options?: DrawFrameOptions,
   ): void {
     const sheet = this.sheets.get(this.resolveName(sheetName));
     if (!sheet) {
@@ -334,7 +569,7 @@ export class AssetManager {
     sheetName: string,
     x: number,
     y: number,
-    options?: { centerX?: boolean; centerY?: boolean; scale?: number },
+    options?: DrawFrameOptions,
   ): void {
     if (!ctx) return; // null context in tests — skip drawing
     const size = 24; // CELL_SIZE — one cell square

@@ -183,6 +183,20 @@ brdg=0,0,0,1,0,-1,20,27,-1,20,32,-1,-1,-1,32,-1,-1,-1
     expect(c.alive).toBe(false);
   });
 
+  it('does not synthesize a fireball effect when destroying a triggering infantry object', () => {
+    const game = createGame();
+    const entrant = new Entity(UnitType.I_E1, House.Greece, 10 * CELL_SIZE + 12, 10 * CELL_SIZE + 12);
+    game.entities.push(entrant);
+    game.entityById.set(entrant.id, entrant);
+
+    const trigger = makeTrigger('kill', [entrant.id]);
+    applyDestroyObject(game, trigger);
+
+    expect(entrant.alive).toBe(false);
+    expect(game.logicAnims.some(a => a.type === 'fball1')).toBe(false);
+    expect(game.effects.some(e => e.type === 'explosion' && e.sprite === 'fball1')).toBe(false);
+  });
+
   it('object-level springs ignore stale cell-trigger entity ids', () => {
     const game = createGame();
     const entrant = new Entity(UnitType.V_JEEP, House.Greece, 10 * CELL_SIZE + 12, 10 * CELL_SIZE + 12);

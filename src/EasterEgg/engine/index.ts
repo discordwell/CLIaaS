@@ -23,6 +23,7 @@ import {
   STRUCTURE_POINTS,
   SUBCELL_LEPTON_OFFSETS,
   TERRAIN_SPEED,
+  CPP_CORPSE_FRAME_COUNT, CPP_CORPSE_FRAME_TICKS, cppCorpseAnimForInfantryDeath,
 } from './types';
 // NOTE: For server-side code that needs rules.ini-derived faction data,
 // import from './rulesIniPipeline' instead of using PRODUCTION_ITEMS directly.
@@ -484,10 +485,10 @@ const CPP_ANIM_MAX = 100;
 // infantry.cpp only creates these follow-up corpse anims after DO_GUN_DEATH,
 // DO_EXPLOSION_DEATH, DO_EXPLOSION2_DEATH, and DO_GRENADE_DEATH. DO_FIRE_DEATH
 // deletes the infantry without a corpse AnimClass.
-// C++ CORPSE1/2/3 are single-frame AnimClass objects with normalized rate 30
-// in the agent heap. They occupy an Anim/Logic slot only until that rate expires;
-// the persistent TS corpse render data must not reserve the C++ slot longer.
-const CPP_CORPSE_ANIM_SLOT_TICKS = 30;
+// C++ CORPSE1/2/3 have six visible frames in the WASM harness. Each frame uses
+// normalized rate 30, so the AnimClass keeps its Anim/Logic slot for the full
+// decay sequence, not just the first frame.
+const CPP_CORPSE_ANIM_SLOT_TICKS = CPP_CORPSE_FRAME_COUNT * CPP_CORPSE_FRAME_TICKS;
 type AIFactoryKind = 'building' | 'infantry' | 'unit' | 'vessel';
 
 export interface CreditDisplayState {
@@ -2252,6 +2253,7 @@ export class Game {
     setPlayerHouses(playerHouseSet);
     // Sync to renderer
     this.renderer.playerHouses = playerHouseSet;
+    this.renderer.playerHouse = this.playerHouse;
     // C++ scenario.cpp:618-625 — count ALLOWWIN triggers and init Blockage counter.
     // Each trigger with ALLOWWIN in action1 or (non-MULTI_ONLY=0) action2 increments Blockage.
     // actionControl: 0 = MULTI_ONLY, 1 = AND. C++ checks ActionControl != MULTI_ONLY (i.e. === 1).
@@ -2613,7 +2615,7 @@ export class Game {
       // C++ Main_Loop renders the current HidPage before Logic.AI advances the
       // frame. Agent screenshots read that back buffer after agent_step(), so
       // the visible frame is the state before the final stepped logic tick.
-      this.advanceCreditDisplay();
+      if (this.tick > 0) this.advanceCreditDisplay();
       if (i === n - 1) {
         this.renderer.interpolationAlpha = 1;
         this.render();
@@ -2689,7 +2691,7 @@ export class Game {
     let ticksThisFrame = 0;
     while (this.accumulator >= this.tickInterval && ticksThisFrame < maxTicksPerFrame) {
       this.accumulator -= this.tickInterval;
-      this.advanceCreditDisplay();
+      if (this.tick > 0) this.advanceCreditDisplay();
       this.update();
       ticksThisFrame++;
       if (this.state !== 'playing') break;
@@ -2706,6 +2708,10 @@ export class Game {
       : 1;
 
     this.render();
+    // C++ Color_Cycle is a visual Sync_Delay/SystemTimer effect. Keep it out
+    // of agent-step logic so deterministic harness captures stay on the same
+    // palette phase as the C++ harness path.
+    this.renderer.advancePaletteCycle(dt);
     this.scheduleNext();
   };
 
@@ -3138,7 +3144,7 @@ export class Game {
 	          ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
 	        }
         logicIdx = Math.max(logicIdx + 1, effectiveLogicIdx + 1);
-        this._processGroundEntity(entity);
+        if (this._processGroundEntity(entity)) logicIdx--;
       }
 
       // ── Phase 2: structures plus earlier runtime objects ──
@@ -3201,7 +3207,7 @@ export class Game {
             ScenarioRandom._entityTag = ScenarioRandom._sourceTag;
           }
           logicIdx = Math.max(logicIdx + 1, effectiveLogicIdx + 1);
-          this._processGroundEntity(entity);
+          if (this._processGroundEntity(entity)) logicIdx--;
         }
       };
 
@@ -3478,7 +3484,7 @@ export class Game {
           }
           logicIdx = Math.max(logicIdx + 1, effectiveLogicIdx + 1);
           this.prepareSameTickUnlimboForLogic(entity);
-          this._processGroundEntity(entity);
+          if (this._processGroundEntity(entity)) logicIdx--;
           processed = true;
         }
         return processed;
@@ -5419,6 +5425,7 @@ export class Game {
   private clearStructureFootprint(s: MapStructure): void {
     if (s.footprintTerrain?.length) {
       for (const cell of s.footprintTerrain) {
+        this.map.clearStructureFootprintBlock(cell.cx, cell.cy);
         this.map.setTerrain(cell.cx, cell.cy, cell.terrain);
         if (cell.wallType) {
           this.map.setWallType(cell.cx, cell.cy, cell.wallType, cell.wallOwner ?? null);
@@ -5434,6 +5441,7 @@ export class Game {
     }
 
     for (const cell of getStructureOccupyCells(s.type, s.cx, s.cy)) {
+      this.map.clearStructureFootprintBlock(cell.cx, cell.cy);
       this.map.setTerrain(cell.cx, cell.cy, Terrain.CLEAR);
       this.map.clearWallType(cell.cx, cell.cy);
     }
@@ -5458,7 +5466,7 @@ export class Game {
    *  Handles per-tick state (rotation guards, recoil, cloak, fear),
    *  then delegates to updateEntity() for mission/movement AI.
    *  Extracted from the entity loop to support the split pre/post-building passes. */
-  private _processGroundEntity(entity: Entity): void {
+  private _processGroundEntity(entity: Entity): boolean {
     // Reset per-tick rotation guards (prevents double-accumulation)
     entity.rotTickedThisFrame = false;
     entity.turretRotTickedThisFrame = false;
@@ -5466,7 +5474,7 @@ export class Game {
     if (entity.isInRecoilState) entity.isInRecoilState = false;
 
     // C++ bullet.cpp:96-175 — dog in limbo rides bullet; skip all processing
-    if (entity.inLimbo) return;
+    if (entity.inLimbo) return false;
     entity.lastLogicProcessedTick = this.tick;
     this.refreshTechnoLock(entity);
     // Live techno objects run Cloaking_AI inside TechnoClass::AI after
@@ -5506,6 +5514,7 @@ export class Game {
 
     if (!entity.alive) {
       entity.tickAnimation();
+      if (this.finalizeCompletedInfantryDeathAnimation(entity)) return true;
       // C++ CDTimerClass<FrameTimerClass> timers are frame-derived, not
       // MissionClass-AI-derived. Destroyed non-infantry Techno objects can
       // remain in Logic for their MISSION_DIE lifetime, and their Arm timer
@@ -5513,7 +5522,7 @@ export class Game {
       // logic index 72 (dead SS) depends on Arm reaching 0 so
       // Is_Ready_To_Cloak() burns the low-health Percent_Chance(4) roll.
       this.decrementEntityCdTimersEndOfLogic(entity);
-      return;
+      return false;
     }
     this.updateEntity(entity);
     this.markMappedPlacementDiscoveredIfNeeded(entity);
@@ -5531,6 +5540,7 @@ export class Game {
     // S5: Update wasMoving — entity moved this tick if position changed from prevPos
     const movedThisTick = entity.pos.x !== entity.prevPos.x || entity.pos.y !== entity.prevPos.y;
     entity.wasMoving = wasMovingBefore || movedThisTick;
+    return false;
   }
 
   /** C++ ObjectClass::AI falling block (object.cpp:237-254).
@@ -11166,6 +11176,7 @@ export class Game {
       Math.trunc(trackTarget.x / LP),
       Math.trunc(trackTarget.y / LP),
     );
+    if (useLongTrack) entity.isPlanningToLook = true;
     this.consumeDrivePathFacings(entity, entity.trackCellSpan);
   }
 
@@ -12130,6 +12141,7 @@ export class Game {
               Math.trunc(trackTarget.x / LP),
               Math.trunc(trackTarget.y / LP),
             );
+            if (useLongTrack) entity.isPlanningToLook = true;
             this.consumeDrivePathFacings(entity, entity.trackCellSpan);
             // Follow first step this tick
             if (this.followTrackStep(entity, speed, trackTarget.x, trackTarget.y)) {
@@ -12536,6 +12548,56 @@ export class Game {
     }
   }
 
+  private createCppCorpseAnimForEntity(e: Entity): void {
+    if (e.cppCorpseCreated) return;
+    const corpseAnim = cppCorpseAnimForInfantryDeath(e.deathVariant);
+    const createsCppCorpseAnim = e.stats.isInfantry &&
+      !e.isAnt &&
+      e.type !== UnitType.I_DOG &&
+      e.fallHeightLeptons <= 0 &&
+      corpseAnim !== null;
+    if (!createsCppCorpseAnim || !corpseAnim) return;
+
+    // C++ attempts this allocation exactly once at the terminal death stage.
+    // If the fixed Anim heap is full, it does not retry on a later frame.
+    e.cppCorpseCreated = true;
+    if (!this.reserveCppAnimSlot()) return;
+
+    if (this.corpses.length >= Game.MAX_CORPSES) {
+      const dropped = this.corpses.shift();
+      if (dropped) this.releaseCppLogicSlotForCorpse(dropped);
+    }
+    this.corpses.push({
+      x: e.pos.x + corpseAnim.dx, y: e.pos.y + corpseAnim.dy, type: e.type, facing: e.facing,
+      isInfantry: e.stats.isInfantry, isAnt: e.isAnt, alpha: 0.5,
+      deathVariant: e.deathVariant,
+      cppAnimStartTick: this.tick,
+      logicIndexHint: this.logicIndexHintForNewObject(),
+    });
+  }
+
+  private finalizeCompletedInfantryDeathAnimation(e: Entity): boolean {
+    // C++ deletes InfantryClass during that infantry object's AI when the
+    // terminal death DoControl stage elapses. Any follow-up CORPSE AnimClass is
+    // constructed before `delete this`, so its Logic slot must be reserved before
+    // the dead infantry slot is released.
+    if (e.alive || !e.stats.isInfantry || !e.isInfantryDeathAnimationComplete()) return false;
+    if (e.cppDeathFinalized) return true;
+
+    if (e.triggerName) this.destroyedTriggerNames.add(e.triggerName);
+    this.detachEntityFromTargeting(e, true);
+    if (e.claimedCellIdx >= 0 && e.claimedSubCell >= 0) {
+      this.clearInfantryOccupyBit(e.claimedCellIdx, e.claimedSubCell);
+    }
+    e.claimedCellIdx = -1;
+    e.claimedSubCell = -1;
+
+    this.createCppCorpseAnimForEntity(e);
+    this.releaseCppLogicSlotForEntity(e);
+    e.cppDeathFinalized = true;
+    return true;
+  }
+
   private cleanupCompletedInfantryDeathAnimations(): number {
     // C++ deletes InfantryClass after the terminal death stage. The destructor
     // calls Limbo(), and ObjectClass::Limbo() runs Detach_All() before removing
@@ -12553,37 +12615,7 @@ export class Game {
     }
 
     for (const e of this.entities) {
-      if (!shouldRemoveDeadEntity(e)) continue;
-
-      // Persist trigger name before entity is removed from array.
-      if (e.triggerName) this.destroyedTriggerNames.add(e.triggerName);
-      this.detachEntityFromTargeting(e, true);
-      if (e.claimedCellIdx >= 0 && e.claimedSubCell >= 0) {
-        this.clearInfantryOccupyBit(e.claimedCellIdx, e.claimedSubCell);
-      }
-      e.claimedCellIdx = -1;
-      e.claimedSubCell = -1;
-      this.releaseCppLogicSlotForEntity(e);
-
-      const createsCppCorpseAnim = e.stats.isInfantry &&
-        !e.isAnt &&
-        e.type !== UnitType.I_DOG &&
-        e.fallHeightLeptons <= 0 &&
-        e.deathVariant >= 1 &&
-        e.deathVariant <= 3;
-      if (createsCppCorpseAnim && this.reserveCppAnimSlot()) {
-        if (this.corpses.length >= Game.MAX_CORPSES) {
-          const dropped = this.corpses.shift();
-          if (dropped) this.releaseCppLogicSlotForCorpse(dropped);
-        }
-        this.corpses.push({
-          x: e.pos.x, y: e.pos.y, type: e.type, facing: e.facing,
-          isInfantry: e.stats.isInfantry, isAnt: e.isAnt, alpha: 0.5,
-          deathVariant: e.deathVariant,
-          cppAnimStartTick: this.tick,
-          logicIndexHint: this.logicIndexHintForNewObject(),
-        });
-      }
+      if (shouldRemoveDeadEntity(e)) this.finalizeCompletedInfantryDeathAnimation(e);
     }
 
     this.entities = this.entities.filter(e => !shouldRemoveDeadEntity(e));
@@ -13101,7 +13133,6 @@ export class Game {
     screenShake: number;
     explosionSize: number;
     debris: boolean;
-    decal: { infantry: number; vehicle: number; opacity: number } | null;
     explodeLgSound: boolean;
     attackerIsPlayer: boolean;
     trackLoss: boolean;
@@ -15514,18 +15545,30 @@ export class Game {
       }
     }
     if (result.destroyTriggeringUnit) {
+      const destroyTriggerEntity = (te: Entity): void => {
+        // C++ taction.cpp:690-752 destroys objects through Take_Damage with
+        // forced AP damage. It does not synthesize a standalone FBALL1 visual;
+        // any death art comes from the normal object death path.
+        const killed = this.damageEntity(te, te.hp, 'AP', undefined, {
+          skipEntityArmorBias: true,
+          skipHouseArmorBias: true,
+        });
+        if (!killed) return;
+        this.handleUnitDeath(te, {
+          screenShake: !te.stats.isInfantry && !te.stats.isAircraft && !te.stats.isVessel && te.maxHp > 400 ? 3 : 0,
+          explosionSize: 12,
+          debris: false,
+          explodeLgSound: false,
+          attackerIsPlayer: false,
+          trackLoss: this.isPlayerControlled(te),
+        });
+      };
+
       if (trigger.triggeringEntityIds.length > 0) {
         for (const eid of trigger.triggeringEntityIds) {
           const te = this.entityById.get(eid);
           if (te && te.alive) {
-            const occupiedLogicBefore = te.occupiesCppLogic();
-            te.takeDamage(9999);
-            if (occupiedLogicBefore && !te.occupiesCppLogic()) this.releaseCppLogicSlotForEntity(te);
-            this.effects.push({
-              type: 'explosion', x: te.pos.x, y: te.pos.y,
-              frame: 0, maxFrames: 18, size: 12,
-              sprite: 'fball1', spriteStart: 0,
-            });
+            destroyTriggerEntity(te);
           }
         }
         trigger.triggeringEntityIds = [];
@@ -15539,14 +15582,7 @@ export class Game {
       // object sweep.
       for (const e of this.entities) {
         if (e.alive && e.triggerName === trigger.name) {
-          const occupiedLogicBefore = e.occupiesCppLogic();
-          e.takeDamage(9999);
-          if (occupiedLogicBefore && !e.occupiesCppLogic()) this.releaseCppLogicSlotForEntity(e);
-          this.effects.push({
-            type: 'explosion', x: e.pos.x, y: e.pos.y,
-            frame: 0, maxFrames: 18, size: 12,
-            sprite: 'fball1', spriteStart: 0,
-          });
+          destroyTriggerEntity(e);
         }
       }
       for (const s of this.structures) {
@@ -15927,7 +15963,9 @@ export class Game {
     if (entity.house !== this.playerHouse && !this.isAllied(entity.house, this.playerHouse)) return;
     const sight = entity.stats.sight;
     if (!sight || sight > 10) return;
-    this.revealSightFromPlayer(entity.cell.cx, entity.cell.cy, sight, true);
+    const incremental = !entity.isPlanningToLook;
+    this.revealSightFromPlayer(entity.cell.cx, entity.cell.cy, sight, incremental);
+    entity.isPlanningToLook = false;
     this.markEntityDiscoveredByPlayer(entity);
   }
 
@@ -16718,7 +16756,7 @@ export class Game {
 
     this.structures.push(structure);
     for (const cell of getStructureOccupyCells(type, cx, cy)) {
-      this.map.setTerrain(cell.cx, cell.cy, Terrain.WALL);
+      this.map.setStructureFootprintBlock(cell.cx, cell.cy);
     }
     for (const bc of getBibCells(type, cx, cy)) {
       this.map.setBibSmudge(bc.cx, bc.cy, true);
@@ -17249,6 +17287,7 @@ export class Game {
     this.renderer.suppressScreenShake = this.comparisonMode;
     this.renderer.repairingStructures = this.repairingStructures;
     this.renderer.corpses = this.corpses;
+    this.renderer.logicAnims = this.logicAnims;
     // Sidebar data
     this.renderer.sidebarCredits = Math.floor(this.displayCredits);
     this.renderer.sidebarSiloCapacity = this.siloCapacity;

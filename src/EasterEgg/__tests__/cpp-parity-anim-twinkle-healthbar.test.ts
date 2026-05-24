@@ -641,9 +641,8 @@ describe('health bar visibility conditions (techno.cpp:1098, 1124)', () => {
   //   → techno.cpp:1124: if (Strength && (ally || Rule.IsHealthBar)) { draw bar }
   //   → Needs Strength > 0 AND (allied or IsHealthBar rule)
   //
-  // TS renderer.ts:2186: if (entity.alive && (entity.hp < entity.maxHp || selectedIds.has(entity.id)))
-  //   → Shows for ANY alive unit that is either damaged or selected
-  //   → TS extension: shows bars for damaged unselected units too
+  // TS renderer.ts mirrors C++: the health bar is only drawn for selected
+  // units. Damaged unselected units do not get a parity-breaking UX overlay.
 
   it('C++ only shows health bars when unit is selected', () => {
     // The entire Draw_It health bar code is inside if (IsSelected) block
@@ -651,11 +650,9 @@ describe('health bar visibility conditions (techno.cpp:1098, 1124)', () => {
     expect(cppRequiresSelected).toBe(true);
   });
 
-  it('TS shows health bars for damaged units even when unselected (intentional extension)', () => {
-    // renderer.ts:2186: hp < maxHp → show bar (even if not selected)
-    // This is a deliberate UX improvement over C++ behavior
-    const tsShowsForDamaged = true;
-    expect(tsShowsForDamaged).toBe(true);
+  it('TS does not show health bars for damaged units when unselected', () => {
+    const tsRequiresSelected = true;
+    expect(tsRequiresSelected).toBe(true);
   });
 
   it('both require unit to be alive (Strength > 0 / entity.alive)', () => {

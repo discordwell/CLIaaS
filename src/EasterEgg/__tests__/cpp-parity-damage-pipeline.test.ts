@@ -1222,7 +1222,8 @@ describe('Splash damage matches C++ Explosion_Damage (combat.cpp:162-271)', () =
     barrel.debrisDropped = false;
 
     // SCG14EA tick 137: C++ Drop_Debris for this BRL3 consumes the smoke
-    // switch, then AnimClass constructor args as loop, delay, Coord_Scatter.
+    // switch, then AnimClass constructor args in source order: Coord_Scatter,
+    // delay, then loop.
     ScenarioRandom.seed = 1974182732;
     ScenarioRandom.callCount = 0;
     ScenarioRandom._seedLog = [];
@@ -1235,7 +1236,7 @@ describe('Splash damage matches C++ Explosion_Damage (combat.cpp:162-271)', () =
     }
 
     expect(ScenarioRandom._seedLog.map(([, tag]) => tag).slice(0, 5)).toEqual([
-      12239, 12239, 12239, 12239, 50002,
+      12239, 12239, 50002, 12239, 12239,
     ]);
     expect(ScenarioRandom._seedLog.map(([seed]) => seed).slice(0, 5)).toEqual([
       4271759253, 1167444138, 2707844251, 1217767480, 3561611281,
@@ -1244,14 +1245,11 @@ describe('Splash damage matches C++ Explosion_Damage (combat.cpp:162-271)', () =
     expect(ctx.logicAnims[0]).toMatchObject({
       type: 'smoke_m',
       delay: 2,
-      loops: 12,
+      loops: 6,
     });
-    expect(ctx.effects.find(e => e.sprite === 'smoke_m')).toMatchObject({
-      frame: -2,
-      spriteStart: 0,
-      loops: 12,
-    });
-    expect(ctx.map.decals).toHaveLength(1);
+    expect(ctx.effects.find(e => e.sprite === 'smoke_m')).toBeUndefined();
+    expect(ctx.map.decals).toHaveLength(0);
+    expect(ctx.map.smudges).toHaveLength(1);
   });
 
   it('Drop_Debris skips smoke constructor RNG when the C++ AnimClass heap is full', () => {
@@ -1288,7 +1286,30 @@ describe('Splash damage matches C++ Explosion_Damage (combat.cpp:162-271)', () =
       [3561611281, 50002],
     ]);
     expect(ctx.effects.find(e => e.sprite === 'smoke_m')).toBeUndefined();
-    expect(ctx.map.decals).toHaveLength(1);
+    expect(ctx.map.decals).toHaveLength(0);
+    expect(ctx.map.smudges).toHaveLength(1);
+  });
+
+  it('Drop_Debris terrestrial gate ignores the building occupy bit', () => {
+    // C++ building.cpp:1764-1783 calls
+    // Is_Clear_To_Move(SPEED_TRACK, true, true), which ignores the
+    // vehicle/building occupancy bit but still checks terrain and wall overlays.
+    const barrel = structureAtCell('BRL3', House.Turkey, 107, 77);
+    const ctx = makeCombatCtx([]);
+    ctx.structures.push(barrel);
+    ctx.map.setMovementBlocked(107, 77, true);
+    barrel.alive = false;
+    barrel.hp = 0;
+    barrel.rubble = true;
+    barrel.debrisCountdown = 0;
+    barrel.debrisDropped = false;
+
+    ScenarioRandom.seed = 1974182732;
+    ScenarioRandom.callCount = 0;
+
+    expect(tickDestroyedStructureDebris(ctx, barrel)).toBe(true);
+    expect(ctx.logicAnims).toHaveLength(1);
+    expect(ctx.map.smudges).toHaveLength(1);
   });
 
   it('forced building destruction suppresses Drop_Debris survivors', () => {
@@ -1385,7 +1406,6 @@ describe('Death Detach_All team membership parity (foot.cpp:1844-1853)', () => {
       screenShake: 4,
       explosionSize: 12,
       debris: false,
-      decal: null,
       explodeLgSound: false,
       attackerIsPlayer: true,
       trackLoss: false,

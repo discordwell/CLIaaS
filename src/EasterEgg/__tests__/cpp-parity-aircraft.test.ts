@@ -638,6 +638,7 @@ describe('Fixed-wing regroup & re-engage (aircraft.cpp REGROUP)', () => {
     const enemy = makeEntity(UnitType.V_2TNK, House.Spain, 200, 200 - 2 * CELL_SIZE);
     yak.target = enemy;
     yak.ammo = 5;
+    yak.mission = Mission.HUNT;
     yak.aircraftState = 'attacking';
     setFixedWingAttackPhase(yak, 'regroup');
     ScenarioRandom.seed = 1778541872;

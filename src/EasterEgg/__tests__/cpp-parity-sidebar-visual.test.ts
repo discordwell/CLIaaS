@@ -91,7 +91,7 @@ describe('sidebar production visuals', () => {
     expect(infantryTypes).toEqual(['E1', 'E3', 'E6', 'SPY', 'MEDI']);
   });
 
-  it('draws the C++ power bar frame even when produced and consumed power are zero', () => {
+  it('draws the zero-state power frame but not the overwritten drain marker', () => {
     const renderer = new Renderer(mockCanvas());
     renderer.sidebarPowerProduced = 0;
     renderer.sidebarPowerConsumed = 0;
@@ -126,13 +126,203 @@ describe('sidebar production visuals', () => {
       640 - 80 * RESFACTOR,
       88 * RESFACTOR + 112,
     );
+    expect(drawFrame).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'power_marker',
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+    );
+  });
+
+  it('uses C++ raw-bottom marker math when a zero-power overlay is explicitly redrawn', () => {
+    const renderer = new Renderer(mockCanvas());
+    renderer.sidebarPowerProduced = 0;
+    renderer.sidebarPowerConsumed = 0;
+    (renderer as any).powerFlashTimer = 1;
+
+    const drawFrame = vi.fn();
+    const assets = {
+      getSheet: (name: string) => {
+        if (name === 'powerbar') return { meta: { frameWidth: 40, frameHeight: 56, frameCount: 2 } };
+        if (name === 'power_marker') return { meta: { frameWidth: 18, frameHeight: 12, frameCount: 1 } };
+        return null;
+      },
+      drawFrame,
+    };
+
+    (renderer as any).renderVerticalPowerBar(assets, 640 - 80 * RESFACTOR, false);
+
     expect(drawFrame).toHaveBeenCalledWith(
       expect.anything(),
       'power_marker',
       0,
       640 - 80 * RESFACTOR + RESFACTOR,
-      175 * RESFACTOR + 1 - 2 * RESFACTOR,
+      Renderer.POWER_RAW_BOTTOM - 2 * RESFACTOR + Renderer.POWER_MARKER_Y_OFFSET,
     );
+  });
+
+  it('switches marker math to the rescaled fill bottom only after power height is nonzero', () => {
+    const renderer = new Renderer(mockCanvas());
+    renderer.sidebarPowerProduced = 100;
+    renderer.sidebarPowerConsumed = 50;
+    (renderer as any).powerHeight = 10;
+    (renderer as any).desiredPowerHeight = 10;
+    (renderer as any).powerBounce = 0;
+    (renderer as any).drainHeight = 10;
+    (renderer as any).desiredDrainHeight = 10;
+    (renderer as any).drainBounce = 0;
+
+    const drawFrame = vi.fn();
+    const assets = {
+      getSheet: (name: string) => {
+        if (name === 'powerbar') return { meta: { frameWidth: 40, frameHeight: 56, frameCount: 2 } };
+        if (name === 'power_marker') return { meta: { frameWidth: 18, frameHeight: 12, frameCount: 1 } };
+        return null;
+      },
+      drawFrame,
+    };
+
+    (renderer as any).renderVerticalPowerBar(assets, 640 - 80 * RESFACTOR, false);
+
+    const scaledDrainHeight = RESFACTOR === 1 ? 10 : Math.floor(10 * 153 / 107);
+    expect(drawFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      'power_marker',
+      0,
+      640 - 80 * RESFACTOR + Renderer.POWER_MARKER_X_OFFSET,
+      Renderer.POWER_FILL_BOTTOM - (scaledDrainHeight + 2 * RESFACTOR) + Renderer.POWER_MARKER_Y_OFFSET,
+    );
+  });
+
+  it('fills the power bar through the C++ inclusive bottom pixel', () => {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      fillRect: vi.fn(),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      rect: vi.fn(),
+      clip: vi.fn(),
+    };
+    const canvas = {
+      width: 640,
+      height: 400,
+      getContext: () => ctx,
+    } as unknown as HTMLCanvasElement;
+    const renderer = new Renderer(canvas);
+    renderer.sidebarPowerProduced = 100;
+    renderer.sidebarPowerConsumed = 0;
+    (renderer as any).powerHeight = 10;
+    (renderer as any).desiredPowerHeight = 10;
+    (renderer as any).powerBounce = 0;
+    (renderer as any).drainHeight = 0;
+    (renderer as any).desiredDrainHeight = 0;
+    (renderer as any).drainBounce = 0;
+
+    const assets = {
+      getSheet: (name: string) => {
+        if (name === 'powerbar') return { meta: { frameWidth: 40, frameHeight: 56, frameCount: 2 } };
+        if (name === 'power_marker') return { meta: { frameWidth: 18, frameHeight: 12, frameCount: 1 } };
+        return null;
+      },
+      drawFrame: vi.fn(),
+    };
+
+    (renderer as any).renderVerticalPowerBar(assets, 640 - 80 * RESFACTOR, false);
+
+    const scaledHeight = RESFACTOR === 1 ? 10 : Math.floor(10 * 153 / 107);
+    expect(ctx.fillRect).toHaveBeenCalledWith(
+      640 - 80 * RESFACTOR + Renderer.POWER_FILL_X_OFFSET,
+      Renderer.POWER_FILL_BOTTOM - scaledHeight,
+      2,
+      scaledHeight + 1,
+    );
+    expect(ctx.fillRect).toHaveBeenCalledWith(
+      640 - 80 * RESFACTOR + Renderer.POWER_FILL_X_OFFSET + 2,
+      Renderer.POWER_FILL_BOTTOM - scaledHeight,
+      2,
+      scaledHeight + 1,
+    );
+  });
+
+  it('clips the extracted POWERBAR right padding column to match C++ drawing', () => {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      fillRect: vi.fn(),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      rect: vi.fn(),
+      clip: vi.fn(),
+    };
+    const canvas = {
+      width: 640,
+      height: 400,
+      getContext: () => ctx,
+    } as unknown as HTMLCanvasElement;
+    const renderer = new Renderer(canvas);
+    const assets = {
+      getSheet: (name: string) => {
+        if (name === 'powerbar') return { meta: { frameWidth: 20, frameHeight: 112, frameCount: 2 } };
+        if (name === 'power_marker') return null;
+        return null;
+      },
+      drawFrame: vi.fn(),
+    };
+
+    (renderer as any).renderVerticalPowerBar(assets, 640 - 80 * RESFACTOR, false);
+
+    expect(ctx.rect).toHaveBeenCalledWith(
+      640 - 80 * RESFACTOR,
+      Renderer.POWER_Y,
+      19,
+      224,
+    );
+    expect(ctx.clip).toHaveBeenCalledOnce();
+  });
+
+  it('redraws the power bar after the sidebar buttons in the final frame', () => {
+    const renderer = new Renderer(mockCanvas());
+    renderer.sidebarPowerProduced = 100;
+    (renderer as any).powerHeight = 1;
+    const order: string[] = [];
+    for (const method of [
+      'renderTerrain',
+      'renderDecals',
+      'renderOverlays',
+      'renderStructures',
+      'renderCrates',
+      'renderCorpses',
+      'renderEntities',
+      'renderTargetLines',
+      'renderWaypoints',
+      'renderEffects',
+      'renderFogOfWar',
+      'renderPlacementGhost',
+      'renderSelectionBox',
+      'renderAttackMoveIndicator',
+      'renderModeLabel',
+      'renderOffscreenIndicators',
+      'renderFullscreenRadar',
+      'renderHelpOverlay',
+      'renderCursor',
+    ]) {
+      (renderer as any)[method] = vi.fn();
+    }
+    (renderer as any).renderSidebar = vi.fn(() => order.push('sidebar'));
+    (renderer as any).renderMinimap = vi.fn(() => order.push('radar'));
+    (renderer as any).renderSidebarButtonRow = vi.fn(() => order.push('buttons'));
+    (renderer as any).renderVerticalPowerBar = vi.fn(() => order.push('power'));
+
+    const assets = {
+      getTheatrePalette: () => [[0, 0, 0]],
+      hasTileset: () => false,
+    };
+
+    renderer.render({} as any, {} as any, [], [], assets as any, {} as any, new Set(), [], 100);
+
+    expect(order).toEqual(['sidebar', 'radar', 'buttons', 'power']);
   });
 
   it('draws strip scroll buttons even when a production strip has no buildable items', () => {

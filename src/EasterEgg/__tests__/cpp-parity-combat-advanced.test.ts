@@ -320,7 +320,7 @@ describe('Flame trail alternation (bullet.cpp:377-386)', () => {
     }
   });
 
-  it('flame trail effects spawn only on flameToggle=true ticks', () => {
+  it('flame trail Logic anims spawn only on flameToggle=true ticks', () => {
     // C++ bullet.cpp:378-384: animation only spawns when IsToAnimate is true
     // BEFORE the toggle. Since it starts false, first spawn is on tick 2.
     const attacker = entityAtCell(UnitType.I_GNRL, House.Spain, 2, 5);
@@ -330,12 +330,12 @@ describe('Flame trail alternation (bullet.cpp:377-386)', () => {
     const weapon = { ...WEAPON_STATS['Flamer'], projectileSpeed: 0.3 };
     launchProjectile(ctx, attacker, target, weapon, 70, target.pos.x, target.pos.y, true);
 
-    // Tick through 6 frames and count explosion effects spawned per tick
+    // Tick through 6 frames and count AnimClass trail objects spawned per tick.
     const trailsPerTick: number[] = [];
     for (let i = 0; i < 6 && ctx.inflightProjectiles.length > 0; i++) {
-      const before = ctx.effects.filter(e => e.type === 'explosion').length;
+      const before = ctx.logicAnims.filter(a => a.type === 'fball_fade' || a.type === 'smokey').length;
       updateInflightProjectiles(ctx);
-      const after = ctx.effects.filter(e => e.type === 'explosion').length;
+      const after = ctx.logicAnims.filter(a => a.type === 'fball_fade' || a.type === 'smokey').length;
       trailsPerTick.push(after - before);
     }
 
@@ -353,7 +353,7 @@ describe('Flame trail alternation (bullet.cpp:377-386)', () => {
     expect(hasOne).toBe(true);
   });
 
-  it('non-flame weapon does not generate flame trail effects', () => {
+  it('non-flame weapon does not generate flame trail Logic anims', () => {
     const attacker = entityAtCell(UnitType.V_2TNK, House.Spain, 2, 5);
     const target = entityAtCell(UnitType.V_2TNK, House.USSR, 6, 5);
     const ctx = makeCombatCtx([attacker, target]);
@@ -367,17 +367,11 @@ describe('Flame trail alternation (bullet.cpp:377-386)', () => {
     expect(proj.isFlameEquipped).toBe(false);
     expect(proj.flameToggle).toBe(false);
 
-    // Run ticks
-    const effectsBefore = ctx.effects.length;
     for (let i = 0; i < 4 && ctx.inflightProjectiles.length > 0; i++) {
       updateInflightProjectiles(ctx);
     }
 
-    // No flame trail effects should be spawned DURING flight
-    // (the final impact explosion is expected)
-    // Flame trails are type 'explosion' with sprite 'napalm1'
-    const flamePuffs = ctx.effects.filter(e =>
-      e.type === 'explosion' && (e as any).sprite === 'napalm1');
+    const flamePuffs = ctx.logicAnims.filter(a => a.type === 'fball_fade' || a.type === 'smokey');
     expect(flamePuffs.length).toBe(0);
   });
 
@@ -425,6 +419,35 @@ describe('Flame trail alternation (bullet.cpp:377-386)', () => {
     expect(anim!.stage).toBe(1);
   });
 
+  it('invisible projectile impact animation scatters with C++ Coord_Scatter tables', () => {
+    // C++ bullet.cpp:1012-1014 scatters invisible projectile impact art by
+    // Coord_Scatter(Coord, 0x0020). With seed 0, Random_Pick(DIR_N, DIR_MAX)
+    // returns dir 12; coord.cpp tables produce (+9, -30) leptons.
+    resetScenarioRandom(0);
+    const attacker = entityAtCell(UnitType.I_E4, House.USSR, 2, 5);
+    const target = entityAtCell(UnitType.V_4TNK, House.Spain, 6, 5);
+    const ctx = makeCombatCtx([attacker, target]);
+    const weapon = {
+      ...WEAPON_STATS.Flamer,
+      name: 'InvisibleFireTest',
+      damage: 1,
+      isInvisible: true,
+      isFlameEquipped: false,
+      projSpeed: 100,
+    };
+
+    launchProjectile(ctx, attacker, target, weapon, weapon.damage, target.pos.x, target.pos.y, true);
+    let ticks = 0;
+    while (ctx.inflightProjectiles.length > 0 && ticks++ < 20) {
+      updateInflightProjectiles(ctx);
+    }
+
+    const anim = ctx.logicAnims.find(a => a.type === 'napalm1');
+    expect(anim).toBeDefined();
+    expect(anim!.x).toBe((target.leptonX + 9) * CELL_SIZE / 256);
+    expect(anim!.y).toBe((target.leptonY - 30) * CELL_SIZE / 256);
+  });
+
   it('ELECTRO death anim keeps IsBrandNew when created after the AnimClass phase', () => {
     const victim = entityAtCell(UnitType.I_E1, House.USSR, 3, 5);
     victim.deathVariant = 5;
@@ -435,7 +458,6 @@ describe('Flame trail alternation (bullet.cpp:377-386)', () => {
       screenShake: 0,
       explosionSize: 8,
       debris: false,
-      decal: null,
       explodeLgSound: false,
       attackerIsPlayer: false,
       trackLoss: false,
@@ -449,6 +471,71 @@ describe('Flame trail alternation (bullet.cpp:377-386)', () => {
     expect(processLogicAnim(anim!, ctx.logicAnims, ctx.effects)).toBe(true);
     expect(anim!.stage).toBe(0);
     expect(anim!.isBrandNew).toBe(false);
+  });
+
+  it('ordinary infantry deaths do not create a fireball AnimClass/effect', () => {
+    // C++ infantry.cpp:383-416 maps InfDeath 1-4 to InfantryClass::Do_Action
+    // death frames. It does not allocate ANIM_FBALL1; the SCG01 E1 gun death
+    // should leave only the infantry death SHP, not a large fireball overlay.
+    const victim = entityAtCell(UnitType.I_E1, House.USSR, 3, 5);
+    const killed = victim.takeDamage(victim.hp, 'SA');
+    expect(killed).toBe(true);
+    expect(victim.deathVariant).toBe(1);
+
+    const ctx = makeCombatCtx([victim]);
+    handleUnitDeath(ctx, victim, {
+      screenShake: 0,
+      explosionSize: 8,
+      debris: false,
+      explodeLgSound: false,
+      attackerIsPlayer: false,
+      trackLoss: false,
+    });
+
+    expect(ctx.logicAnims.some(a => a.type === 'fball1')).toBe(false);
+    expect(ctx.effects.some(e => e.type === 'explosion' && e.sprite === 'fball1')).toBe(false);
+  });
+
+  it('ordinary infantry deaths do not shake the screen', () => {
+    // C++ InfantryClass::Take_Damage death handling has no Shake_The_Screen
+    // call; screen shake belongs to strong vehicle/building explosions.
+    const victim = entityAtCell(UnitType.I_E1, House.USSR, 3, 5);
+    victim.takeDamage(victim.hp, 'SA');
+
+    const ctx = makeCombatCtx([victim]);
+    handleUnitDeath(ctx, victim, {
+      screenShake: 8,
+      explosionSize: 8,
+      debris: false,
+      explodeLgSound: false,
+      attackerIsPlayer: false,
+      trackLoss: false,
+    });
+
+    expect(ctx.screenShake).toBe(0);
+  });
+
+  it('vehicle death explosion Effect is linked to the C++ AnimClass slot', () => {
+    const victim = entityAtCell(UnitType.V_2TNK, House.USSR, 3, 5);
+    let nextLogicHint = 400;
+    const ctx = makeCombatCtx([victim]);
+    ctx.logicIndexHintForNewObject = () => nextLogicHint++;
+
+    handleUnitDeath(ctx, victim, {
+      screenShake: 0,
+      explosionSize: 8,
+      debris: false,
+      explodeLgSound: false,
+      attackerIsPlayer: false,
+      trackLoss: false,
+    });
+
+    const anim = ctx.logicAnims.find(a => a.type === 'frag1');
+    const effect = ctx.effects.find(e => e.type === 'explosion' && e.sprite === 'frag1');
+    expect(anim).toBeDefined();
+    expect(effect).toBeDefined();
+    expect(anim!.logicIndexHint).toBe(400);
+    expect(effect!.logicIndexHint).toBe(anim!.logicIndexHint);
   });
 
   it('Super projectile impact does not fall back to a generic VEH-HIT anim', () => {
@@ -530,6 +617,28 @@ describe('AnimClass heap allocation order (anim.cpp)', () => {
     expect(effects).toHaveLength(0);
   });
 
+  it('live AnimClass creation does not allocate a second render Effect slot', () => {
+    // C++ has one AnimClass object in Logic/Anims. A separate TS Effect copy
+    // double-counts the AnimClass heap and can expire earlier than the real
+    // anim, shifting later logic indices while C++ still keeps the anim alive.
+    const effects: Effect[] = [];
+    const logicAnims: ReturnType<typeof makeCombatCtx>['logicAnims'] = [];
+
+    const spawned = spawnLogicAnim(
+      logicAnims,
+      effects,
+      'fire_small',
+      10 * CELL_SIZE,
+      10 * CELL_SIZE,
+      1,
+      true,
+    );
+
+    expect(spawned).toBe(true);
+    expect(logicAnims).toHaveLength(1);
+    expect(effects).toHaveLength(0);
+  });
+
   it('FIRE_MED skips inline child loop RNG when the AnimClass heap is full', () => {
     resetScenarioRandom(0x12345678);
     const effects: Effect[] = [];
@@ -582,6 +691,31 @@ describe('AnimClass heap allocation order (anim.cpp)', () => {
     expect(ScenarioRandom.callCount).toBe(4);
     expect(logicAnims).toHaveLength(1);
     expect(effects).toHaveLength(0);
+  });
+
+  it('NAPALM child fire uses Closest_Free_Spot(any=true) sub-cell placement', () => {
+    // C++ anim.cpp:988 wraps Coord_Scatter in Map.Closest_Free_Spot(..., true),
+    // so the spawned fire is quantized to StoppingCoordAbs, not left at the
+    // raw scatter lepton coordinate.
+    resetScenarioRandom(0x12345678);
+    const effects: Effect[] = [];
+    const logicAnims: ReturnType<typeof makeCombatCtx>['logicAnims'] = [{
+      type: 'napalm3',
+      x: 82 * CELL_SIZE,
+      y: 78 * CELL_SIZE,
+      stage: 4,
+      timer: 1,
+      loops: 1,
+      delay: 0,
+      isBrandNew: false,
+    }];
+
+    expect(processLogicAnim(logicAnims[0], logicAnims, effects)).toBe(true);
+
+    const child = logicAnims[1];
+    expect(child.type).toBe('fire_small');
+    expect(child.x).toBe(81 * CELL_SIZE + 18);
+    expect(child.y).toBe(77 * CELL_SIZE + 18);
   });
 });
 

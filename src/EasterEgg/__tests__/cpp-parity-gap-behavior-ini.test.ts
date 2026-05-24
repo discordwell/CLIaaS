@@ -38,7 +38,7 @@ import {
   STRUCTURE_SIGHT,
   type FogContext,
 } from '../engine/fog';
-import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_MAX_HP } from '../engine/scenario';
+import { type MapStructure, STRUCTURE_SIZE, STRUCTURE_MAX_HP, structureCenterCell } from '../engine/scenario';
 import { House, buildDefaultAlliances, POWER_DRAIN } from '../engine/types';
 import { GameMap } from '../engine/map';
 
@@ -271,6 +271,45 @@ describe('rules.ini [GAP] building properties', () => {
 // =============================================================================
 
 describe('GAP power gate matches C++ Power_Fraction threshold (house.cpp:4160-4170)', () => {
+  it('powered GAP jams on its first AI pass, not only on a global 90-tick boundary', () => {
+    // C++ building.cpp:1021-1034: when Arm starts at 0, BuildingClass::AI()
+    // resets Arm and immediately Jam_Froms if power is sufficient.
+    const gap = makeGapStructure(50, 50);
+    const ctx = makeFogContext({
+      structures: [gap],
+      powerProduced: 100,
+      powerConsumed: 100,
+      tick: 1,
+    });
+
+    updateGapGenerators(ctx);
+
+    const center = structureCenterCell(gap);
+    expect(isCellJammed(ctx.map, center.cx, center.cy)).toBe(true);
+    expect(countJammedCells(ctx.map)).toBeGreaterThan(0);
+  });
+
+  it('player-owned GAP sets radar jam bits without shrouding the tactical map', () => {
+    // C++ radar.cpp:1387-1392 only calls Shroud_Cell when house != PlayerPtr.
+    // Player-owned GAP cells therefore go black on radar but stay visible on
+    // the tactical map if already mapped by sight.
+    const gap = makeGapStructure(50, 50, House.Spain);
+    const center = structureCenterCell(gap);
+    const ctx = makeFogContext({
+      structures: [gap],
+      powerProduced: 100,
+      powerConsumed: 100,
+      tick: 1,
+      playerHouse: House.Spain,
+    });
+    ctx.map.setVisibility(center.cx, center.cy, 2);
+
+    updateGapGenerators(ctx);
+
+    expect(isCellJammed(ctx.map, center.cx, center.cy)).toBe(true);
+    expect(ctx.map.visibility[center.cy * 128 + center.cx]).toBe(2);
+  });
+
   it('GAP requires Power_Fraction >= 1 (full power, not partial)', () => {
     // C++ building.cpp:997: if (House->Power_Fraction() >= 1) { Map.Jam_From... }
     // This is a STRICT >= 1 check, not "has any power"
@@ -474,7 +513,7 @@ describe('GAP sell cleanup: Remove_Gap_Effect (building.cpp:3557-3558)', () => {
 
 // =============================================================================
 // Section 8: GAP structure size — 1x2 footprint
-// C++ Center_Coord() for 1x2 building → jam origin is offset
+// C++ Center_Coord() for 1x2 building → Coord_Cell stays on the top cell.
 // =============================================================================
 
 describe('GAP STRUCTURE_SIZE affects jam center (building.cpp:998 Center_Coord)', () => {
@@ -485,10 +524,10 @@ describe('GAP STRUCTURE_SIZE affects jam center (building.cpp:998 Center_Coord)'
     expect(gh).toBe(2);
   });
 
-  it('jam center is at cx + floor(gw/2), cy + floor(gh/2)', () => {
-    // C++ building.cpp:998: Coord_Cell(Center_Coord()) for a 1x2 building
-    // TS fog.ts:291-292: cx = s.cx + Math.floor(gw / 2), cy = s.cy + Math.floor(gh / 2)
-    // For GAP at (40, 40): center = (40 + 0, 40 + 1) = (40, 41)
+  it('jam center uses Coord_Cell(Center_Coord()), not the geometric midpoint cell', () => {
+    // C++ building.cpp:998: Coord_Cell(Center_Coord()) for a 1x2 building.
+    // building.cpp:122 CenterOffset[BSIZE_12] is (0x80,0xff), and Coord_Cell()
+    // floors the lepton coordinate, so a GAP at (40,40) jams from (40,40).
     const ctx = makeFogContext({
       structures: [makeGapStructure(40, 40)],
       powerProduced: 200,
@@ -498,11 +537,11 @@ describe('GAP STRUCTURE_SIZE affects jam center (building.cpp:998 Center_Coord)'
 
     updateGapGenerators(ctx);
 
-    // Verify symmetry around (40, 41)
     const jamCenter = ctx.gapGeneratorCells.get(0)!;
     expect(jamCenter.cx).toBe(40);
-    expect(jamCenter.cy).toBe(41);
+    expect(jamCenter.cy).toBe(40);
     expect(jamCenter.radius).toBe(GAP_RADIUS);
+    expect(structureCenterCell(ctx.structures[0])).toEqual({ cx: 40, cy: 40 });
   });
 });
 
@@ -522,7 +561,7 @@ describe('GAP jam shape uses C++ octagonal distance (coord.cpp:124-136)', () => 
     });
     updateGapGenerators(ctx);
 
-    const cY = 51; // center Y of 1x2 structure at cy=50
+    const cY = 50; // Coord_Cell(Center_Coord()) for BSIZE_12 stays on cy.
     expect(isCellJammed(ctx.map, 50 + 7, cY + 7)).toBe(false);
   });
 
@@ -535,7 +574,7 @@ describe('GAP jam shape uses C++ octagonal distance (coord.cpp:124-136)', () => 
     });
     updateGapGenerators(ctx);
 
-    const cY = 51;
+    const cY = 50;
     expect(isCellJammed(ctx.map, 50 + 7, cY + 6)).toBe(true);
   });
 
@@ -549,7 +588,7 @@ describe('GAP jam shape uses C++ octagonal distance (coord.cpp:124-136)', () => 
     });
     updateGapGenerators(ctx);
 
-    const cY = 51;
+    const cY = 50;
     expect(isCellJammed(ctx.map, 50 + 10, cY)).toBe(true);
     expect(isCellJammed(ctx.map, 50, cY + 10)).toBe(true);
     expect(isCellJammed(ctx.map, 50 - 10, cY)).toBe(true);
@@ -565,7 +604,7 @@ describe('GAP jam shape uses C++ octagonal distance (coord.cpp:124-136)', () => 
     });
     updateGapGenerators(ctx);
 
-    const cY = 51;
+    const cY = 50;
     expect(isCellJammed(ctx.map, 50 + 11, cY)).toBe(false);
     expect(isCellJammed(ctx.map, 50, cY + 11)).toBe(false);
   });
@@ -579,7 +618,7 @@ describe('GAP jam shape uses C++ octagonal distance (coord.cpp:124-136)', () => 
     });
     updateGapGenerators(ctx);
 
-    const cY = 51;
+    const cY = 50;
     expect(isCellJammed(ctx.map, 50 + 10, cY + 10)).toBe(false);
   });
 

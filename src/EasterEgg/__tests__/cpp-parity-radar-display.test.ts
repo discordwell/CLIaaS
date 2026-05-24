@@ -36,6 +36,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { CELL_SIZE, House, HOUSE_FACTION, RESFACTOR, UnitType } from '../engine/types';
 import { Entity } from '../engine/entity';
 import { Renderer } from '../engine/renderer';
+import { type MapStructure } from '../engine/scenario';
 import {
   MAX_RADAR_FRAMES,
   RADAR_ACTIVATED_FRAME,
@@ -45,7 +46,7 @@ import {
   radarDisplayFrame,
   updateRadarAvailability,
 } from '../engine/radar';
-import { Terrain } from '../engine/map';
+import { GameMap, Terrain, TREE_MAX_HP, TREE_OCCUPY, type MapTree } from '../engine/map';
 
 // ─── Canvas mock ────────────────────────────────────────
 
@@ -105,6 +106,18 @@ const CPP_RADAR_SHP: Record<string, 'natoradr' | 'ussrradr'> = {
 // ─── Tests ──────────────────────────────────────────────
 
 describe('C++ parity: Radar display states (radar.cpp)', () => {
+  it('samples 24x24 radar tiles at C++ Linear_Scale_To_Linear offsets', () => {
+    // C++ radar.cpp:1102 scales a 24x24 template through SDLLIB
+    // Linear_Scale_To_Linear(..., dst_w=ZoomFactor=3). The scaler starts at
+    // source offset 0 and advances by floor((24 << 16) / 3), so the 3x3
+    // radar tile samples x/y offsets 0, 8, 16.
+    expect([
+      Renderer.cppScaleSourceOffset(24, 3, 0),
+      Renderer.cppScaleSourceOffset(24, 3, 1),
+      Renderer.cppScaleSourceOffset(24, 3, 2),
+    ]).toEqual([0, 8, 16]);
+  });
+
   describe('radar animation asset coverage', () => {
     it('manifest includes the extracted C++ radar cover SHPs', () => {
       const manifest = JSON.parse(readFileSync(
@@ -463,6 +476,38 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
       expect(fogOverlays).toHaveLength(0);
     });
 
+    it('draws the C++ active radar frame before plotting cells', () => {
+      const r = new Renderer(mockCanvas(640, 400));
+      r.hasRadar = true;
+      r.playerHouse = House.Greece;
+      const assets = {
+        getSheet: vi.fn((name: string) => name === 'nradrfrm'
+          ? { meta: { frameWidth: 160, frameHeight: 160, frameCount: 2 } }
+          : null),
+        drawFrame: vi.fn(),
+      };
+      const map = {
+        boundsX: 10,
+        boundsY: 20,
+        boundsW: 1,
+        boundsH: 1,
+        overlay: new Uint8Array(128 * 128),
+        getDisplayVisibility: () => 0,
+        getTerrain: () => Terrain.CLEAR,
+        getTreeType: () => null,
+      };
+
+      (r as any).renderMinimap(map, [], [], { x: 10 * CELL_SIZE, y: 20 * CELL_SIZE, viewWidth: 16, viewHeight: 16 }, assets);
+
+      expect(assets.drawFrame).toHaveBeenCalledWith(
+        expect.anything(),
+        'nradrfrm',
+        1,
+        480,
+        Renderer.RADAR_COVER_DRAW_Y,
+      );
+    });
+
     it('blacks jammed radar terrain even when the cell is mapped', () => {
       const fills: Array<{ x: number; y: number; w: number; h: number; style: string }> = [];
       const ctx = {
@@ -535,6 +580,563 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
         h: layout.cellPx,
         style: 'rgb(104,116,160)',
       }));
+    });
+
+    it('draws infantry radar blips as C++ sub-cell dots instead of full-cell unit blocks', () => {
+      // C++ radar.cpp Render_Infantry: infantry use subsize=max(1,size/3)
+      // and x/y offsets from Coord_XLepton/Coord_YLepton. At zoom size 3,
+      // that is a single radar pixel inside the 3x3 cell.
+      const fills: Array<{ x: number; y: number; w: number; h: number; style: string }> = [];
+      const ctx = {
+        fillStyle: '',
+        fillRect(x: number, y: number, w: number, h: number) {
+          fills.push({ x, y, w, h, style: this.fillStyle });
+        },
+      };
+      const r = new Renderer(mockCanvas(640, 400, ctx));
+      r.hasRadar = true;
+      const map = {
+        boundsX: 10,
+        boundsY: 20,
+        boundsW: 1,
+        boundsH: 1,
+        overlay: new Uint8Array(128 * 128),
+        getDisplayVisibility: () => 2,
+        getTerrain: () => Terrain.CLEAR,
+        getTreeType: () => null,
+      };
+      const infantry = new Entity(
+        UnitType.I_E1,
+        House.Greece,
+        10 * CELL_SIZE,
+        20 * CELL_SIZE,
+      );
+      infantry.leptonX = 10 * 256 + 192;
+      infantry.leptonY = 20 * 256 + 192;
+      infantry.syncPosFromLeptons();
+
+      (r as any).renderMinimap(map, [infantry], [], { x: 10 * CELL_SIZE, y: 20 * CELL_SIZE, viewWidth: 16, viewHeight: 16 }, undefined);
+
+      const layout = (r as any).getActiveRadarLayout(map, { x: 10 * CELL_SIZE, y: 20 * CELL_SIZE });
+      const infantryFills = fills.filter(f => f.style === 'rgb(104,116,160)');
+      expect(infantryFills).toContainEqual({
+        x: layout.x + 2,
+        y: layout.y + 2,
+        w: 1,
+        h: 1,
+        style: 'rgb(104,116,160)',
+      });
+      expect(infantryFills).not.toContainEqual({
+        x: layout.x,
+        y: layout.y,
+        w: layout.cellPx,
+        h: layout.cellPx,
+        style: 'rgb(104,116,160)',
+      });
+    });
+
+    it('draws spy radar blips in the player house color like C++ PlayerPtr remap', () => {
+      const fills: Array<{ x: number; y: number; w: number; h: number; style: string }> = [];
+      const ctx = {
+        fillStyle: '',
+        fillRect(x: number, y: number, w: number, h: number) {
+          fills.push({ x, y, w, h, style: this.fillStyle });
+        },
+      };
+      const r = new Renderer(mockCanvas(640, 400, ctx));
+      r.hasRadar = true;
+      (r as any).playerHouse = House.Greece;
+      const map = {
+        boundsX: 10,
+        boundsY: 20,
+        boundsW: 1,
+        boundsH: 1,
+        overlay: new Uint8Array(128 * 128),
+        getDisplayVisibility: () => 2,
+        getTerrain: () => Terrain.CLEAR,
+        getTreeType: () => null,
+      };
+      const spy = new Entity(
+        UnitType.I_SPY,
+        House.USSR,
+        10 * CELL_SIZE,
+        20 * CELL_SIZE,
+      );
+      spy.leptonX = 10 * 256 + 128;
+      spy.leptonY = 20 * 256 + 128;
+      spy.syncPosFromLeptons();
+
+      (r as any).renderMinimap(map, [spy], [], { x: 10 * CELL_SIZE, y: 20 * CELL_SIZE, viewWidth: 16, viewHeight: 16 }, undefined);
+
+      const spyFills = fills.filter(f => f.w === 1 && f.h === 1);
+      expect(spyFills).toContainEqual(expect.objectContaining({
+        style: 'rgb(104,116,160)',
+      }));
+      expect(spyFills).not.toContainEqual(expect.objectContaining({
+        style: 'rgb(176,0,0)',
+      }));
+    });
+
+    it('draws structure blips from C++ Occupy_List cells, not the rectangular BSIZE footprint', () => {
+      // C++ radar.cpp asks each CellClass for Cell_Building() via
+      // Cell_Color(true). That follows the building occupy list, not every
+      // cell in the declared BSIZE footprint. FIX is a useful guard because
+      // its BSIZE is 3x3 but its bdata.cpp Occupy_List skips the NW corner.
+      const fills: Array<{ x: number; y: number; w: number; h: number; style: string }> = [];
+      const ctx = {
+        fillStyle: '',
+        fillRect(x: number, y: number, w: number, h: number) {
+          fills.push({ x, y, w, h, style: this.fillStyle });
+        },
+      };
+      const r = new Renderer(mockCanvas(640, 400, ctx));
+      r.hasRadar = true;
+      const map = {
+        boundsX: 50,
+        boundsY: 89,
+        boundsW: 6,
+        boundsH: 5,
+        overlay: new Uint8Array(128 * 128),
+        getDisplayVisibility: () => 2,
+        getTerrain: () => Terrain.CLEAR,
+        getTreeType: () => null,
+      };
+      const fix: MapStructure = {
+        type: 'FIX',
+        image: 'fix',
+        house: House.Greece,
+        cx: 51,
+        cy: 90,
+        hp: 256,
+        maxHp: 256,
+        alive: true,
+        rubble: false,
+        attackCooldown: 0,
+        ammo: -1,
+        maxAmmo: -1,
+      };
+
+      (r as any).renderMinimap(map, [], [fix], { x: 50 * CELL_SIZE, y: 89 * CELL_SIZE, viewWidth: 16, viewHeight: 16 }, undefined);
+
+      const layout = (r as any).getActiveRadarLayout(map, { x: 50 * CELL_SIZE, y: 89 * CELL_SIZE });
+      const structureFills = fills.filter(f => f.style === 'rgb(104,116,160)');
+      const expectedCells = [
+        [52, 90],
+        [51, 91], [52, 91], [53, 91],
+        [52, 92],
+      ];
+
+      expect(structureFills).toEqual(expectedCells.map(([cx, cy]) => ({
+        x: layout.x + (cx - layout.ox) * layout.cellPx,
+        y: layout.y + (cy - layout.oy) * layout.cellPx,
+        w: layout.cellPx,
+        h: layout.cellPx,
+        style: 'rgb(104,116,160)',
+      })));
+    });
+
+    it('renders TerrainClass radar icons even when the underlying TMP tile was drawn', () => {
+      // C++ Plot_Radar_Pixel draws the template tile first, then calls
+      // Render_Terrain(cell, ...). A successful tile draw must not suppress
+      // tree/terrain-object radar icons.
+      const fills: Array<{ x: number; y: number; w: number; h: number; style: string }> = [];
+      const ctx = {
+        fillStyle: '',
+        fillRect(x: number, y: number, w: number, h: number) {
+          fills.push({ x, y, w, h, style: this.fillStyle });
+        },
+      };
+      const r = new Renderer(mockCanvas(640, 400, ctx));
+      r.hasRadar = true;
+
+      const pal = Array.from({ length: 256 }, () => [0, 0, 0, 255]);
+      pal[0] = [0, 0, 0, 0];
+      pal[15] = [255, 255, 255, 255];
+      pal[20] = [40, 40, 40, 255];
+      pal[21] = [60, 60, 60, 255];
+      (r as any).pal = pal;
+      (r as any).tilesetReady = true;
+      (r as any).tilesetTheatre = 'TEMPERATE';
+      (r as any).tilesetImage = { naturalWidth: 24, naturalHeight: 24, width: 24, height: 24 };
+      (r as any).tilesetMeta = {
+        tileW: 24,
+        tileH: 24,
+        atlasW: 24,
+        atlasH: 24,
+        tileCount: 1,
+        tiles: { '255,2': { ax: 0, ay: 0 } },
+      };
+
+      const treeImage = { naturalWidth: 24, naturalHeight: 24, width: 24, height: 24 };
+      const tileData = new Uint8ClampedArray(24 * 24 * 4);
+      const treeData = new Uint8ClampedArray(24 * 24 * 4);
+      const treePixel = (1 * 24 + 1) * 4;
+      treeData[treePixel] = 40;
+      treeData[treePixel + 1] = 40;
+      treeData[treePixel + 2] = 40;
+      treeData[treePixel + 3] = 255;
+
+      const previousDocument = (globalThis as typeof globalThis & { document?: Document }).document;
+      let lastSource: unknown = null;
+      const sourcePixels = new Map<unknown, Uint8ClampedArray>([
+        [(r as any).tilesetImage, tileData],
+        [treeImage, treeData],
+      ]);
+      const fakeCanvas = {
+        width: 0,
+        height: 0,
+        getContext: () => ({
+          imageSmoothingEnabled: false,
+          drawImage: vi.fn((source: unknown) => { lastSource = source; }),
+          getImageData: vi.fn(() => ({ data: sourcePixels.get(lastSource) ?? tileData })),
+        }),
+      } as unknown as HTMLCanvasElement;
+      Object.defineProperty(globalThis, 'document', {
+        configurable: true,
+        value: { createElement: vi.fn(() => fakeCanvas) },
+      });
+
+      try {
+        const assets = {
+          hasSheet: vi.fn((name: string) => name === 'tc01'),
+          getSheet: vi.fn((name: string) => name === 'tc01'
+            ? { image: treeImage, meta: { frameWidth: 24, frameHeight: 24, frameCount: 1, columns: 1, rows: 1, sheetWidth: 24, sheetHeight: 24 } }
+            : undefined),
+        };
+        const map = {
+          boundsX: 10,
+          boundsY: 20,
+          boundsW: 1,
+          boundsH: 1,
+          overlay: new Uint8Array(128 * 128),
+          templateType: new Uint16Array(128 * 128).fill(255),
+          templateIcon: new Uint8Array(128 * 128),
+          getDisplayVisibility: () => 2,
+          getTerrain: () => Terrain.CLEAR,
+          getTreeType: () => 'tc01',
+          getTreeAtCell: () => ({ type: 'tc01', cx: 10, cy: 20 }),
+          getTerrainObjectAtCell: () => undefined,
+        };
+
+        (r as any).renderMinimap(map, [], [], { x: 10 * CELL_SIZE, y: 20 * CELL_SIZE, viewWidth: 16, viewHeight: 16 }, assets);
+
+        const layout = (r as any).getActiveRadarLayout(map, { x: 10 * CELL_SIZE, y: 20 * CELL_SIZE });
+        expect(fills).toContainEqual({
+          x: layout.x,
+          y: layout.y,
+          w: 1,
+          h: 1,
+          style: 'rgb(60,60,60)',
+        });
+      } finally {
+        Object.defineProperty(globalThis, 'document', {
+          configurable: true,
+          value: previousDocument,
+        });
+      }
+    });
+
+    it('draws TerrainClass radar icons from C++ Overlapper cells, not only Occupy_List cells', () => {
+      // C++ MapClass::Place_Down registers TerrainClass in both Occupy_List
+      // and Overlap_List. RadarClass::Render_Terrain checks Cell_Occupier
+      // plus Overlapper, so TC04's visual top-row cells draw on radar even
+      // though they do not block movement.
+      const fills: Array<{ x: number; y: number; w: number; h: number; style: string }> = [];
+      const ctx = {
+        fillStyle: '',
+        fillRect(x: number, y: number, w: number, h: number) {
+          fills.push({ x, y, w, h, style: this.fillStyle });
+        },
+      };
+      const r = new Renderer(mockCanvas(640, 400, ctx));
+      r.hasRadar = true;
+
+      const pal = Array.from({ length: 256 }, () => [0, 0, 0, 255]);
+      pal[0] = [0, 0, 0, 0];
+      pal[15] = [255, 255, 255, 255];
+      pal[20] = [40, 40, 40, 255];
+      pal[21] = [60, 60, 60, 255];
+      (r as any).pal = pal;
+      (r as any).tilesetReady = true;
+      (r as any).tilesetTheatre = 'TEMPERATE';
+      (r as any).tilesetImage = { naturalWidth: 24, naturalHeight: 24, width: 24, height: 24 };
+      (r as any).tilesetMeta = {
+        tileW: 24,
+        tileH: 24,
+        atlasW: 24,
+        atlasH: 24,
+        tileCount: 1,
+        tiles: { '255,0': { ax: 0, ay: 0 } },
+      };
+
+      const map = new GameMap();
+      map.setBounds(10, 20, 4, 3, false);
+      map.templateType.fill(255);
+      for (let cy = 20; cy < 23; cy++) {
+        for (let cx = 10; cx < 14; cx++) {
+          map.displayVisibility[cy * 128 + cx] = 2;
+        }
+      }
+      const tree: MapTree = {
+        type: 'tc04',
+        cx: 10,
+        cy: 20,
+        hp: TREE_MAX_HP,
+        maxHp: TREE_MAX_HP,
+        immune: true,
+        occupyCells: TREE_OCCUPY.tc04.map(([dx, dy]) => (10 + dx) + (20 + dy) * 128),
+      };
+      map.addTree(tree);
+
+      const treeImage = { naturalWidth: 96, naturalHeight: 72, width: 96, height: 72 };
+      const tileData = new Uint8ClampedArray(24 * 24 * 4);
+      const treeData = new Uint8ClampedArray(96 * 72 * 4);
+      const treePixel = (1 * 96 + 49) * 4;
+      treeData[treePixel] = 40;
+      treeData[treePixel + 1] = 40;
+      treeData[treePixel + 2] = 40;
+      treeData[treePixel + 3] = 255;
+
+      const previousDocument = (globalThis as typeof globalThis & { document?: Document }).document;
+      let lastSource: unknown = null;
+      const sourcePixels = new Map<unknown, Uint8ClampedArray>([
+        [(r as any).tilesetImage, tileData],
+        [treeImage, treeData],
+      ]);
+      const fakeCanvas = {
+        width: 0,
+        height: 0,
+        getContext: () => ({
+          imageSmoothingEnabled: false,
+          drawImage: vi.fn((source: unknown) => { lastSource = source; }),
+          getImageData: vi.fn(() => ({ data: sourcePixels.get(lastSource) ?? tileData })),
+        }),
+      } as unknown as HTMLCanvasElement;
+      Object.defineProperty(globalThis, 'document', {
+        configurable: true,
+        value: { createElement: vi.fn(() => fakeCanvas) },
+      });
+
+      try {
+        const assets = {
+          hasSheet: vi.fn((name: string) => name === 'tc04'),
+          getSheet: vi.fn((name: string) => name === 'tc04'
+            ? { image: treeImage, meta: { frameWidth: 96, frameHeight: 72, frameCount: 1, columns: 1, rows: 1, sheetWidth: 96, sheetHeight: 72 } }
+            : undefined),
+        };
+
+        (r as any).renderMinimap(map, [], [], { x: 10 * CELL_SIZE, y: 20 * CELL_SIZE, viewWidth: 16, viewHeight: 16 }, assets);
+
+        const layout = (r as any).getActiveRadarLayout(map, { x: 10 * CELL_SIZE, y: 20 * CELL_SIZE });
+        expect(map.isTreeOccupied(12, 20)).toBe(false);
+        expect(fills).toContainEqual({
+          x: layout.x + 2 * layout.cellPx,
+          y: layout.y,
+          w: 1,
+          h: 1,
+          style: 'rgb(60,60,60)',
+        });
+      } finally {
+        Object.defineProperty(globalThis, 'document', {
+          configurable: true,
+          value: previousDocument,
+        });
+      }
+    });
+
+    it('treats TerrainClass LTGREEN radar samples as transparent like C++ Get_Radar_Icon', () => {
+      // C++ conquer.cpp Get_Radar_Icon: if (pixel == LTGREEN) pixel = 0.
+      // LTGREEN is palette enum value 4; the extracted PNGs preserve that
+      // source index as the alpha-130 shadow sentinel, not an opaque radar dot.
+      const fills: Array<{ x: number; y: number; w: number; h: number; style: string }> = [];
+      const ctx = {
+        fillStyle: '',
+        fillRect(x: number, y: number, w: number, h: number) {
+          fills.push({ x, y, w, h, style: this.fillStyle });
+        },
+      };
+      const r = new Renderer(mockCanvas(640, 400, ctx));
+      r.hasRadar = true;
+
+      const pal = Array.from({ length: 256 }, () => [0, 0, 0, 255]);
+      pal[0] = [0, 0, 0, 0];
+      pal[4] = [88, 252, 84, 130];
+      pal[15] = [255, 255, 255, 255];
+      pal[18] = [20, 20, 24, 255];
+      (r as any).pal = pal;
+      (r as any).tilesetReady = true;
+      (r as any).tilesetTheatre = 'TEMPERATE';
+      (r as any).tilesetImage = { naturalWidth: 24, naturalHeight: 24, width: 24, height: 24 };
+      (r as any).tilesetMeta = {
+        tileW: 24,
+        tileH: 24,
+        atlasW: 24,
+        atlasH: 24,
+        tileCount: 1,
+        tiles: { '255,2': { ax: 0, ay: 0 } },
+      };
+
+      const treeImage = { naturalWidth: 24, naturalHeight: 24, width: 24, height: 24 };
+      const tileData = new Uint8ClampedArray(24 * 24 * 4);
+      const treeData = new Uint8ClampedArray(24 * 24 * 4);
+      const treePixel = (1 * 24 + 1) * 4;
+      treeData[treePixel] = 0;
+      treeData[treePixel + 1] = 0;
+      treeData[treePixel + 2] = 0;
+      treeData[treePixel + 3] = 130;
+
+      const previousDocument = (globalThis as typeof globalThis & { document?: Document }).document;
+      let lastSource: unknown = null;
+      const sourcePixels = new Map<unknown, Uint8ClampedArray>([
+        [(r as any).tilesetImage, tileData],
+        [treeImage, treeData],
+      ]);
+      const fakeCanvas = {
+        width: 0,
+        height: 0,
+        getContext: () => ({
+          imageSmoothingEnabled: false,
+          drawImage: vi.fn((source: unknown) => { lastSource = source; }),
+          getImageData: vi.fn(() => ({ data: sourcePixels.get(lastSource) ?? tileData })),
+        }),
+      } as unknown as HTMLCanvasElement;
+      Object.defineProperty(globalThis, 'document', {
+        configurable: true,
+        value: { createElement: vi.fn(() => fakeCanvas) },
+      });
+
+      try {
+        const assets = {
+          hasSheet: vi.fn((name: string) => name === 'tc01'),
+          getSheet: vi.fn((name: string) => name === 'tc01'
+            ? { image: treeImage, meta: { frameWidth: 24, frameHeight: 24, frameCount: 1, columns: 1, rows: 1, sheetWidth: 24, sheetHeight: 24 } }
+            : undefined),
+        };
+        const map = {
+          boundsX: 10,
+          boundsY: 20,
+          boundsW: 1,
+          boundsH: 1,
+          overlay: new Uint8Array(128 * 128),
+          templateType: new Uint16Array(128 * 128).fill(255),
+          templateIcon: new Uint8Array(128 * 128),
+          getDisplayVisibility: () => 2,
+          getTerrain: () => Terrain.CLEAR,
+          getTreeType: () => 'tc01',
+          getTreeAtCell: () => ({ type: 'tc01', cx: 10, cy: 20 }),
+          getTerrainObjectAtCell: () => undefined,
+        };
+
+        (r as any).renderMinimap(map, [], [], { x: 10 * CELL_SIZE, y: 20 * CELL_SIZE, viewWidth: 16, viewHeight: 16 }, assets);
+
+        const layout = (r as any).getActiveRadarLayout(map, { x: 10 * CELL_SIZE, y: 20 * CELL_SIZE });
+        expect(fills).not.toContainEqual({
+          x: layout.x,
+          y: layout.y,
+          w: 1,
+          h: 1,
+          style: 'rgb(20,20,24)',
+        });
+      } finally {
+        Object.defineProperty(globalThis, 'document', {
+          configurable: true,
+          value: previousDocument,
+        });
+      }
+    });
+
+    it('renders ore overlay radar icons after the terrain tile with C++ FadingYellow', () => {
+      // C++ Plot_Radar_Pixel draws the TMP tile, then Render_Overlay().
+      // Tiberium overlays use OverlayData as the radar-icon frame and remap
+      // nontransparent samples through DisplayClass::FadingYellow.
+      const fills: Array<{ x: number; y: number; w: number; h: number; style: string }> = [];
+      const ctx = {
+        fillStyle: '',
+        fillRect(x: number, y: number, w: number, h: number) {
+          fills.push({ x, y, w, h, style: this.fillStyle });
+        },
+      };
+      const r = new Renderer(mockCanvas(640, 400, ctx));
+      r.hasRadar = true;
+
+      const pal = Array.from({ length: 256 }, () => [0, 0, 0, 255]);
+      pal[0] = [0, 0, 0, 0];
+      pal[5] = [255, 255, 85, 255];
+      pal[6] = [255, 255, 85, 255];
+      (r as any).pal = pal;
+      (r as any).tilesetReady = true;
+      (r as any).tilesetTheatre = 'TEMPERATE';
+      (r as any).tilesetImage = { naturalWidth: 24, naturalHeight: 24, width: 24, height: 24 };
+      (r as any).tilesetMeta = {
+        tileW: 24,
+        tileH: 24,
+        atlasW: 24,
+        atlasH: 24,
+        tileCount: 1,
+        tiles: { '255,2': { ax: 0, ay: 0 } },
+      };
+
+      const map = new GameMap();
+      map.setBounds(10, 20, 1, 1, false);
+      map.setTerrain(10, 20, Terrain.ORE);
+      map.displayVisibility[20 * 128 + 10] = 2;
+      map.templateType.fill(255);
+      map.overlay[20 * 128 + 10] = GameMap.OVERLAY_GOLD3;
+      map.oreDensity[20 * 128 + 10] = 6;
+
+      const oreImage = { naturalWidth: 288, naturalHeight: 24, width: 288, height: 24 };
+      const tileData = new Uint8ClampedArray(24 * 24 * 4);
+      const oreData = new Uint8ClampedArray(288 * 24 * 4);
+      const orePixel = (1 * 288 + 6 * 24 + 1) * 4;
+      oreData[orePixel] = 255;
+      oreData[orePixel + 1] = 255;
+      oreData[orePixel + 2] = 85;
+      oreData[orePixel + 3] = 255;
+
+      const previousDocument = (globalThis as typeof globalThis & { document?: Document }).document;
+      let lastSource: unknown = null;
+      const sourcePixels = new Map<unknown, Uint8ClampedArray>([
+        [(r as any).tilesetImage, tileData],
+        [oreImage, oreData],
+      ]);
+      const fakeCanvas = {
+        width: 0,
+        height: 0,
+        getContext: () => ({
+          imageSmoothingEnabled: false,
+          drawImage: vi.fn((source: unknown) => { lastSource = source; }),
+          getImageData: vi.fn(() => ({ data: sourcePixels.get(lastSource) ?? tileData })),
+        }),
+      } as unknown as HTMLCanvasElement;
+      Object.defineProperty(globalThis, 'document', {
+        configurable: true,
+        value: { createElement: vi.fn(() => fakeCanvas) },
+      });
+
+      try {
+        const assets = {
+          hasSheet: vi.fn((name: string) => name === 'gold03'),
+          getSheet: vi.fn((name: string) => name === 'gold03'
+            ? { image: oreImage, meta: { frameWidth: 24, frameHeight: 24, frameCount: 12, columns: 12, rows: 1, sheetWidth: 288, sheetHeight: 24 } }
+            : undefined),
+        };
+
+        (r as any).renderMinimap(map, [], [], { x: 10 * CELL_SIZE, y: 20 * CELL_SIZE, viewWidth: 16, viewHeight: 16 }, assets);
+
+        const layout = (r as any).getActiveRadarLayout(map, { x: 10 * CELL_SIZE, y: 20 * CELL_SIZE });
+        expect(fills).toContainEqual({
+          x: layout.x,
+          y: layout.y,
+          w: 1,
+          h: 1,
+          style: 'rgb(255,255,85)',
+        });
+      } finally {
+        Object.defineProperty(globalThis, 'document', {
+          configurable: true,
+          value: previousDocument,
+        });
+      }
     });
 
     it('draws the viewport as C++ LTGREEN corner brackets, not a white rectangle', () => {

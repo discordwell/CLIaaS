@@ -189,6 +189,10 @@ export class BitmapFont {
     for (let i = 0; i < text.length; i++) {
       const code = text.charCodeAt(i);
       const g = this.meta.glyphs[code];
+      if (g && g.h === 0) {
+        cx += (g.w + letterSpacing) * scale;
+        continue;
+      }
       if (!g) {
         cx += (this.meta.maxWidth + letterSpacing) * scale;
         continue;

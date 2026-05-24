@@ -1021,6 +1021,22 @@ char* agent_get_state(void)
 			}
 			buf_cat("],");
 
+			buf_cat("\"smudges\":[");
+			{
+				bool sfirst = true;
+				for (CELL si = 0; si < MAP_CELL_TOTAL; si++) {
+					CellClass const & cell = Map[si];
+					if (cell.Smudge == SMUDGE_NONE) continue;
+					if (!sfirst) buf_cat(",");
+					sfirst = false;
+					SmudgeTypeClass const & stype = SmudgeTypeClass::As_Reference(cell.Smudge);
+					buf_cat("{\"i\":%d,\"type\":\"%s\",\"cx\":%d,\"cy\":%d,\"data\":%d,\"land\":%d}",
+						(int)si, stype.IniName, Cell_X(si), Cell_Y(si),
+						(int)cell.SmudgeData, (int)cell.Land_Type());
+				}
+			}
+			buf_cat("],");
+
 			// Dump Logic layer entity order (units/infantry/aircraft/buildings/vessels) for parity debugging.
 	// Buildings/vessels included so cross-engine structure iteration order can be verified
 	// (BuildingClass::Unlimbo insertion vs TS INI section order — SCG11EA t32 SAM, task ad83df56).

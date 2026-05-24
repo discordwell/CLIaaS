@@ -386,6 +386,26 @@ export interface InfantryAnim {
   idleRate?: number;   // ticks per frame for idle (default 4)
 }
 
+export const CPP_CORPSE_FRAME_TICKS = 30;
+export const CPP_CORPSE_FRAME_COUNT = 6;
+
+/** C++ infantry.cpp follow-up corpse AnimClass creation after death DoControls.
+ *  InfDeath 4 (DO_FIRE_DEATH) and 5 (ELECT_DIE) do not create CORPSE anims. */
+export function cppCorpseAnimForInfantryDeath(
+  deathVariant: number,
+): { sprite: 'corpse1' | 'corpse2' | 'corpse3'; dx: number; dy: number } | null {
+  switch (deathVariant) {
+    case 1: // DO_GUN_DEATH
+      return { sprite: 'corpse1', dx: -2, dy: 4 };
+    case 2: // DO_EXPLOSION_DEATH
+      return { sprite: 'corpse3', dx: -2, dy: 4 };
+    case 3: // DO_GRENADE_DEATH
+      return { sprite: 'corpse1', dx: -10, dy: 3 };
+    default:
+      return null;
+  }
+}
+
 // C++ infantry.cpp:90 — HumanShape maps Dir_To_32(PrimaryFacing.Current()) to
 // SHP sprite direction order. SHP files store directions as:
 // N(0), NW(1), W(2), SW(3), S(4), SE(5), E(6), NE(7).

@@ -24,7 +24,7 @@ import { type AircraftContext, canTargetNaval, closestInfantryUnlimboSpot } from
 import { AI_BUILD_RULES } from './ai';
 import { ScenarioRandom } from './random';
 import { assignMission, commence } from './missionLifecycle';
-import { type LogicAnim, type LogicAnimType, spawnLogicAnim, spawnLogicAnimForSprite } from './logicAnim';
+import { type LogicAnim, type LogicAnimType, logicAnimTypeForSprite, spawnLogicAnim, spawnLogicAnimForSprite } from './logicAnim';
 import { getActiveTeams } from './team';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -264,6 +264,22 @@ function moveCoordLeptons(coord: { lx: number; ly: number }, dir256: number, dis
   return {
     lx: coord.lx + ((COS_TABLE_256[dir] * dist) >> 7),
     ly: coord.ly - ((SIN_TABLE_256[dir] * dist) >> 7),
+  };
+}
+
+function coordScatterPixels(point: WorldPos, distanceLeptons: number): WorldPos {
+  const start = {
+    lx: pixelToLepton(point.x),
+    ly: pixelToLepton(point.y),
+  };
+  const dir = withScenarioRandomSourceTag(50002, () => ScenarioRandom.nextInRange(0, 255));
+  const moved = moveCoordLeptons(start, dir, distanceLeptons);
+  if (moved.lx < 0 || moved.ly < 0 || moved.lx >= 0x8000 || moved.ly >= 0x8000) {
+    return point;
+  }
+  return {
+    x: moved.lx * CELL_SIZE / LEPTON_SIZE,
+    y: moved.ly * CELL_SIZE / LEPTON_SIZE,
   };
 }
 
@@ -614,8 +630,34 @@ function coordScatterFromCell(cellCx: number, cellCy: number, radiusLeptons: num
   };
 }
 
+function craterSmudgeTypeForCoord(point: { x: number; y: number }): string {
+  const lx = pixelToLepton(point.x);
+  const ly = pixelToLepton(point.y);
+  const fracX = ((lx % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+  const fracY = ((ly % LEPTON_SIZE) + LEPTON_SIZE) % LEPTON_SIZE;
+  let spotIndex = 0;
+  if (leptonDist(fracX, fracY, 0x80, 0x80) >= 60) {
+    if (fracX > 0x80) spotIndex |= 0x01;
+    if (fracY > 0x80) spotIndex |= 0x02;
+    spotIndex += 1;
+  }
+  return `cr${spotIndex + 1}`;
+}
+
+function addCraterSmudge(ctx: CombatContext, point: { x: number; y: number }): void {
+  ctx.map.addSmudge(
+    craterSmudgeTypeForCoord(point),
+    Math.floor(point.x / CELL_SIZE),
+    Math.floor(point.y / CELL_SIZE),
+  );
+}
+
 function reserveBuildingAnimSlot(ctx: CombatContext): boolean {
   return !ctx.reserveAnimSlot || ctx.reserveAnimSlot();
+}
+
+function linkedAnimEffectFields(logicIndexHint: number | undefined): Partial<Effect> {
+  return logicIndexHint !== undefined ? { logicIndexHint } : { cppLogicSlot: true };
 }
 
 function submitBuildingFireSmall(
@@ -1020,6 +1062,7 @@ function submitBuildingFballEffect(
 ): void {
   if (!animSlotReserved && !reserveBuildingAnimSlot(ctx)) return;
   const logicAnims = ctx.logicAnims ?? (ctx.logicAnims = []);
+  const logicIndexHint = ctx.logicIndexHintForNewObject?.();
   logicAnims.push({
     type: 'fball1',
     x,
@@ -1029,7 +1072,7 @@ function submitBuildingFballEffect(
     loops: 1,
     delay,
     isBrandNew: ctx.logicAnimsAlreadyProcessed !== true,
-    logicIndexHint: ctx.logicIndexHintForNewObject?.(),
+    logicIndexHint,
     createdLogicTick: ctx.tick,
   });
   ctx.effects.push({
@@ -1041,6 +1084,7 @@ function submitBuildingFballEffect(
     size,
     sprite: 'fball1',
     spriteStart: 0,
+    ...linkedAnimEffectFields(logicIndexHint),
   } as Effect);
 }
 
@@ -1072,19 +1116,6 @@ function submitBuildingSmokeEffect(
     undefined,
     ctx.tick,
   );
-  ctx.effects.push({
-    type: 'explosion',
-    x,
-    y,
-    frame: -delay,
-    maxFrames: EXPLOSION_FRAMES.smoke_m ?? 91,
-    size: 10,
-    sprite: 'smoke_m',
-    spriteStart: 0,
-    loopStart: 67,
-    loopEnd: EXPLOSION_FRAMES.smoke_m ?? 91,
-    loops: Math.max(1, loop) * 6,
-  } as Effect);
 }
 
 function treeKey(tree: MapTree): number {
@@ -1141,7 +1172,7 @@ function runBuildingDestroyedTakeDamageEffects(ctx: CombatContext, s: MapStructu
   for (const cell of getStructureOccupyCells(s.type, s.cx, s.cy)) {
     // C++ building.cpp:1301 — Random_Pick(SMUDGE_CRATER1, SMUDGE_CRATER6).
     ScenarioRandom.nextInRange(1, 6);
-    ctx.map.addDecal(cell.cx, cell.cy, 10, 0.5);
+    ctx.map.addSmudge('cr1', cell.cx, cell.cy);
 
     if (ScenarioRandom.percentChance(50)) {
       // C++ allocation happens before constructor arguments, so a full heap
@@ -1727,7 +1758,6 @@ export function killBridgeOccupants(ctx: CombatContext, cx: number, cy: number, 
     if (killed) {
       handleUnitDeath(ctx, e, {
         screenShake: 4, explosionSize: 12, debris: true,
-        decal: null,
         explodeLgSound: false,
         attackerIsPlayer: false,
         trackLoss: ctx.isPlayerControlled(e),
@@ -2308,7 +2338,6 @@ export function fireWeaponAt(
     attacker.creditKill();
     handleUnitDeath(ctx, target, {
       screenShake: 8, explosionSize: 16, debris: true,
-      decal: { infantry: 6, vehicle: 10, opacity: 0.6 },
       explodeLgSound: false,
       attackerIsPlayer: ctx.isPlayerControlled(attacker),
       trackLoss: true,
@@ -2667,60 +2696,60 @@ function wideAreaDamage(
   }
 }
 
-/** Shared death aftermath — explosion, debris, decal, sound, kill/loss tracking.
+/** Shared death aftermath — explosion, debris, sound, kill/loss tracking.
  *  Parameterized to handle the 4 death contexts (direct, defense, projectile, splash). */
 export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
   screenShake: number;
   explosionSize: number;
   debris: boolean;
-  decal: { infantry: number; vehicle: number; opacity: number } | null;
   explodeLgSound: boolean;
   attackerIsPlayer: boolean;
   trackLoss: boolean;
   friendlyFireLoss?: boolean;
   attacker?: Entity;
-	}): void {
-	  const kx = victim.pos.x;
-	  const ky = victim.pos.y;
-	  const isGroundVehicle = !victim.stats.isInfantry && !victim.stats.isAircraft && !victim.stats.isVessel;
-	  const deathExplosionSprite = isGroundVehicle ? 'frag1' : 'fball1';
-	  if (isGroundVehicle) {
-	    // C++ unit.cpp:1009-1020 creates UnitTypeClass::Explosion before
-	    // crew/passenger ejection. RA's vehicle classes use ANIM_FRAG1 in udata.cpp,
-	    // and the AnimClass occupies a Logic slot even when the renderer also draws
-	    // a simple explosion effect.
-	    spawnLogicAnimForSprite(
-	      ctx.logicAnims,
-	      ctx.effects,
-	      deathExplosionSprite,
-	      kx,
-	      ky,
-	      false,
-	      ctx.logicAnimsAlreadyProcessed === true,
-	      ctx.logicIndexHintForNewObject?.(),
-	      ctx.logicIndexHintForNewObject,
-	      ctx.reserveAnimSlot,
-	    );
-	  }
-	  ctx.effects.push({
-	    type: 'explosion',
-	    x: kx,
-	    y: ky,
-	    frame: 0,
-	    maxFrames: EXPLOSION_FRAMES[deathExplosionSprite] ?? 18,
-	    size: opts.explosionSize,
-	    sprite: deathExplosionSprite,
-	    spriteStart: 0,
-	  } as Effect);
+}): void {
+  const kx = victim.pos.x;
+  const ky = victim.pos.y;
+  const isGroundVehicle = !victim.stats.isInfantry && !victim.stats.isAircraft && !victim.stats.isVessel;
+  const deathExplosionSprite = isGroundVehicle ? 'frag1' : 'fball1';
+  let deathExplosionLink: Partial<Effect> | undefined;
+  if (isGroundVehicle) {
+    // C++ unit.cpp:1009-1020 creates UnitTypeClass::Explosion before
+    // crew/passenger ejection. RA's vehicle classes use ANIM_FRAG1 in udata.cpp,
+    // and the AnimClass occupies a Logic slot even when the renderer also draws
+    // a simple explosion effect.
+    const logicIndexHint = ctx.logicIndexHintForNewObject?.();
+    const spawned = spawnLogicAnimForSprite(
+      ctx.logicAnims,
+      ctx.effects,
+      deathExplosionSprite,
+      kx,
+      ky,
+      false,
+      ctx.logicAnimsAlreadyProcessed === true,
+      logicIndexHint,
+      ctx.logicIndexHintForNewObject,
+      ctx.reserveAnimSlot,
+    );
+    if (spawned) deathExplosionLink = linkedAnimEffectFields(logicIndexHint);
+  }
+  const shouldDrawDeathExplosion = !victim.stats.isInfantry && (!isGroundVehicle || deathExplosionLink);
+  if (shouldDrawDeathExplosion) ctx.effects.push({
+    type: 'explosion',
+    x: kx,
+    y: ky,
+    frame: 0,
+    maxFrames: EXPLOSION_FRAMES[deathExplosionSprite] ?? 18,
+    size: opts.explosionSize,
+    sprite: deathExplosionSprite,
+    spriteStart: 0,
+    ...deathExplosionLink,
+  } as Effect);
   if (opts.debris && !victim.stats.isInfantry) {
     ctx.effects.push({ type: 'debris', x: kx, y: ky, frame: 0, maxFrames: 12, size: 18 } as Effect);
   }
-  ctx.screenShake = Math.max(ctx.screenShake, opts.screenShake);
-  if (opts.decal) {
-    const tc = worldToCell(kx, ky);
-    ctx.map.addDecal(tc.cx, tc.cy,
-      victim.stats.isInfantry ? opts.decal.infantry : opts.decal.vehicle, opts.decal.opacity);
-  }
+  const deathScreenShake = victim.stats.isInfantry ? 0 : opts.screenShake;
+  ctx.screenShake = Math.max(ctx.screenShake, deathScreenShake);
   if (victim.isAnt) ctx.playSoundAt('die_ant', kx, ky);
   else if (victim.stats.isInfantry) {
     ctx.playSoundAt('die_infantry', kx, ky);
@@ -3167,7 +3196,6 @@ export function checkVehicleCrush(ctx: CombatContext, vehicle: Entity): void {
       // Use appropriate death sound based on unit type
       const crushSound = other.isAnt ? 'die_ant' : 'die_infantry';
       ctx.playSoundAt(crushSound, other.pos.x, other.pos.y);
-      ctx.map.addDecal(oc.cx, oc.cy, 3, 0.3);
       const crushPoints = other.stats.points ?? other.stats.strength ?? 0;
       if (ctx.isPlayerControlled(vehicle)) {
         ctx.killCount++;
@@ -3222,7 +3250,6 @@ export function checkWallCrush(ctx: CombatContext, vehicle: Entity): void {
   // Destroy the wall overlay on the map
   ctx.map.clearWallType(vc.cx, vc.cy);
   detachCellTargetFromTargeting(ctx, vc.cx, vc.cy);
-  ctx.map.addDecal(vc.cx, vc.cy, 4, 0.3);
 
   // Destroy the corresponding wall structure (mark dead, clear footprint)
   if (wallStruct) {
@@ -4157,7 +4184,6 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
         if (killed) {
           handleUnitDeath(ctx, target, {
             screenShake: 4, explosionSize: 12, debris: false,
-            decal: null,
             explodeLgSound: false,
             attackerIsPlayer: ctx.isAllied(attackerHouse, ctx.playerHouse),
             trackLoss: !ctx.isAllied(target.house, attackerHouse),
@@ -4183,15 +4209,9 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
     // Consumes 1 Random_Pick(DIR_N, DIR_MAX) via Coord_Scatter → Coord_Move.
     // Tag 50002 verified at SCG03EA tick 267 bullet[282].
     if (proj.weapon.isInvisible) {
-      if (ScenarioRandom._tagLogging) {
-        ScenarioRandom._sourceTag = 50002;
-      }
-      const scatterDir256 = ScenarioRandom.nextInRange(0, 255);
-      // 0x0020 leptons = 32 leptons = 32 * CELL_SIZE / LEPTON_SIZE pixels
-      const scatterPx = 32 * CELL_SIZE / LEPTON_SIZE;
-      const angle = scatterDir256 * 2 * Math.PI / 256;
-      proj.impactX += Math.cos(angle) * scatterPx;
-      proj.impactY += Math.sin(angle) * scatterPx;
+      const scattered = coordScatterPixels({ x: proj.impactX, y: proj.impactY }, 0x0020);
+      proj.impactX = scattered.x;
+      proj.impactY = scattered.y;
     }
 
     // R8: Impact explosion sprite via C++ Combat_Anim — damage-scaled selection
@@ -4206,15 +4226,15 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
     // V2RL SCUD: large explosion + screen shake on impact (C++ IsGigundo=true)
     const isScud = proj.weapon.name === 'SCUD';
     if (projImpactSprite) {
-      ctx.effects.push({ type: 'explosion', x: proj.impactX, y: proj.impactY,
-        frame: 0, maxFrames: EXPLOSION_FRAMES[projImpactSprite] ?? 17, size: isScud ? 20 : 8, sprite: projImpactSprite, spriteStart: 0 } as Effect);
       // C++ travelling bullets are Logic objects. When BulletClass::AI explodes and
       // creates an AnimClass, logic.cpp's dynamic Count() loop reaches the new anim
       // later in that same tick and consumes only its IsBrandNew skip. If TS has
       // already passed its AnimClass phase, pre-clear that skip so the next tick
       // starts at the same stage; otherwise leave IsBrandNew set for this tick's
       // anim phase to consume.
-      spawnLogicAnimForSprite(
+      const impactAnimSupported = logicAnimTypeForSprite(projImpactSprite) !== null;
+      const impactLogicIndexHint = impactAnimSupported ? ctx.logicIndexHintForNewObject?.() : undefined;
+      const spawnedImpactAnim = spawnLogicAnimForSprite(
         ctx.logicAnims,
         ctx.effects,
         projImpactSprite,
@@ -4222,21 +4242,27 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
         proj.impactY,
         false,
         ctx.logicAnimsAlreadyProcessed === true,
-        ctx.logicIndexHintForNewObject?.(),
+        impactLogicIndexHint,
         ctx.logicIndexHintForNewObject,
         ctx.reserveAnimSlot,
       );
+      if (!impactAnimSupported || spawnedImpactAnim) {
+        ctx.effects.push({
+          type: 'explosion',
+          x: proj.impactX,
+          y: proj.impactY,
+          frame: 0,
+          maxFrames: EXPLOSION_FRAMES[projImpactSprite] ?? 17,
+          size: isScud ? 20 : 8,
+          sprite: projImpactSprite,
+          spriteStart: 0,
+          ...(spawnedImpactAnim ? linkedAnimEffectFields(impactLogicIndexHint) : {}),
+        } as Effect);
+      }
     }
     if (isScud) {
       ctx.screenShake = Math.max(ctx.screenShake, 12);
       ctx.playSoundAt('building_explode', proj.impactX, proj.impactY);
-    }
-
-    // D5: C++ anim.cpp — IsScorcher=true animations (napalm, fire) plant SMUDGE_SCORCH on ground.
-    // Fire warhead (ExplosionSet=3) leaves scorch marks at impact cell.
-    // Nuke warhead also scorches (InfDeath=4 = burn). Only on ground, not water/air.
-    if (projLand === 'ground' && (proj.weapon.warhead === 'Fire' || proj.weapon.warhead === 'Nuke')) {
-      ctx.map.addDecal(projImpactCell.cx, projImpactCell.cy, 7, 0.3);
     }
 
     // C++ bullet.cpp:112-175 — dog-rides-bullet unlimbo: when bullet arrives, dog exits limbo at impact point
@@ -4417,7 +4443,6 @@ export function applySplashDamage(
       if (!isFriendly && attacker) attacker.creditKill();
       handleUnitDeath(ctx, other, {
         screenShake: 4, explosionSize: 12, debris: false,
-        decal: null,
         explodeLgSound: false,
         attackerIsPlayer: !isFriendly && attackerIsPlayerControlled,
         trackLoss: !isFriendly,
@@ -4641,7 +4666,6 @@ export function applySplashDamage(
         if (weapon.damage === -1 || nextLevel >= damageLevels || clearsWithMissingDamagedArt) {
           ctx.map.clearWallType(impactCell.cx, impactCell.cy);
           detachCellTargetFromTargeting(ctx, impactCell.cx, impactCell.cy);
-          ctx.map.addDecal(impactCell.cx, impactCell.cy, 4, 0.3);
           const wallStruct = ctx.structures.find(s =>
             s.alive && s.cx === impactCell.cx && s.cy === impactCell.cy && s.type === wallType);
           if (wallStruct) {
@@ -4760,7 +4784,6 @@ export function applySplashDamage(
                 // Tree destroyed — clear from map (C++ terrain.cpp Start_To_Crumble + destructor)
                 ctx.map.destroyTree(hitTree);
                 ctx.releaseTerrainLogicSlot?.(hitTree);
-                ctx.map.addDecal(hitTree.cx, hitTree.cy, 6, 0.4); // stump/scorch mark
                 ctx.effects.push({
                   type: 'explosion',
                   x: hitTree.cx * CELL_SIZE + CELL_SIZE / 2,
@@ -4810,10 +4833,6 @@ export function structureDamage(
     // the triggering object as already dead and will not destroy it a second time.
     s.alive = false;
   }
-  // C++ flasher.cpp:83-95 + house.cpp:2308 — Blushing damage flash.
-  // Set FlashCount to 6 so 3 odd ticks (5, 3, 1) render the white "lightening" tint.
-  // Keeps existing countdown if larger so repeated hits stack gracefully.
-  s.flashCount = Math.max(s.flashCount ?? 0, 6);
   // Track attacked trigger names for TEVENT_ATTACKED. C++ only springs ATTACKED
   // when a real source object is supplied; source-less forced trigger damage
   // should not arm another ATTACKED event.
@@ -4915,8 +4934,6 @@ export function structureDamage(
         launchBarrelDeathBullet(ctx, s, off.dx, off.dy);
       }
     }
-    // Leave large scorch mark
-    ctx.map.addDecal(s.cx, s.cy, 14, 0.6);
     // C++ building.cpp:1330-1334 — force-destroyed buildings and kennels
     // do not generate Drop_Debris survivors.
     if (options?.forced || s.type === 'KENN') {
@@ -5040,19 +5057,20 @@ function runBuildingDropDebris(ctx: CombatContext, s: MapStructure): void {
       if (ctx.entities.length > before) count--;
     }
 
-    if (!ctx.map.isTerrainPassable(cell.cx, cell.cy)) continue;
+    if (!ctx.map.isClearToMoveTrackIgnoringOccupants(cell.cx, cell.cy)) continue;
 
     switch (ScenarioRandom.nextInRange(0, 5)) {
       case 0:
       case 1:
       case 2: {
         if (reserveBuildingAnimSlot(ctx)) {
-          // C++/WASM evaluates this AnimClass argument list right-to-left here:
-          // loop, delay, then Coord_Scatter. The AnimClass allocation itself is
-          // reserved first; if it fails, none of these constructor args run.
-          const smokeLoop = ScenarioRandom.nextInRange(1, 2);
-          const smokeDelay = ScenarioRandom.nextInRange(0, 5);
+          // C++ building.cpp Drop_Debris evaluates the constructor arguments
+          // in source order on the WASM build: Coord_Scatter, delay, then loop.
+          // The AnimClass allocation itself is reserved first; if it fails,
+          // none of these constructor args run.
           const smokePos = coordScatterFromCell(cell.cx, cell.cy, 0x0050);
+          const smokeDelay = ScenarioRandom.nextInRange(0, 5);
+          const smokeLoop = ScenarioRandom.nextInRange(1, 2);
           submitBuildingSmokeEffect(ctx, smokePos.x, smokePos.y, smokeDelay, smokeLoop, true);
         }
         break;
@@ -5062,12 +5080,11 @@ function runBuildingDropDebris(ctx: CombatContext, s: MapStructure): void {
     }
 
     if (ScenarioRandom.percentChance(25)) {
-      ScenarioRandom.nextInRange(1, 6);
-      ctx.map.addDecal(cell.cx, cell.cy, 8, 0.4);
+      const scorch = ScenarioRandom.nextInRange(1, 6);
+      ctx.map.addSmudge(`sc${scorch}`, cell.cx, cell.cy);
     } else {
       ScenarioRandom.nextInRange(1, 6);
-      coordScatterFromCell(cell.cx, cell.cy, 0x0080);
-      ctx.map.addDecal(cell.cx, cell.cy, 10, 0.5);
+      addCraterSmudge(ctx, coordScatterFromCell(cell.cx, cell.cy, 0x0080));
     }
   }
 }
@@ -5590,12 +5607,9 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
             ? 'flak'
             : combatAnim(s.weapon.damage, structExpSet, structLand);
           if (aaImpactSprite) {
-            ctx.effects.push({
-              type: 'explosion', x: bestTargetPixels.x, y: bestTargetPixels.y,
-              frame: 0, maxFrames: 10, size: 6,
-              sprite: aaImpactSprite, spriteStart: 0,
-            } as Effect);
-            spawnLogicAnimForSprite(
+            const impactAnimSupported = logicAnimTypeForSprite(aaImpactSprite) !== null;
+            const impactLogicIndexHint = impactAnimSupported ? ctx.logicIndexHintForNewObject?.() : undefined;
+            const spawnedImpactAnim = spawnLogicAnimForSprite(
               ctx.logicAnims,
               ctx.effects,
               aaImpactSprite,
@@ -5603,15 +5617,18 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
               bestTargetPixels.y,
               false,
               ctx.logicAnimsAlreadyProcessed === true,
-              ctx.logicIndexHintForNewObject?.(),
+              impactLogicIndexHint,
               ctx.logicIndexHintForNewObject,
               ctx.reserveAnimSlot,
             );
-          }
-          // D5: Structure fire weapons (FTUR FireballLauncher) plant scorch marks at impact
-          if (structLand === 'ground' && wh === 'Fire') {
-            const impCell = worldToCell(bestTargetPixels.x, bestTargetPixels.y);
-            ctx.map.addDecal(impCell.cx, impCell.cy, 7, 0.3);
+            if (!impactAnimSupported || spawnedImpactAnim) {
+              ctx.effects.push({
+                type: 'explosion', x: bestTargetPixels.x, y: bestTargetPixels.y,
+                frame: 0, maxFrames: 10, size: 6,
+                sprite: aaImpactSprite, spriteStart: 0,
+                ...(spawnedImpactAnim ? linkedAnimEffectFields(impactLogicIndexHint) : {}),
+              } as Effect);
+            }
           }
         }
         ctx.playSoundAt('machinegun', sx, sy);
@@ -5622,7 +5639,6 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
       if (killed && !(s.weapon.splash && s.weapon.splash > 0)) {
         handleUnitDeath(ctx, bestTarget, {
           screenShake: 4, explosionSize: 16, debris: false,
-          decal: { infantry: 4, vehicle: 8, opacity: 0.5 },
           explodeLgSound: false,
           attackerIsPlayer: ctx.isAllied(s.house, ctx.playerHouse),
           trackLoss: false,

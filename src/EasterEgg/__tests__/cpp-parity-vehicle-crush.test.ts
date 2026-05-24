@@ -12,7 +12,7 @@
  *   infantry.cpp:1852-1929 — Scatter(): infantry flee approaching vehicles
  *
  * Observable outcomes: entity death, wall destruction, sound effects,
- * kill tracking, friendly crush prevention, decals.
+ * kill tracking, friendly crush prevention, sound and blood effects.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -296,20 +296,20 @@ describe('Crush kill tracking and side effects', () => {
     expect(bloodEffects.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('crush adds ground decal at crush location', () => {
-    // C++ unit.cpp:4437 — OverlayClass(OVERLAY_SQUISH, ...) (commented out in C++
-    // but TS adds a decal instead)
+  it('crush does not add TS-only ground decals at crush location', () => {
+    // C++ unit.cpp:4437 leaves OverlayClass(OVERLAY_SQUISH, ...) commented out;
+    // there is no CellClass smudge or generic decal side effect.
     const map = new GameMap();
     const tank = entityAtCell(UnitType.V_2TNK, House.Spain, 10, 10);
     const enemy = entityAtCell(UnitType.I_E1, House.USSR, 10, 10);
     const ctx = makeCombatCtx([tank, enemy], map);
     const addDecalSpy = { called: false };
-    const origAddDecal = map.addDecal.bind(map);
-    map.addDecal = (cx, cy, size, alpha) => { addDecalSpy.called = true; origAddDecal(cx, cy, size, alpha); };
+    map.addDecal = () => { addDecalSpy.called = true; };
 
     checkVehicleCrush(ctx, tank);
 
-    expect(addDecalSpy.called).toBe(true);
+    expect(addDecalSpy.called).toBe(false);
+    expect(map.decals).toHaveLength(0);
   });
 
   it('enemy vehicle crushing player infantry increments lossCount', () => {

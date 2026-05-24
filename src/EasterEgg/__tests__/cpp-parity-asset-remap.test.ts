@@ -856,13 +856,29 @@ describe('Shadow rendering color table (display.cpp ShadowTrans)', () => {
   // The shadow is rendered by blitting the sprite shape with palette-index
   // remapping to darken the underlying terrain.
 
-  it('TS uses the C++ black alpha levels instead of a uniform gray approximation', async () => {
-    const { shadowTransAlphaForRGBA } = await import('../engine/shadow');
+  it('TS uses the C++ ShadowTrans table selectors instead of a black alpha mask', async () => {
+    const { RA_COLOR_BLACK, makeFadingTable, nearestPaletteIndex, shadowGhostRemapColor, shadowTransFadeForRGBA } = await import('../engine/shadow');
 
-    expect(shadowTransAlphaForRGBA(16, 12, 12, 255)).toBe(130);
-    expect(shadowTransAlphaForRGBA(255, 255, 255, 255)).toBe(170);
-    expect(shadowTransAlphaForRGBA(170, 170, 170, 255)).toBe(250);
-    expect(shadowTransAlphaForRGBA(85, 85, 85, 255)).toBe(250);
+    expect(shadowTransFadeForRGBA(16, 12, 12, 255)).toBe(130);
+    expect(shadowTransFadeForRGBA(255, 255, 255, 255)).toBe(170);
+    expect(shadowTransFadeForRGBA(170, 170, 170, 255)).toBe(250);
+    expect(shadowTransFadeForRGBA(85, 85, 85, 255)).toBe(250);
+
+    const palette = Array.from({ length: 256 }, () => [255, 0, 255, 255]);
+    palette[0] = [0, 0, 0, 0];
+    palette[4] = [88, 252, 84, 130];
+    palette[12] = [0, 0, 0, 255];
+    palette[16] = [16, 12, 12, 255];
+    palette[79] = [228, 216, 228, 255];
+    palette[137] = [112, 112, 112, 255];
+    const table = makeFadingTable(palette, RA_COLOR_BLACK, 130);
+    const destIndex = nearestPaletteIndex(palette, 228, 216, 228);
+    const expected = palette[table[destIndex]].slice(0, 3);
+
+    expect(shadowGhostRemapColor(palette, 228, 216, 228, 16, 12, 12, 255)?.slice(0, 3)).toEqual(expected);
+    expect(expected).toEqual([112, 112, 112]);
+    expect(makeFadingTable(palette, RA_COLOR_BLACK, 250)[79]).toBe(16);
+    expect(shadowGhostRemapColor(palette, 0, 0, 0, 168, 168, 168, 255)?.slice(0, 3)).toEqual([16, 12, 12]);
   });
 });
 

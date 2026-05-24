@@ -561,15 +561,15 @@ describe('Death State Transitions (object.cpp, infantry.cpp)', () => {
 });
 
 // ============================================================
-// Section 11: Damage Flash
-// TS entity.ts:514 — damageFlash = 4 on hit
+// Section 11: FlasherClass countdown
+// C++ object.cpp:1560-1679 does not call Clicked_As_Target for ordinary damage.
 // ============================================================
-describe('Damage Flash on Hit', () => {
-  it('taking damage sets damageFlash to 4', () => {
+describe('FlasherClass countdown', () => {
+  it('taking ordinary damage does not start blushing', () => {
     const e = new Entity(UnitType.I_E1, House.Spain, 100, 100);
     expect(e.damageFlash).toBe(0);
     e.takeDamage(1, 'SA');
-    expect(e.damageFlash).toBe(4);
+    expect(e.damageFlash).toBe(0);
   });
 
   it('damageFlash decrements via tickAnimation', () => {

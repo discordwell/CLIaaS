@@ -28,6 +28,7 @@ import {
   updateInflightProjectiles,
 } from '../engine/combat';
 import { GameMap } from '../engine/map';
+import { logicAnimRenderSpec } from '../engine/logicAnim';
 import type { Effect } from '../engine/renderer';
 import { COUNTRY_BONUSES } from '../engine/types';
 import {
@@ -399,6 +400,40 @@ describe('IsFueled — fuel timer detonation (fuse.cpp:127-139)', () => {
     expect(ctx.inflightProjectiles.length).toBe(1);
   });
 
+  it('projectile impact Combat_Anim Effect is linked to its C++ AnimClass slot', () => {
+    let nextLogicHint = 500;
+    const ctx = makeCombatCtx();
+    ctx.logicIndexHintForNewObject = () => nextLogicHint++;
+    ctx.inflightProjectiles.push(makeProjectile({
+      targetId: -1,
+      weapon: WEAPON_STATS['90mm'],
+      damage: 30,
+      strength: 30,
+      fuseTimer: 1,
+      fuelTimer: 1,
+      travelFrames: 100,
+      startX: 0,
+      startY: 0,
+      impactX: 120,
+      impactY: 120,
+      logicalLX: pixelToLepton(0),
+      logicalLY: pixelToLepton(0),
+      headToLX: pixelToLepton(120),
+      headToLY: pixelToLepton(120),
+      speedAdd: 0,
+      speedAccum: 0,
+    }));
+
+    updateInflightProjectiles(ctx);
+
+    const anim = ctx.logicAnims.find(a => a.type === 'veh-hit2');
+    const effect = ctx.effects.find(e => e.type === 'explosion' && e.sprite === 'veh-hit2');
+    expect(anim).toBeDefined();
+    expect(effect).toBeDefined();
+    expect(anim!.logicIndexHint).toBe(500);
+    expect(effect!.logicIndexHint).toBe(anim!.logicIndexHint);
+  });
+
   it('launchProjectile sets FuseClass Timer = min(0xFF, max(range, Arm)) for fueled weapons', () => {
     const attacker = entityAtCell(UnitType.V_V2RL, House.USSR, 5, 5);
     const target = entityAtCell(UnitType.I_E1, House.Spain, 10, 5);
@@ -718,7 +753,7 @@ describe('IsFlameEquipped — flame/smoke trail (bullet.cpp:377-386)', () => {
     expect(proj.flameToggle).toBe(false);
   });
 
-  it('flame trail spawns every other tick as an explosion effect (bullet.cpp:378-383)', () => {
+  it('flame trail spawns every other tick as a C++ AnimClass (bullet.cpp:378-383)', () => {
     const ctx = makeCombatCtx();
     const proj = makeProjectile({
       isFlameEquipped: true,
@@ -731,31 +766,32 @@ describe('IsFlameEquipped — flame/smoke trail (bullet.cpp:377-386)', () => {
       weapon: WEAPON_STATS.Flamer,
     });
     ctx.inflightProjectiles.push(proj);
+    const trailCount = () => ctx.logicAnims.filter(a => a.type === 'fball_fade' || a.type === 'smokey').length;
 
     // Tick 1: flameToggle starts false → no trail → toggle becomes true
     updateInflightProjectiles(ctx);
-    const effectsAfterTick1 = ctx.effects.length;
+    const trailsAfterTick1 = trailCount();
 
     // Tick 2: flameToggle is true → trail spawns → toggle becomes false
     updateInflightProjectiles(ctx);
-    const effectsAfterTick2 = ctx.effects.length;
+    const trailsAfterTick2 = trailCount();
 
-    // Should have spawned exactly 1 effect in tick 2 (the flame trail)
-    expect(effectsAfterTick2).toBeGreaterThan(effectsAfterTick1);
+    // Should have spawned exactly 1 AnimClass in tick 2 (the flame trail)
+    expect(trailsAfterTick2).toBeGreaterThan(trailsAfterTick1);
 
     // Tick 3: flameToggle is false → no trail → toggle becomes true
-    const effectsBefore3 = ctx.effects.length;
+    const trailsBefore3 = trailCount();
     updateInflightProjectiles(ctx);
-    const effectsAfterTick3 = ctx.effects.length;
-    // No new effect in tick 3
-    expect(effectsAfterTick3).toBe(effectsBefore3);
+    const trailsAfterTick3 = trailCount();
+    // No new AnimClass in tick 3
+    expect(trailsAfterTick3).toBe(trailsBefore3);
 
     // Tick 4: flameToggle is true → trail spawns
     updateInflightProjectiles(ctx);
-    expect(ctx.effects.length).toBeGreaterThan(effectsAfterTick3);
+    expect(trailCount()).toBeGreaterThan(trailsAfterTick3);
   });
 
-  it('flame trail effect uses napalm1 sprite (closest to C++ ANIM_FBALL_FADE)', () => {
+  it('flame trail AnimClass maps to napalm1 sprite (C++ ANIM_FBALL_FADE)', () => {
     const ctx = makeCombatCtx();
     const proj = makeProjectile({
       isFlameEquipped: true,
@@ -769,14 +805,13 @@ describe('IsFlameEquipped — flame/smoke trail (bullet.cpp:377-386)', () => {
     });
     ctx.inflightProjectiles.push(proj);
 
-    // Tick 1 + 2 to get a flame trail effect
+    // Tick 1 + 2 to get a flame trail AnimClass
     updateInflightProjectiles(ctx);
     updateInflightProjectiles(ctx);
 
-    const flameEffects = ctx.effects.filter(e => e.type === 'explosion' && (e as any).sprite === 'napalm1');
-    expect(flameEffects.length).toBeGreaterThanOrEqual(1);
     const flameAnims = ctx.logicAnims.filter(a => a.type === 'fball_fade');
     expect(flameAnims).toHaveLength(1);
+    expect(logicAnimRenderSpec(flameAnims[0].type).sprite).toBe('napalm1');
     expect(flameAnims[0].delay).toBe(1);
     expect(flameAnims[0].isBrandNew).toBe(true);
   });
@@ -799,12 +834,10 @@ describe('IsFlameEquipped — flame/smoke trail (bullet.cpp:377-386)', () => {
     proj.fuelTimer = 20;
     updateInflightProjectiles(ctx);
 
-    const smoke = ctx.effects.find(e => e.type === 'explosion' && e.sprite === 'smokey');
-    expect(smoke).toBeDefined();
-    expect(smoke?.maxFrames).toBe(7);
-    expect(smoke?.cppLogicSlot).toBeUndefined();
     const smokeAnim = ctx.logicAnims.find(a => a.type === 'smokey');
     expect(smokeAnim).toBeDefined();
+    expect(logicAnimRenderSpec(smokeAnim!.type).sprite).toBe('smokey');
+    expect(ctx.effects.some(e => e.type === 'explosion' && e.sprite === 'smokey')).toBe(false);
     expect(smokeAnim?.delay).toBe(1);
     expect(smokeAnim?.isBrandNew).toBe(true);
   });

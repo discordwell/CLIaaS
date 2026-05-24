@@ -12,12 +12,58 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { AssetManager } from '../engine/assets';
 import { Camera } from '../engine/camera';
 import { Entity } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
-import { applyWaterPaletteCycle, HOUSE_MINIMAP_COLOR, Renderer, waterPaletteCycleShift } from '../engine/renderer';
+import { applyWaterPaletteCycle, BUILDING_FRAME_TABLE, HOUSE_MINIMAP_COLOR, Renderer, waterPaletteCycleShift } from '../engine/renderer';
 import { NonCriticalRandom } from '../engine/random';
+import { RA_COLOR_BLACK, conquerBuildFadingTable, nearestPaletteIndex } from '../engine/shadow';
 import { CELL_SIZE, House, UnitType } from '../engine/types';
+
+describe('sprite SHAPE_CENTER placement (2keyfbuf.cpp Buffer_Frame_To_Page)', () => {
+  function managerWithSheet(width: number, height: number): AssetManager {
+    const assets = new AssetManager();
+    (assets as any).sheets.set('odd', {
+      image: { width, height },
+      meta: {
+        frameWidth: width,
+        frameHeight: height,
+        frameCount: 1,
+        columns: 1,
+        rows: 1,
+        sheetWidth: width,
+        sheetHeight: height,
+      },
+    });
+    return assets;
+  }
+
+  it('centers odd-sized frames with C++ integer division, not browser half-pixels', () => {
+    // C++ RA/2keyfbuf.cpp: Buffer_Frame_To_Page applies SHAPE_CENTER as:
+    //   x -= w / 2; y -= h / 2;
+    // with integer division. FIRE1/2/3 are 23x23, so their destination is
+    // center minus 11, not center minus 11.5.
+    const assets = managerWithSheet(23, 23);
+    const ctx = { drawImage: vi.fn() } as unknown as CanvasRenderingContext2D;
+
+    assets.drawFrame(ctx, 'odd', 0, 100, 80, { centerX: true, centerY: true });
+
+    expect((ctx.drawImage as any).mock.calls[0].slice(5)).toEqual([89, 69, 23, 23]);
+  });
+
+  it('snaps fractional lepton-derived anchors before applying SHAPE_CENTER', () => {
+    // C++ render paths pass integer Lepton_To_Pixel results into CC_Draw_Shape.
+    // Canvas drawImage at fractional coordinates anti-aliases sprite edges, so
+    // TS must snap the anchor before the SHAPE_CENTER offset.
+    const assets = managerWithSheet(23, 23);
+    const ctx = { drawImage: vi.fn() } as unknown as CanvasRenderingContext2D;
+
+    assets.drawFrame(ctx, 'odd', 0, 100.375, 80.375, { centerX: true, centerY: true });
+
+    expect((ctx.drawImage as any).mock.calls[0].slice(5)).toEqual([89, 69, 23, 23]);
+  });
+});
 
 // ============================================================
 // Section 1: Minimap Blip Colors — hdata.cpp + radar.cpp:740
@@ -456,6 +502,576 @@ describe('renderer clear-template base art (cell.cpp:981-987)', () => {
   });
 });
 
+describe('renderer structure fog brightness (cell.cpp:1275, display.cpp:2113-2151)', () => {
+  it('draws mapped structures at full alpha and leaves fog dimming to SHADOW.SHP', () => {
+    const alphas: number[] = [];
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      fillStyle: '#000',
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      rect: vi.fn(),
+      clip: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+    };
+    const canvas = {
+      width: 640,
+      height: 400,
+      getContext: () => ctx,
+    } as unknown as HTMLCanvasElement;
+    const renderer = new Renderer(canvas);
+    const camera = new Camera(640, 400);
+    const map = {
+      getDisplayVisibility: () => 1,
+    };
+    const assets = {
+      getSheet: (name: string) => name === 'barl'
+        ? { meta: { frameWidth: 12, frameHeight: 14, frameCount: 3 } }
+        : null,
+      getRemappedSheet: () => null,
+      drawFrame: vi.fn(() => alphas.push(ctx.globalAlpha)),
+      drawFrameFrom: vi.fn(() => alphas.push(ctx.globalAlpha)),
+      hasSheet: () => false,
+    };
+    const barrel = {
+      type: 'BARL',
+      image: 'barl',
+      house: House.USSR,
+      cx: 10,
+      cy: 10,
+      hp: 10,
+      maxHp: 10,
+      alive: true,
+    };
+
+    (renderer as any).renderStructures(camera, map as any, [barrel] as any, assets as any, 100);
+
+    expect(alphas).toEqual([1]);
+    expect(ctx.globalAlpha).toBe(1);
+  });
+});
+
+describe('renderer structure shadow sentinels (Techno_Draw_Object SHAPE_GHOST)', () => {
+  it('draws building body sprites with C++ ghost-shadow handling', () => {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      fillStyle: '#000',
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      rect: vi.fn(),
+      clip: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      getImageData: vi.fn(),
+      putImageData: vi.fn(),
+      canvas: { width: 640, height: 400 },
+    };
+    const canvas = {
+      width: 640,
+      height: 400,
+      getContext: () => ctx,
+    } as unknown as HTMLCanvasElement;
+    const renderer = new Renderer(canvas);
+    renderer.theatre = 'SNOW';
+    const palette = Array.from({ length: 256 }, () => [0, 0, 0]);
+    (renderer as any).pal = palette;
+    const camera = new Camera(640, 400);
+    const map = {
+      getDisplayVisibility: () => 2,
+    };
+    const assets = {
+      getSheet: (name: string) => name === 'powr'
+        ? { meta: { frameWidth: 48, frameHeight: 48, frameCount: 2 } }
+        : null,
+      getRemappedSheet: () => ({ meta: { frameWidth: 48, frameHeight: 48, frameCount: 2 } }),
+      drawFrame: vi.fn(),
+      drawFrameFrom: vi.fn(),
+      hasSheet: () => false,
+    };
+    const powr = {
+      type: 'POWR',
+      image: 'powr',
+      house: House.USSR,
+      cx: 10,
+      cy: 10,
+      hp: 400,
+      maxHp: 400,
+      alive: true,
+    };
+
+    (renderer as any).renderStructures(camera, map as any, [powr] as any, assets as any, 100);
+
+    expect(assets.drawFrameFrom).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'powr',
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.objectContaining({
+        centerX: true,
+        centerY: true,
+        ghostShadow: expect.objectContaining({ palette, frac: 75 }),
+      }),
+    );
+  });
+});
+
+describe('renderer structure owner remap flags (TechnoClass::Remap_Table)', () => {
+  function setup(sheetName: string, frameCount = 2) {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      globalCompositeOperation: 'source-over',
+      fillStyle: '#000',
+      strokeStyle: '#fff',
+      lineWidth: 1,
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      rect: vi.fn(),
+      clip: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      strokeRect: vi.fn(),
+    };
+    const canvas = {
+      width: 640,
+      height: 400,
+      getContext: () => ctx,
+    } as unknown as HTMLCanvasElement;
+    const renderer = new Renderer(canvas);
+    const camera = new Camera(640, 400);
+    const map = {
+      getDisplayVisibility: () => 2,
+    };
+    const assets = {
+      getSheet: vi.fn((name: string) => name === sheetName
+        ? { meta: { frameWidth: 24, frameHeight: 24, frameCount } }
+        : null),
+      getRemappedSheet: vi.fn(() => ({ meta: { frameWidth: 24, frameHeight: 24, frameCount } })),
+      drawFrame: vi.fn(),
+      drawFrameFrom: vi.fn(),
+      hasSheet: vi.fn(() => false),
+    };
+    return { ctx, renderer, camera, map, assets };
+  }
+
+  it('keeps non-remappable civilian structures on source/gold art', () => {
+    // C++ bdata.cpp ClassV19: REMAP_ALTERNATE but IsRemappable=false.
+    // TechnoClass::Remap_Table therefore returns PCOLOR_GOLD, not France blue.
+    const { ctx, renderer, camera, map, assets } = setup('v19', 29);
+    const v19 = {
+      type: 'V19',
+      image: 'v19',
+      house: House.France,
+      cx: 10,
+      cy: 10,
+      hp: 400,
+      maxHp: 400,
+      alive: true,
+    };
+
+    (renderer as any).renderStructures(camera, map as any, [v19] as any, assets as any, 100);
+
+    expect(assets.getRemappedSheet).not.toHaveBeenCalled();
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'v19', 11, 252, 252, {
+      centerX: true,
+      centerY: true,
+    });
+    expect(assets.drawFrameFrom).not.toHaveBeenCalled();
+  });
+
+  it('does not owner-remap REMAP_NONE mine buildings', () => {
+    // C++ MINV/MINP have IsRemappable=true, but HouseClass::Remap_Table
+    // returns null when the type remap mode is REMAP_NONE.
+    const { ctx, renderer, camera, map, assets } = setup('minv', 1);
+    const mine = {
+      type: 'MINV',
+      image: 'minv',
+      house: House.USSR,
+      cx: 10,
+      cy: 10,
+      hp: 1,
+      maxHp: 1,
+      alive: true,
+    };
+
+    (renderer as any).renderStructures(camera, map as any, [mine] as any, assets as any, 100);
+
+    expect(assets.getRemappedSheet).not.toHaveBeenCalled();
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'minv', 0, 252, 252, {
+      centerX: true,
+      centerY: true,
+    });
+    expect(assets.drawFrameFrom).not.toHaveBeenCalled();
+  });
+
+  it('still owner-remaps IsRemappable REMAP_ALTERNATE buildings', () => {
+    const { renderer, camera, map, assets } = setup('powr', 8);
+    const powr = {
+      type: 'POWR',
+      image: 'powr',
+      house: House.USSR,
+      cx: 10,
+      cy: 10,
+      hp: 400,
+      maxHp: 400,
+      alive: true,
+    };
+
+    (renderer as any).renderStructures(camera, map as any, [powr] as any, assets as any, 100);
+
+    expect(assets.getRemappedSheet).toHaveBeenCalledWith('powr', House.USSR);
+    expect(assets.drawFrameFrom).toHaveBeenCalled();
+  });
+});
+
+describe('renderer destroyed building countdown visuals (building.cpp:940-956)', () => {
+  function mockStructureCanvas(): { canvas: HTMLCanvasElement; ctx: any } {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      globalCompositeOperation: 'source-over',
+      fillStyle: '#000',
+      strokeStyle: '#fff',
+      lineWidth: 1,
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      rect: vi.fn(),
+      clip: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      strokeRect: vi.fn(),
+    };
+    const canvas = {
+      width: 640,
+      height: 400,
+      getContext: () => ctx,
+    } as unknown as HTMLCanvasElement;
+    return { canvas, ctx };
+  }
+
+  function structureAssets() {
+    return {
+      getSheet: vi.fn((name: string) => name === 'v19'
+        ? { meta: { frameWidth: 24, frameHeight: 24, frameCount: 29, columns: 16, rows: 2, sheetWidth: 384, sheetHeight: 48 } }
+        : null),
+      getRemappedSheet: vi.fn(() => null),
+      drawFrame: vi.fn(),
+      drawFrameFrom: vi.fn(),
+      hasSheet: vi.fn(() => false),
+    };
+  }
+
+  it('draws zero-strength buildings with their damaged SHP frame during CountDown', () => {
+    // C++ leaves Strength=0 buildings on the map until CountDown reaches zero.
+    // They still go through BuildingClass::Draw_It/Shape_Number, which selects
+    // the damaged frame range; TS-only procedural rubble would hide the real art.
+    const { canvas, ctx } = mockStructureCanvas();
+    const renderer = new Renderer(canvas);
+    const camera = new Camera(640, 400);
+    const map = { getDisplayVisibility: () => 2 };
+    const assets = structureAssets();
+    const v19 = {
+      type: 'V19',
+      image: 'v19',
+      house: House.France,
+      cx: 10,
+      cy: 10,
+      hp: 0,
+      maxHp: 400,
+      alive: false,
+      rubble: true,
+      debrisCountdown: 7,
+      debrisDropped: false,
+    };
+
+    (renderer as any).renderStructures(camera, map as any, [v19] as any, assets as any, 50);
+
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'v19', 26, 252, 252, {
+      centerX: true,
+      centerY: true,
+    });
+    expect(ctx.fillRect).not.toHaveBeenCalled();
+  });
+
+  it('does not render persistent rubble after Drop_Debris deletes the C++ building', () => {
+    const { canvas, ctx } = mockStructureCanvas();
+    const renderer = new Renderer(canvas);
+    const camera = new Camera(640, 400);
+    const map = { getDisplayVisibility: () => 2 };
+    const assets = structureAssets();
+    const removed = {
+      type: 'V19',
+      image: 'v19',
+      house: House.France,
+      cx: 10,
+      cy: 10,
+      hp: 0,
+      maxHp: 400,
+      alive: false,
+      rubble: true,
+      debrisDropped: true,
+    };
+
+    (renderer as any).renderStructures(camera, map as any, [removed] as any, assets as any, 50);
+
+    expect(assets.drawFrame).not.toHaveBeenCalled();
+    expect(assets.drawFrameFrom).not.toHaveBeenCalled();
+    expect(ctx.fillRect).not.toHaveBeenCalled();
+  });
+});
+
+describe('renderer Tesla coil shape selection (building.cpp:598-611)', () => {
+  function renderTsla(structureOverrides: Record<string, unknown>, tick: number): number[] {
+    const frames: number[] = [];
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      fillStyle: '#000',
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      rect: vi.fn(),
+      clip: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+    };
+    const canvas = {
+      width: 640,
+      height: 400,
+      getContext: () => ctx,
+    } as unknown as HTMLCanvasElement;
+    const renderer = new Renderer(canvas);
+    const camera = new Camera(640, 400);
+    const map = {
+      getDisplayVisibility: () => 2,
+    };
+    const assets = {
+      getSheet: (name: string) => name === 'tsla'
+        ? { meta: { frameWidth: 48, frameHeight: 48, frameCount: 20 } }
+        : null,
+      getRemappedSheet: () => ({ meta: { frameWidth: 48, frameHeight: 48, frameCount: 20 } }),
+      drawFrame: vi.fn((_ctx, _sheet, frame) => frames.push(frame)),
+      drawFrameFrom: vi.fn((_ctx, _remap, _sheet, frame) => frames.push(frame)),
+      hasSheet: () => false,
+    };
+    const tsla = {
+      type: 'TSLA',
+      image: 'tsla',
+      house: House.USSR,
+      cx: 10,
+      cy: 10,
+      hp: 400,
+      maxHp: 400,
+      alive: true,
+      ...structureOverrides,
+    };
+
+    (renderer as any).renderStructures(camera, map as any, [tsla] as any, assets as any, tick);
+    return frames;
+  }
+
+  it('forces idle Tesla coils to frame 0 instead of cycling active charge frames', () => {
+    expect(renderTsla({ isCharging: false, isCharged: false, chargeStage: 7 }, 100)).toEqual([0]);
+  });
+
+  it('uses charge stage only while IsCharging and frame 3 while IsCharged', () => {
+    expect(renderTsla({ isCharging: true, isCharged: false, chargeStage: 6 }, 100)).toEqual([6]);
+    expect(renderTsla({ isCharging: false, isCharged: true, chargeStage: 8 }, 100)).toEqual([3]);
+  });
+});
+
+describe('renderer building animation rates (bdata.cpp:3060-3095)', () => {
+  it('uses the C++ STRUCT_PUMP idle rate of 4 ticks per frame', () => {
+    // bdata.cpp:3083: { STRUCT_PUMP, BSTATE_IDLE, 0, 14, 4 }.
+    // At tick 100, C++ is on frame floor(100 / 4) % 14 = 11,
+    // while the old generic renderer cadence floor(100 / 8) would pick 12.
+    const frames: number[] = [];
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      fillStyle: '#000',
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      rect: vi.fn(),
+      clip: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+    };
+    const canvas = {
+      width: 640,
+      height: 400,
+      getContext: () => ctx,
+    } as unknown as HTMLCanvasElement;
+    const renderer = new Renderer(canvas);
+    const camera = new Camera(640, 400);
+    const map = {
+      getDisplayVisibility: () => 2,
+    };
+    const assets = {
+      getSheet: (name: string) => name === 'v19'
+        ? { meta: { frameWidth: 24, frameHeight: 24, frameCount: 29 } }
+        : null,
+      getRemappedSheet: () => null,
+      drawFrame: vi.fn((_ctx, _sheet, frame) => frames.push(frame)),
+      drawFrameFrom: vi.fn(),
+      hasSheet: () => false,
+    };
+    const pump = {
+      type: 'V19',
+      image: 'v19',
+      house: House.Neutral,
+      cx: 10,
+      cy: 10,
+      hp: 400,
+      maxHp: 400,
+      alive: true,
+    };
+
+    (renderer as any).renderStructures(camera, map as any, [pump] as any, assets as any, 100);
+
+    expect(BUILDING_FRAME_TABLE.v19.idleAnimRate).toBe(4);
+    expect(frames).toEqual([11]);
+  });
+});
+
+describe('renderer infantry death brightness (infantry.cpp Shape_Number/Draw_It)', () => {
+  it('draws death Doing frames at full alpha until object deletion', () => {
+    // C++ renders DO_GUN_DEATH/DO_EXPLOSION_DEATH through the normal object
+    // draw path. There is no per-tick alpha fade; cleanup happens by deleting
+    // the InfantryClass or spawning a corpse AnimClass.
+    const alphas: number[] = [];
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      fillStyle: '#000',
+      strokeStyle: '#fff',
+      lineWidth: 1,
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      rect: vi.fn(),
+      clip: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      setLineDash: vi.fn(),
+    };
+    const canvas = {
+      width: 640,
+      height: 400,
+      getContext: () => ctx,
+    } as unknown as HTMLCanvasElement;
+    const renderer = new Renderer(canvas);
+    const camera = new Camera(640, 400);
+    const map = {
+      getDisplayVisibility: () => 2,
+    };
+    const assets = {
+      getSheet: (name: string) => name === 'e1'
+        ? { meta: { frameWidth: 50, frameHeight: 39, frameCount: 600 } }
+        : null,
+      getRemappedSheet: () => ({ meta: { frameWidth: 50, frameHeight: 39, frameCount: 600 } }),
+      drawFrame: vi.fn(() => alphas.push(ctx.globalAlpha)),
+      drawFrameFrom: vi.fn(() => alphas.push(ctx.globalAlpha)),
+    };
+    const e1 = new Entity(UnitType.I_E1, House.USSR, 240, 240);
+    e1.alive = false;
+    e1.deathTick = 20;
+    e1.deathVariant = 1;
+
+    (renderer as any).renderEntities(camera, map as any, [e1], assets as any, new Set(), 100);
+
+    expect(alphas).toEqual([1]);
+    expect(ctx.globalAlpha).toBe(1);
+  });
+});
+
 describe('renderer theatre-specific terrain object art', () => {
   function mockCanvas(): { canvas: HTMLCanvasElement; ctx: any } {
     const ctx = {
@@ -524,6 +1140,7 @@ describe('renderer theatre-specific terrain object art', () => {
     const { canvas, ctx } = mockCanvas();
     const renderer = new Renderer(canvas);
     renderer.theatre = 'SNOW';
+    (renderer as any).pal = Array.from({ length: 256 }, () => [0, 0, 0, 255]);
 
     const camera = new Camera(0, 0);
     camera.x = 12 * CELL_SIZE;
@@ -540,7 +1157,11 @@ describe('renderer theatre-specific terrain object art', () => {
 
     (renderer as any).renderOverlays(camera, map, 7, assets);
 
-    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, expectedSheet, expectedFrame, 0, 0);
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, expectedSheet, expectedFrame, 12, 12, {
+      centerX: true,
+      centerY: true,
+      ghostShadow: { palette: (renderer as any).pal, frac: 75 },
+    });
     expect(ctx.fillRect).not.toHaveBeenCalled();
   });
 });
@@ -603,26 +1224,246 @@ describe('renderer smudge/crater art (sdata.cpp SmudgeTypeClass::Draw_It)', () =
     expect(ctx.ellipse).not.toHaveBeenCalled();
   });
 
-  it('draws dynamic crater decals through CR1 theater art', () => {
+  it('ignores legacy TS decals and draws only CellClass smudge art', () => {
     const { canvas, ctx } = mockCanvas();
     const renderer = new Renderer(canvas);
+    renderer.theatre = 'SNOW';
 
     const camera = new Camera(0, 0);
     camera.x = 20 * CELL_SIZE;
     camera.y = 20 * CELL_SIZE;
 
     const map = new GameMap();
-    map.addDecal(20, 20, 10, 0.5);
+    map.smudges.push({ type: 'SC6', cx: 20, cy: 20 });
+    map.decals.push({ cx: 20, cy: 20, size: 7, alpha: 0.3 });
 
     const assets = {
-      hasSheet: vi.fn((name: string) => name === 'cr1'),
+      hasSheet: vi.fn((name: string) => name === 'sc6_snow' || name === 'sc1_snow'),
       drawFrame: vi.fn(),
     };
 
     (renderer as any).renderDecals(camera, map, assets);
 
-    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'cr1', 0, 0, 0);
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'sc6_snow', 0, 0, 0);
+    expect(assets.drawFrame).not.toHaveBeenCalledWith(ctx, 'sc1_snow', 0, 0, 0);
     expect(ctx.ellipse).not.toHaveBeenCalled();
+  });
+});
+
+describe('renderer corpse AnimClass art (infantry.cpp corpse follow-up)', () => {
+  function mockCanvas(): { canvas: HTMLCanvasElement; ctx: any } {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      fillStyle: '#000',
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+    };
+    return {
+      canvas: {
+        width: 640,
+        height: 400,
+        getContext: () => ctx,
+      } as unknown as HTMLCanvasElement,
+      ctx,
+    };
+  }
+
+  it('draws deathVariant=2 as centered CORPSE3.SNO without synthetic burn darkening', () => {
+    // C++ infantry.cpp: DO_EXPLOSION_DEATH creates ANIM_CORPSE3 at
+    // Center_Coord()+(-2,4). AnimClass::Draw_It renders the theatre shape with
+    // SHAPE_CENTER; it does not draw a procedural ellipse below it.
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    renderer.theatre = 'SNOW';
+    renderer.corpses = [{
+      x: 100,
+      y: 80,
+      type: UnitType.I_E2,
+      facing: 0,
+      isInfantry: true,
+      isAnt: false,
+      alpha: 0.5,
+      deathVariant: 2,
+      cppAnimStartTick: 40,
+    }];
+
+    const camera = new Camera(0, 0);
+    const map = new GameMap();
+    vi.spyOn(map, 'getDisplayVisibility').mockReturnValue(2);
+
+    const assets = {
+      hasSheet: vi.fn((name: string) => name === 'corpse3_snow'),
+      getSheet: vi.fn(() => ({ meta: { frameWidth: 50, frameHeight: 39, frameCount: 6 } })),
+      drawFrame: vi.fn(),
+    };
+
+    (renderer as any).renderCorpses(camera, map, assets, 50);
+
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'corpse3_snow', 0, 100, 80, {
+      centerX: true,
+      centerY: true,
+    });
+    expect(ctx.ellipse).not.toHaveBeenCalled();
+    expect(ctx.fillRect).not.toHaveBeenCalled();
+  });
+
+  it('draws live AnimClass sprites from StageClass stage, not stale Effect frames', () => {
+    // C++ anim.cpp:254 draws Class->Start + Fetch_Stage() directly from the
+    // live AnimClass. Reusing a separate render Effect frame loses parity once
+    // looping FIRE/SMOKE anims keep their Logic object after the first visual pass.
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    renderer.logicAnims = [{
+      type: 'fire_small',
+      x: 100,
+      y: 80,
+      stage: 4,
+      timer: 1,
+      loops: 3,
+      delay: 0,
+      isBrandNew: false,
+      logicIndexHint: 302,
+    } as any];
+
+    const assets = {
+      getSheet: vi.fn(() => ({ meta: { frameWidth: 23, frameHeight: 23, frameCount: 15 } })),
+      drawFrame: vi.fn(),
+    };
+
+    (renderer as any).renderLogicAnims(new Camera(0, 0), assets, 'ground');
+
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'fire3', 4, 100, 80, {
+      centerX: true,
+      centerY: true,
+    });
+  });
+
+  it('skips linked Effect copies for C++ AnimClass visuals', () => {
+    const { canvas } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    const assets = {
+      getSheet: vi.fn(() => ({ meta: { frameWidth: 23, frameHeight: 23, frameCount: 15 } })),
+      drawFrame: vi.fn(),
+    };
+
+    (renderer as any).renderEffects(new Camera(0, 0), [{
+      type: 'explosion',
+      x: 100,
+      y: 80,
+      frame: 14,
+      maxFrames: 15,
+      size: 8,
+      sprite: 'fire3',
+      logicIndexHint: 302,
+    }], assets);
+
+    expect(assets.drawFrame).not.toHaveBeenCalled();
+  });
+
+  it('skips unhinted cppLogicSlot Effect copies for C++ AnimClass visuals', () => {
+    const { canvas } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    const assets = {
+      getSheet: vi.fn(() => ({ meta: { frameWidth: 72, frameHeight: 72, frameCount: 14 } })),
+      drawFrame: vi.fn(),
+    };
+
+    (renderer as any).renderEffects(new Camera(0, 0), [{
+      type: 'explosion',
+      x: 100,
+      y: 80,
+      frame: 10,
+      maxFrames: 14,
+      size: 8,
+      sprite: 'napalm3',
+      cppLogicSlot: true,
+    }], assets);
+
+    expect(assets.drawFrame).not.toHaveBeenCalled();
+  });
+
+  it('does not draw health bars for damaged unselected technos', () => {
+    // C++ techno.cpp:1120 wraps health-bar rendering in if (IsSelected).
+    // A damaged but unselected unit must not get the TS-only always-visible
+    // HP bar, because it shows up as a black rectangle in visual parity shots.
+    const { canvas } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    const entity = new Entity(UnitType.V_1TNK, House.USSR, 100, 80);
+    entity.hp = Math.max(1, entity.maxHp - 10);
+
+    const map = new GameMap();
+    vi.spyOn(map, 'getDisplayVisibility').mockReturnValue(2);
+    const assets = {
+      getSheet: vi.fn(() => ({ meta: { frameWidth: 24, frameHeight: 24, frameCount: 32 } })),
+      getRemappedSheet: vi.fn(() => null),
+      drawFrame: vi.fn(),
+    };
+    const healthSpy = vi.spyOn(renderer as any, 'renderHealthBar');
+
+    (renderer as any).renderEntities(new Camera(0, 0), map, [entity], assets, new Set(), 50);
+
+    expect(healthSpy).not.toHaveBeenCalled();
+  });
+
+  it('renders the corpse surface layer after overlays but before structures', () => {
+    // C++ DisplayClass redraws surface-layer AnimClass objects before the
+    // ground layer (buildings/units), so corpses cannot cover structures.
+    const { canvas } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    const order: string[] = [];
+    for (const method of [
+      'renderTerrain',
+      'renderDecals',
+      'renderOverlays',
+      'renderCorpses',
+      'renderStructures',
+      'renderCrates',
+      'renderEntities',
+      'renderTargetLines',
+      'renderWaypoints',
+      'renderEffects',
+      'renderFogOfWar',
+      'renderPlacementGhost',
+      'renderSelectionBox',
+      'renderAttackMoveIndicator',
+      'renderOffscreenIndicators',
+      'renderSidebar',
+      'renderMinimap',
+      'renderSidebarButtonRow',
+      'renderFullscreenRadar',
+      'renderVerticalPowerBar',
+      'renderCursor',
+    ]) {
+      (renderer as any)[method] = vi.fn(() => order.push(method));
+    }
+
+    const assets = {
+      getTheatrePalette: vi.fn(() => Array.from({ length: 256 }, () => [0, 0, 0])),
+      hasTileset: vi.fn(() => false),
+    };
+
+    renderer.render(new Camera(640, 400), new GameMap(), [], [], assets as any, {} as any, new Set(), [], 1);
+
+    expect(order.indexOf('renderOverlays')).toBeLessThan(order.indexOf('renderCorpses'));
+    expect(order.indexOf('renderCorpses')).toBeLessThan(order.indexOf('renderStructures'));
+    expect(order.indexOf('renderCorpses')).toBeLessThan(order.indexOf('renderEntities'));
   });
 });
 
@@ -635,14 +1476,30 @@ describe('renderer terrain palette cycling (conquer.cpp:1667-1677)', () => {
     return pal;
   }
 
-  it('rotates the C++ water palette range every TIMER_SECOND/4 equivalent', () => {
+  it('rotates the C++ water palette range from the Sync_Delay system timer', () => {
     // C++ Color_Cycle rotates CYCLE_COLOR_START (6*16 = 96) through 102.
-    // TIMER_SECOND/4 is one quarter-second; at the default 15 game ticks/sec
-    // that advances once every 4 logic ticks.
+    // TIMER_SECOND/4 is one quarter-second and is not tied to logic ticks.
     expect(waterPaletteCycleShift(0)).toBe(0);
-    expect(waterPaletteCycleShift(3)).toBe(0);
-    expect(waterPaletteCycleShift(4)).toBe(1);
-    expect(waterPaletteCycleShift(28)).toBe(0);
+    expect(waterPaletteCycleShift(249)).toBe(0);
+    expect(waterPaletteCycleShift(250)).toBe(1);
+    expect(waterPaletteCycleShift(1750)).toBe(0);
+  });
+
+  it('applies the first C++ Color_Cycle call immediately, then waits TIMER_SECOND/4', () => {
+    const canvas = {
+      width: CELL_SIZE,
+      height: CELL_SIZE,
+      getContext: () => ({ imageSmoothingEnabled: false }),
+    } as unknown as HTMLCanvasElement;
+    const renderer = new Renderer(canvas);
+
+    expect(renderer.paletteCycleShift).toBe(0);
+    renderer.advancePaletteCycle(500);
+    expect(renderer.paletteCycleShift).toBe(1);
+    renderer.advancePaletteCycle(249);
+    expect(renderer.paletteCycleShift).toBe(1);
+    renderer.advancePaletteCycle(1);
+    expect(renderer.paletteCycleShift).toBe(2);
   });
 
   it('remaps baked RGBA water pixels through the same palette rotation', () => {
@@ -660,7 +1517,94 @@ describe('renderer terrain palette cycling (conquer.cpp:1667-1677)', () => {
     expect([...data.slice(8, 12)]).toEqual([1, 2, 3, 255]);
   });
 
-  it('draws tileset terrain through a remapped atlas when the water cycle advances', () => {
+  it('does not cycle tileset terrain only because logic ticks advanced', () => {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      fillStyle: '#000',
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+    };
+    const canvas = {
+      width: CELL_SIZE,
+      height: CELL_SIZE,
+      getContext: () => ctx,
+    } as unknown as HTMLCanvasElement;
+
+    const pal = makePalette();
+    const tilesetImage = { naturalWidth: 1, naturalHeight: 1, width: 1, height: 1 };
+    const imageData = { data: new Uint8ClampedArray([...pal[96]]) };
+    const cycleCtx = {
+      drawImage: vi.fn(),
+      getImageData: vi.fn(() => imageData),
+      putImageData: vi.fn(),
+    };
+    const cycledCanvas = {
+      width: 0,
+      height: 0,
+      getContext: () => cycleCtx,
+    } as unknown as HTMLCanvasElement;
+
+    const previousDocument = (globalThis as typeof globalThis & { document?: Document }).document;
+    const createElement = vi.fn(() => cycledCanvas);
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: { createElement },
+    });
+    try {
+      const renderer = new Renderer(canvas);
+      renderer.theatre = 'SNOW';
+      (renderer as any).pal = pal;
+      (renderer as any).tilesetImage = tilesetImage;
+      (renderer as any).tilesetMeta = {
+        tileW: CELL_SIZE,
+        tileH: CELL_SIZE,
+        atlasW: 1,
+        atlasH: 1,
+        tileCount: 1,
+        tiles: { '1,0': { ax: 0, ay: 0, lt: 'Water' } },
+      };
+      (renderer as any).tilesetReady = true;
+      (renderer as any).tilesetTheatre = 'SNOW';
+
+      const camera = new Camera(0, 0);
+      camera.x = 4 * CELL_SIZE;
+      camera.y = 4 * CELL_SIZE;
+
+      const map = new GameMap();
+      map.setBounds(4, 4, 1, 1);
+      map.setTerrain(4, 4, Terrain.WATER);
+      map.templateType[4 * 128 + 4] = 1;
+      map.templateIcon[4 * 128 + 4] = 0;
+
+      (renderer as any).renderTerrain(camera, map, 4, {});
+
+      expect(createElement).not.toHaveBeenCalled();
+      expect(cycleCtx.putImageData).not.toHaveBeenCalled();
+      expect(ctx.drawImage.mock.calls[0][0]).toBe(tilesetImage);
+    } finally {
+      Object.defineProperty(globalThis, 'document', {
+        configurable: true,
+        value: previousDocument,
+      });
+    }
+  });
+
+  it('draws tileset terrain through a remapped atlas when Color_Cycle advances', () => {
     const ctx = {
       imageSmoothingEnabled: false,
       globalAlpha: 1,
@@ -710,6 +1654,7 @@ describe('renderer terrain palette cycling (conquer.cpp:1667-1677)', () => {
     try {
       const renderer = new Renderer(canvas);
       renderer.theatre = 'SNOW';
+      renderer.advancePaletteCycle(0);
       (renderer as any).pal = pal;
       (renderer as any).tilesetImage = { naturalWidth: 1, naturalHeight: 1, width: 1, height: 1 };
       (renderer as any).tilesetMeta = {
@@ -733,7 +1678,7 @@ describe('renderer terrain palette cycling (conquer.cpp:1667-1677)', () => {
       map.templateType[4 * 128 + 4] = 1;
       map.templateIcon[4 * 128 + 4] = 0;
 
-      (renderer as any).renderTerrain(camera, map, 4, {});
+      (renderer as any).renderTerrain(camera, map, 0, {});
 
       expect(createElement).toHaveBeenCalledWith('canvas');
       expect(cycleCtx.putImageData).toHaveBeenCalled();
@@ -745,6 +1690,29 @@ describe('renderer terrain palette cycling (conquer.cpp:1667-1677)', () => {
         value: previousDocument,
       });
     }
+  });
+});
+
+describe('renderer unit shadow remap (display.cpp:422-427, jshell.cpp:410-530)', () => {
+  it('maps SNOW LTGREEN shadow pixels through UnitShadow instead of alpha-blending black', () => {
+    const pal = Array.from({ length: 256 }, () => [0, 0, 0, 255]);
+    pal[1] = [228, 216, 228, 255];
+    pal[RA_COLOR_BLACK] = [0, 0, 0, 255];
+    [
+      [28, 24, 8], [36, 32, 12], [40, 36, 16], [48, 48, 20], [56, 56, 28],
+      [65, 65, 32], [73, 73, 40], [81, 81, 48], [89, 89, 56], [93, 97, 65],
+      [101, 105, 73], [109, 113, 85], [117, 121, 93], [125, 130, 105], [134, 138, 117],
+    ].forEach((rgb, i) => {
+      pal[240 + i] = [...rgb, 255];
+    });
+
+    const table = conquerBuildFadingTable(pal, RA_COLOR_BLACK, 75);
+    const snowIndex = nearestPaletteIndex(pal, 228, 216, 228);
+    const shadowColor = pal[table[snowIndex]];
+
+    expect(table[snowIndex]).toBe(254);
+    expect(shadowColor.slice(0, 3)).toEqual([134, 138, 117]);
+    expect(shadowColor.slice(0, 3)).not.toEqual([112, 106, 112]);
   });
 });
 
@@ -820,7 +1788,7 @@ describe('renderer infantry draw anchor (infantry.cpp:545-548)', () => {
     expect(call[2]).toEqual(expect.any(Number));
     expect(call[3]).toBeCloseTo(baseScreen.x - 2);
     expect(call[4]).toBeCloseTo(baseScreen.y + 4);
-    expect(call[5]).toEqual({ centerX: true, centerY: true });
+    expect(call[5]).toEqual(expect.objectContaining({ centerX: true, centerY: true }));
   });
 });
 
@@ -871,6 +1839,7 @@ describe('renderer structure draw anchor (building.cpp:2795, bdata.cpp:3806)', (
     // shifts bridge barrels up-left from the original renderer.
     const { canvas, ctx } = mockCanvas();
     const renderer = new Renderer(canvas);
+    (renderer as any).pal = Array.from({ length: 256 }, (_, i) => [i, i, i, 255]);
     const camera = new Camera(160, 120);
     const map = new GameMap();
     map.setBounds(0, 0, 128, 128);
@@ -914,11 +1883,11 @@ describe('renderer structure draw anchor (building.cpp:2795, bdata.cpp:3806)', (
     expect(call[2]).toBe(0);
     expect(call[3]).toBeCloseTo(screen.x + CELL_SIZE / 2);
     expect(call[4]).toBeCloseTo(screen.y + CELL_SIZE / 2);
-    expect(call[5]).toEqual({ centerX: true, centerY: true });
+    expect(call[5]).toEqual(expect.objectContaining({ centerX: true, centerY: true }));
   });
 });
 
-describe('renderer vessel body frames (vessel.cpp:345-365)', () => {
+describe('renderer vessel and aircraft body frames', () => {
   function mockCanvas(): { canvas: HTMLCanvasElement; ctx: any } {
     const ctx = {
       imageSmoothingEnabled: false,
@@ -1015,6 +1984,33 @@ describe('renderer vessel body frames (vessel.cpp:345-365)', () => {
     expect(call[2]).toBe(0);
   });
 
+  it('draws LST door animation frames from C++ DoorClass::Door_Stage', () => {
+    // C++ vessel.cpp:365-371 replaces the LST transport frame with
+    // Door_Stage() whenever the door is not closed. Open_Door(5, 6) stores
+    // five visible stages, advancing every five game frames.
+    const states = [
+      { doorOpen: true, doorOpeningTicks: 25, doorClosingTicks: 0, frame: 0 },
+      { doorOpen: true, doorOpeningTicks: 20, doorClosingTicks: 0, frame: 1 },
+      { doorOpen: true, doorOpeningTicks: 5, doorClosingTicks: 0, frame: 4 },
+      { doorOpen: true, doorOpeningTicks: 0, doorClosingTicks: 0, frame: 4 },
+      { doorOpen: true, doorOpeningTicks: 0, doorClosingTicks: 25, frame: 4 },
+      { doorOpen: true, doorOpeningTicks: 0, doorClosingTicks: 20, frame: 3 },
+      { doorOpen: true, doorOpeningTicks: 0, doorClosingTicks: 5, frame: 0 },
+    ];
+
+    for (const state of states) {
+      const lst = new Entity(UnitType.V_LST, House.Greece, 64, 64);
+      lst.doorOpen = state.doorOpen;
+      lst.doorOpeningTicks = state.doorOpeningTicks;
+      lst.doorClosingTicks = state.doorClosingTicks;
+
+      const call = renderSingle(lst, 5);
+
+      expect(call[1]).toBe('lst');
+      expect(call[2]).toBe(state.frame);
+    }
+  });
+
   it('draws PT MGUN turret with C++ VesselTypeClass::Turret_Adjust offset', () => {
     // C++ vessel.cpp:453-456 uses MGunShapes for VESSEL_PT, frame
     // BodyShape[Dir_To_32(SecondaryFacing)]. vdata.cpp:621-624 offsets it by
@@ -1035,6 +2031,185 @@ describe('renderer vessel body frames (vessel.cpp:345-365)', () => {
     expect(turret![3]).toBeCloseTo(pt.pos.x + 13);
     expect(turret![4]).toBeCloseTo(pt.pos.y + 1);
     expect(turret![5]).toEqual({ centerX: true, centerY: true });
+  });
+
+  it('orders equal-Y vessels by C++ packed Sort_Y coordinate', () => {
+    // C++ ObjectClass::operator< compares the full Sort_Y COORDINATE value.
+    // In the little-endian coordinate layout, Y is the high word and X is the
+    // low word, so vessels with identical Y sort west-to-east before stable
+    // insertion-order ties. Sorting by screen Y alone lets scenario creation
+    // order decide overlaps and diverges for SCG07EA's PT boats.
+    const { canvas } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    const camera = new Camera(160, 120);
+    const map = new GameMap();
+    map.setBounds(0, 0, 128, 128);
+    map.revealAll();
+
+    const left = new Entity(UnitType.V_PT, House.Greece, 32, 64);
+    const middle = new Entity(UnitType.V_PT, House.Greece, 64, 64);
+    const right = new Entity(UnitType.V_PT, House.Greece, 96, 64);
+    for (const entity of [left, middle, right]) {
+      entity.prevPos = { ...entity.pos };
+      entity.bodyFacing256 = 64;
+      entity.bodyFacing32 = 8;
+      entity.prevBodyFacing32 = 8;
+    }
+
+    const assets = {
+      getSheet: vi.fn(() => ({
+        meta: {
+          frameWidth: 56,
+          frameHeight: 56,
+          frameCount: 16,
+        },
+      })),
+      getRemappedSheet: vi.fn(() => null),
+      drawFrame: vi.fn(),
+      drawFrameFrom: vi.fn(),
+    };
+
+    (renderer as any).renderEntities(camera, map, [right, middle, left], assets, new Set(), 0);
+
+    const bodyX = assets.drawFrame.mock.calls
+      .filter((call) => call[1] === 'pt')
+      .map((call) => call[3]);
+    expect(bodyX).toEqual([left.pos.x, middle.pos.x, right.pos.x]);
+  });
+
+  it('draws aircraft bodies from C++ SecondaryFacing, not PrimaryFacing', () => {
+    // C++ aircraft.cpp:359-365:
+    //   shapenum = UnitClass::BodyShape[Dir_To_32(SecondaryFacing)]
+    // A transport landing north while flying east-southeast must render the
+    // north-facing body frame.
+    const tran = new Entity(UnitType.V_TRAN, House.Greece, 64, 64);
+    tran.bodyFacing256 = 82;
+    tran.bodyFacing32 = 11;
+    tran.prevBodyFacing32 = 11;
+    tran.turretFacing256 = 0;
+    tran.turretFacing32 = 0;
+    tran.prevTurretFacing32 = 0;
+
+    const call = renderSingle(tran, 36);
+
+    expect(call[1]).toBe('tran');
+    expect(call[2]).toBe(0);
+  });
+
+  it('draws the C++ manual aircraft ground shadow before the elevated body', () => {
+    // C++ aircraft.cpp:454 draws shapefile/shapenum at x+1,y+2 with
+    // SHAPE_FADING|SHAPE_PREDATOR before Techno_Draw_Object subtracts Height.
+    const { canvas } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    (renderer as any).pal = Array.from({ length: 256 }, (_, i) => [i, i, i, 255]);
+    const camera = new Camera(160, 120);
+    const map = new GameMap();
+    map.setBounds(0, 0, 128, 128);
+    map.revealAll();
+
+    const tran = new Entity(UnitType.V_TRAN, House.Greece, 64, 64);
+    tran.prevPos = { ...tran.pos };
+    tran.flightAltitude = 10;
+    tran.aircraftHeightLeptons = 102;
+    tran.turretFacing256 = 0;
+    tran.turretFacing32 = 0;
+    tran.prevTurretFacing32 = 0;
+
+    const assets = {
+      getSheet: vi.fn(() => ({
+        meta: {
+          frameWidth: 56,
+          frameHeight: 56,
+          frameCount: 36,
+        },
+      })),
+      getRemappedSheet: vi.fn(() => null),
+      drawFrame: vi.fn(),
+      drawFrameFrom: vi.fn(),
+      drawFrameSpecialGhost: vi.fn(),
+    };
+
+    (renderer as any).renderEntities(camera, map, [tran], assets, new Set(), 100);
+    const shadow = assets.drawFrameSpecialGhost.mock.calls.find((call) => call[1] === 'tran');
+    const body = assets.drawFrame.mock.calls.find((call) => call[1] === 'tran');
+
+    expect(shadow).toBeDefined();
+    expect(body).toBeDefined();
+    expect(shadow![2]).toBe(0);
+    expect(shadow![3]).toBeCloseTo(tran.pos.x + 1);
+    expect(shadow![4]).toBeCloseTo(tran.pos.y + 2);
+    expect(shadow![5]).toBe((renderer as any).pal);
+    expect(shadow![6]).toEqual({ centerX: true, centerY: true });
+    expect(body![3]).toBeCloseTo(tran.pos.x);
+    expect(body![4]).toBeCloseTo(tran.pos.y - tran.flightAltitude);
+    expect(assets.drawFrameSpecialGhost.mock.invocationCallOrder[0])
+      .toBeLessThan(assets.drawFrame.mock.invocationCallOrder[0]);
+  });
+
+  it('draws TRAN rotors from C++ LROTOR/RROTOR SHP pairs with transport offsets', () => {
+    // C++ aircraft.cpp:491-528 and coord.cpp:445-555:
+    //   shapenum = Height ? Fetch_Stage()%4 : (Fetch_Stage()%8)+4
+    //   TRAN draws RRotorData after Move_Point(SecondaryFacing, stretch),
+    //   then LRotorData after Move_Point(SecondaryFacing+DIR_S, stretch*2).
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    (renderer as any).pal = Array.from({ length: 256 }, (_, i) => [i, i, i, 255]);
+    const camera = new Camera(160, 120);
+    const map = new GameMap();
+    map.setBounds(0, 0, 128, 128);
+    map.revealAll();
+
+    const tran = new Entity(UnitType.V_TRAN, House.Greece, 64, 64);
+    tran.prevPos = { ...tran.pos };
+    tran.flightAltitude = 10;
+    tran.aircraftHeightLeptons = 102;
+    tran.aircraftRotorStage = 99;
+    tran.turretFacing256 = 0;
+    tran.turretFacing32 = 0;
+    tran.prevTurretFacing32 = 0;
+
+    const assets = {
+      getSheet: vi.fn(() => ({
+        meta: {
+          frameWidth: 56,
+          frameHeight: 56,
+          frameCount: 36,
+        },
+      })),
+      getRemappedSheet: vi.fn(() => null),
+      drawFrame: vi.fn(),
+      drawFrameFrom: vi.fn(),
+      drawFrameSpecialGhost: vi.fn(),
+    };
+
+    (renderer as any).renderEntities(camera, map, [tran], assets, new Set(), 100);
+    const rotors = assets.drawFrameSpecialGhost.mock.calls
+      .filter((call) => call[1] === 'rrotor' || call[1] === 'lrotor');
+
+    expect(rotors.map((call) => call[1])).toEqual(['rrotor', 'lrotor']);
+    expect(rotors.map((call) => call[2])).toEqual([3, 3]);
+    const bodyY = tran.pos.y - tran.flightAltitude;
+    expect(rotors[0][3]).toBeCloseTo(tran.pos.x);
+    expect(rotors[0][4]).toBeCloseTo(bodyY - 7 - 2);
+    expect(rotors[1][3]).toBeCloseTo(tran.pos.x);
+    expect(rotors[1][4]).toBeCloseTo(bodyY - 7 + 16 - 2);
+    expect(rotors[0][5]).toBe((renderer as any).pal);
+    expect(rotors[0][6]).toEqual({ centerX: true, centerY: true });
+    expect(ctx.stroke).not.toHaveBeenCalled();
+  });
+
+  it('maps fixed-wing aircraft through C++ 16-stage rotation frames', () => {
+    // C++ aircraft.cpp:367-369:
+    //   shapenum = UnitClass::BodyShape[Dir_To_16(SecondaryFacing)*2]/2
+    const mig = new Entity(UnitType.V_MIG, House.Greece, 64, 64);
+    mig.turretFacing256 = 64;
+    mig.turretFacing32 = 8;
+    mig.prevTurretFacing32 = 8;
+
+    const call = renderSingle(mig, 16);
+
+    expect(call[1]).toBe('mig');
+    expect(call[2]).toBe(12);
   });
 });
 
@@ -1126,6 +2301,7 @@ describe('renderer top tab font (tab.cpp:123, credits.cpp:118-157)', () => {
     const { canvas } = mockCanvas();
     const renderer = new Renderer(canvas);
     renderer.sidebarCredits = 1000;
+    renderer.missionTimer = Renderer.MISSION_TIMER_WARNING_TICKS + 1;
 
     const metalFont = { drawText: vi.fn() };
     const assets = {
@@ -1137,6 +2313,9 @@ describe('renderer top tab font (tab.cpp:123, credits.cpp:118-157)', () => {
 
     renderer.renderTopBar(1);
 
+    expect(assets.drawFrame).toHaveBeenCalledWith(expect.anything(), 'tabs', 0, 0, 0);
+    expect(assets.drawFrame).toHaveBeenCalledWith(expect.anything(), 'tabs', 6, 480, 0);
+    expect(assets.drawFrame).toHaveBeenCalledWith(expect.anything(), 'tabs', 2, 320, 0);
     expect(assets.getFont).toHaveBeenCalledWith('metal12');
     expect(metalFont.drawText).toHaveBeenCalledWith(
       expect.anything(),
@@ -1155,12 +2334,64 @@ describe('renderer top tab font (tab.cpp:123, credits.cpp:118-157)', () => {
       expect.objectContaining({ align: 'center', indexedPalette: expect.any(Array), letterSpacing: 1 }),
     );
   });
+
+  it('uses the lit timer tab frame below C++ Rule.TimerWarning', () => {
+    // C++ tab.cpp:156-160 lights the mission-timer tab when
+    // Scen.MissionTimer < TICKS_PER_MINUTE * Rule.TimerWarning.
+    const { canvas } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    renderer.missionTimer = Renderer.MISSION_TIMER_WARNING_TICKS - 1;
+
+    const assets = {
+      getSheet: vi.fn(() => ({ meta: { frameWidth: 160, frameHeight: 14, frameCount: 9 } })),
+      drawFrame: vi.fn(),
+      getFont: vi.fn(() => ({ drawText: vi.fn() })),
+    };
+    (renderer as any)._cachedAssets = assets;
+
+    renderer.renderTopBar(1);
+
+    expect(assets.drawFrame).toHaveBeenCalledWith(expect.anything(), 'tabs', 4, 320, 0);
+  });
+
+  it('formats mission timer seconds with C++ integer division', () => {
+    // C++ credits.cpp:126 uses long secs = Scen.MissionTimer / TICKS_PER_SECOND.
+    // A partial second is truncated, not rounded up.
+    const { canvas } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    renderer.missionTimer = ((4 * 60 * 60) + (4 * 60) + 53) * 15 + 14;
+
+    const metalFont = { drawText: vi.fn() };
+    const assets = {
+      getSheet: vi.fn(() => ({ meta: { frameWidth: 160, frameHeight: 14, frameCount: 9 } })),
+      drawFrame: vi.fn(),
+      getFont: vi.fn((name: string) => name === 'metal12' ? metalFont : null),
+    };
+    (renderer as any)._cachedAssets = assets;
+
+    renderer.renderTopBar(1);
+
+    expect(metalFont.drawText).toHaveBeenCalledWith(
+      expect.anything(),
+      'Time:04:04:53',
+      400,
+      0,
+      '#efefef',
+      expect.objectContaining({ align: 'center', indexedPalette: expect.any(Array), letterSpacing: 1 }),
+    );
+  });
 });
 
 describe('renderer screen shake parity (conquer.cpp:5523-5566)', () => {
   function mockCanvas(): { canvas: HTMLCanvasElement; ctx: any } {
     const ctx = {
       clearRect: vi.fn(),
+      fillRect: vi.fn(),
+      strokeRect: vi.fn(),
+      beginPath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      stroke: vi.fn(),
       save: vi.fn(),
       restore: vi.fn(),
       translate: vi.fn(),
@@ -1177,6 +2408,7 @@ describe('renderer screen shake parity (conquer.cpp:5523-5566)', () => {
 
   function mockAssets() {
     return {
+      getSheet: vi.fn(() => undefined),
       getTheatrePalette: vi.fn(() => Array.from({ length: 256 }, () => [0, 0, 0])),
       hasTileset: vi.fn(() => false),
     };

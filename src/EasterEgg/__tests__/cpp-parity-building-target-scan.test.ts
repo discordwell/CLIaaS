@@ -230,7 +230,6 @@ describe('building TarCom detach on target death (ObjectClass::Detach_All)', () 
       screenShake: 0,
       explosionSize: 0,
       debris: false,
-      decal: null,
       explodeLgSound: false,
       attackerIsPlayer: false,
       trackLoss: false,

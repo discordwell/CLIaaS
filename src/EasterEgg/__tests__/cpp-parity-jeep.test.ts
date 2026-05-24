@@ -683,11 +683,11 @@ describe('JEEP takeDamage behavior', () => {
     expect(jeep.animState).toBe(AnimState.DIE);
   });
 
-  it('damage flash activates on hit', () => {
+  it('ordinary damage does not start FlasherClass blushing', () => {
     const jeep = makeEntity(UnitType.V_JEEP, House.Spain, 100, 100);
     expect(jeep.damageFlash).toBe(0);
     jeep.takeDamage(10, 'SA');
-    expect(jeep.damageFlash).toBe(4);
+    expect(jeep.damageFlash).toBe(0);
   });
 
   it('does not take damage when invulnerable (Iron Curtain)', () => {

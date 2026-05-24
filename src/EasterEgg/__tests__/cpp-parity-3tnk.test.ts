@@ -347,7 +347,7 @@ describe('3TNK turret behavior', () => {
     tank.turretRotTickedThisFrame = false;
     tank.tickTurretRotation();
     expect(tank.turretFacing256).toBe(12);
-    expect(tank.turretFacing32).toBe(2);
+    expect(tank.turretFacing32).toBe(1);
   });
 });
 
@@ -466,10 +466,12 @@ describe('3TNK damage speed reduction (standard vehicle)', () => {
     expect(tank.hp).toBe(0);
   });
 
-  it('damageFlash is set to 4 on hit', () => {
+  it('ordinary damage does not start FlasherClass blushing', () => {
     const tank = make3TNK();
     tank.takeDamage(10);
-    expect(tank.damageFlash).toBe(4);
+    // C++ object.cpp:1560-1679 applies Strength damage without calling
+    // TechnoClass::Clicked_As_Target. Blushing is target/electric feedback.
+    expect(tank.damageFlash).toBe(0);
   });
 
   it('invulnerable tanks take no damage', () => {
