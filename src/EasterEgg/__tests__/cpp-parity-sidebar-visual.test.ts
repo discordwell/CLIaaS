@@ -135,6 +135,65 @@ describe('sidebar production visuals', () => {
     );
   });
 
+  it('does not draw TS-only bevel strokes over the C++ sidebar sprites', () => {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      fillRect: vi.fn(),
+      strokeRect: vi.fn(),
+      clearRect: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      rect: vi.fn(),
+      clip: vi.fn(),
+      arc: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      translate: vi.fn(),
+      drawImage: vi.fn(),
+      getImageData: () => ({ data: new Uint8ClampedArray(0) }),
+      putImageData: vi.fn(),
+      canvas: { width: 640, height: 400 },
+    };
+    const canvas = {
+      width: 640,
+      height: 400,
+      style: {},
+      getBoundingClientRect: () => ({ width: 640, height: 400, left: 0, top: 0, right: 640, bottom: 400 }),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      getContext: () => ctx,
+    } as unknown as HTMLCanvasElement;
+    const renderer = new Renderer(canvas);
+    const drawFrame = vi.fn();
+    const assets = {
+      getSheet: (name: string) => {
+        if (['side1na', 'side2na', 'side3na'].includes(name)) {
+          return { meta: { frameWidth: 80, frameHeight: 80, frameCount: 42 } };
+        }
+        return null;
+      },
+      drawFrame,
+    };
+
+    (renderer as any).renderSidebar(assets);
+
+    expect(drawFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      'side1na',
+      0,
+      640 - 80 * RESFACTOR,
+      Renderer.SIDEBAR_BG_TOP_Y,
+      expect.anything(),
+    );
+    expect(ctx.stroke).not.toHaveBeenCalled();
+  });
+
   it('uses C++ raw-bottom marker math when a zero-power overlay is explicitly redrawn', () => {
     const renderer = new Renderer(mockCanvas());
     renderer.sidebarPowerProduced = 0;
@@ -246,7 +305,7 @@ describe('sidebar production visuals', () => {
     );
   });
 
-  it('clips the extracted POWERBAR right padding column to match C++ drawing', () => {
+  it('draws the full POWERBAR shape and leaves occlusion to sidebar redraw order', () => {
     const ctx = {
       imageSmoothingEnabled: false,
       fillRect: vi.fn(),
@@ -273,13 +332,21 @@ describe('sidebar production visuals', () => {
 
     (renderer as any).renderVerticalPowerBar(assets, 640 - 80 * RESFACTOR, false);
 
-    expect(ctx.rect).toHaveBeenCalledWith(
+    expect(ctx.clip).not.toHaveBeenCalled();
+    expect(assets.drawFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      'powerbar',
+      0,
       640 - 80 * RESFACTOR,
       Renderer.POWER_Y,
-      19,
-      224,
     );
-    expect(ctx.clip).toHaveBeenCalledOnce();
+    expect(assets.drawFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      'powerbar',
+      1,
+      640 - 80 * RESFACTOR,
+      Renderer.POWER_Y + 112,
+    );
   });
 
   it('redraws the power bar after the sidebar buttons in the final frame', () => {
@@ -323,6 +390,94 @@ describe('sidebar production visuals', () => {
     renderer.render({} as any, {} as any, [], [], assets as any, {} as any, new Set(), [], 100);
 
     expect(order).toEqual(['sidebar', 'radar', 'buttons', 'power']);
+  });
+
+  it('does not redraw inert zero-power chrome after the sidebar buttons', () => {
+    const renderer = new Renderer(mockCanvas());
+    const order: string[] = [];
+    for (const method of [
+      'renderTerrain',
+      'renderDecals',
+      'renderOverlays',
+      'renderGroundLayer',
+      'renderStructures',
+      'renderCrates',
+      'renderCorpses',
+      'renderEntities',
+      'renderTargetLines',
+      'renderWaypoints',
+      'renderEffects',
+      'renderFogOfWar',
+      'renderPlacementGhost',
+      'renderSelectionBox',
+      'renderAttackMoveIndicator',
+      'renderModeLabel',
+      'renderOffscreenIndicators',
+      'renderFullscreenRadar',
+      'renderHelpOverlay',
+      'renderCursor',
+    ]) {
+      (renderer as any)[method] = vi.fn();
+    }
+    (renderer as any).renderSidebar = vi.fn(() => order.push('sidebar'));
+    (renderer as any).renderMinimap = vi.fn(() => order.push('radar'));
+    (renderer as any).renderSidebarButtonRow = vi.fn(() => order.push('buttons'));
+    (renderer as any).renderVerticalPowerBar = vi.fn(() => order.push('power'));
+
+    const assets = {
+      getTheatrePalette: () => [[0, 0, 0]],
+      hasTileset: () => false,
+    };
+
+    renderer.render({} as any, {} as any, [], [], assets as any, {} as any, new Set(), [], 100);
+
+    expect(order).toEqual(['sidebar', 'radar', 'buttons']);
+  });
+
+  it('does not redraw drain-only startup chrome after the sidebar buttons', () => {
+    const renderer = new Renderer(mockCanvas());
+    renderer.sidebarPowerProduced = 0;
+    renderer.sidebarPowerConsumed = 1000;
+    (renderer as any).drainHeight = 1;
+    (renderer as any).desiredDrainHeight = 95;
+    const order: string[] = [];
+    for (const method of [
+      'renderTerrain',
+      'renderDecals',
+      'renderOverlays',
+      'renderGroundLayer',
+      'renderStructures',
+      'renderCrates',
+      'renderCorpses',
+      'renderEntities',
+      'renderTargetLines',
+      'renderWaypoints',
+      'renderEffects',
+      'renderFogOfWar',
+      'renderPlacementGhost',
+      'renderSelectionBox',
+      'renderAttackMoveIndicator',
+      'renderModeLabel',
+      'renderOffscreenIndicators',
+      'renderFullscreenRadar',
+      'renderHelpOverlay',
+      'renderCursor',
+    ]) {
+      (renderer as any)[method] = vi.fn();
+    }
+    (renderer as any).renderSidebar = vi.fn(() => order.push('sidebar'));
+    (renderer as any).renderMinimap = vi.fn(() => order.push('radar'));
+    (renderer as any).renderSidebarButtonRow = vi.fn(() => order.push('buttons'));
+    (renderer as any).renderVerticalPowerBar = vi.fn(() => order.push('power'));
+
+    const assets = {
+      getTheatrePalette: () => [[0, 0, 0]],
+      hasTileset: () => false,
+    };
+
+    renderer.render({} as any, {} as any, [], [], assets as any, {} as any, new Set(), [], 100);
+
+    expect(order).toEqual(['sidebar', 'radar', 'buttons']);
   });
 
   it('draws strip scroll buttons even when a production strip has no buildable items', () => {

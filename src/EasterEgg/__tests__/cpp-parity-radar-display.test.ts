@@ -36,6 +36,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { CELL_SIZE, House, HOUSE_FACTION, RESFACTOR, UnitType } from '../engine/types';
 import { Entity } from '../engine/entity';
 import { Renderer } from '../engine/renderer';
+import { makeFadingTable } from '../engine/shadow';
 import { type MapStructure } from '../engine/scenario';
 import {
   MAX_RADAR_FRAMES,
@@ -116,6 +117,27 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
       Renderer.cppScaleSourceOffset(24, 3, 1),
       Renderer.cppScaleSourceOffset(24, 3, 2),
     ]).toEqual([0, 8, 16]);
+  });
+
+  it('uses RA Make_Fading_Table for FadingBrighten terrain radar icons', () => {
+    // C++ display.cpp:446 builds FadingBrighten with RA/jshell.cpp
+    // Make_Fading_Table, not SDLLIB Build_Fading_Table. The two differ on
+    // SNOW palette tree greys visible in SCG08EA radar icons.
+    const snowPalette = JSON.parse(readFileSync(
+      join(__dirname, '../../..', 'public/ra/assets/snow-palette.json'),
+      'utf-8',
+    ));
+    const r = new Renderer(mockCanvas());
+    (r as any).pal = snowPalette;
+
+    const brighten = (r as any).getRadarBrightenTable() as Uint8Array;
+    const sdllibBuild = makeFadingTable(snowPalette, 15, 25);
+
+    expect(brighten[140]).toBe(139);
+    expect(snowPalette[brighten[140]].slice(0, 3)).toEqual([92, 92, 92]);
+    expect(snowPalette[sdllibBuild[140]].slice(0, 3)).toEqual([100, 100, 100]);
+    expect(brighten[133]).toBe(14);
+    expect(snowPalette[brighten[133]].slice(0, 3)).toEqual([168, 168, 168]);
   });
 
   describe('radar animation asset coverage', () => {
@@ -368,6 +390,62 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
         0,
         mockCanvas().width - 80 * RESFACTOR,
         8 * RESFACTOR,
+      );
+    });
+
+    it('clips the 141px radar cover SHP to the C++ 140px radar viewport', () => {
+      const ctx = {
+        imageSmoothingEnabled: true,
+        fillRect: vi.fn(),
+        strokeRect: vi.fn(),
+        clearRect: vi.fn(),
+        beginPath: vi.fn(),
+        closePath: vi.fn(),
+        moveTo: vi.fn(),
+        lineTo: vi.fn(),
+        rect: vi.fn(),
+        clip: vi.fn(),
+        arc: vi.fn(),
+        fill: vi.fn(),
+        stroke: vi.fn(),
+        fillText: vi.fn(),
+        measureText: () => ({ width: 0 }),
+        createRadialGradient: () => ({ addColorStop: vi.fn() }),
+        save: vi.fn(),
+        restore: vi.fn(),
+        translate: vi.fn(),
+        drawImage: vi.fn(),
+        getImageData: () => ({ data: new Uint8ClampedArray(0) }),
+        putImageData: vi.fn(),
+        canvas: { width: 640, height: 400 },
+      };
+      const r = new Renderer(mockCanvas(640, 400, ctx));
+      r.hasRadar = false;
+      r.doesRadarExist = false;
+      const radarMeta = { frameWidth: 160, frameHeight: 141, frameCount: 43, columns: 16, rows: 3, sheetWidth: 2560, sheetHeight: 423 };
+      const assets = {
+        getSheet: vi.fn((name: string) => name === 'natoradr'
+          ? { image: {}, meta: radarMeta }
+          : undefined),
+        drawFrame: vi.fn(),
+      };
+      const map = { boundsX: 0, boundsY: 0, boundsW: 126, boundsH: 126 };
+
+      (r as any).renderMinimap(map, [], [], {}, assets);
+
+      expect(ctx.rect).toHaveBeenCalledWith(
+        640 - 80 * RESFACTOR,
+        Renderer.RADAR_COVER_Y,
+        Renderer.RADAR_COVER_W,
+        Renderer.RADAR_COVER_H,
+      );
+      expect(ctx.clip).toHaveBeenCalled();
+      expect(assets.drawFrame).toHaveBeenCalledWith(
+        expect.anything(),
+        'natoradr',
+        0,
+        640 - 80 * RESFACTOR,
+        Renderer.RADAR_COVER_DRAW_Y,
       );
     });
 

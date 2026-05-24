@@ -4,14 +4,14 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, RESFACTOR, House, Stance, UnitType, BODY_SHAPE, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, leptonToPixel, type Faction, COS_TABLE_256, SIN_TABLE_256, CPP_CORPSE_FRAME_COUNT, CPP_CORPSE_FRAME_TICKS, cppCorpseAnimForInfantryDeath } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, RESFACTOR, LEPTON_SIZE, House, Stance, UnitType, BODY_SHAPE, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, leptonToPixel, type Faction, COS_TABLE_256, SIN_TABLE_256, CPP_CORPSE_FRAME_COUNT, CPP_CORPSE_FRAME_TICKS, cppCorpseAnimForInfantryDeath } from './types';
 import { type Camera } from './camera';
-import { type AssetManager, type DrawFrameOptions, type SpriteSheet, type TilesetMeta } from './assets';
+import { type AssetManager, type DrawFrameOptions, type SpriteSheet, type TilesetMeta, type TranslucentControl } from './assets';
 import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES, dir256ToFacing8 } from './entity';
-import { GameMap, Terrain, type MapTerrainRadarObject } from './map';
+import { GameMap, Terrain, TREE_CENTER_OFFSET, type MapTerrainRadarObject } from './map';
 import { type InputState } from './input';
-import { type MapStructure, OWNER_REMAPPED_STRUCTURE_TYPES, STRUCTURE_SIZE, getBibCells, getStructureOccupyCells } from './scenario';
-import { SHADOW_TABLE, cellShadowIndex, shadowTransFadeForRGBA, RA_COLOR_BLACK, RA_COLOR_WHITE, RA_COLOR_YELLOW, makeFadingTable, nearestPaletteIndex } from './shadow';
+import { type MapStructure, OWNER_REMAPPED_STRUCTURE_TYPES, STRUCTURE_SIZE, getBibCells, getStructureOccupyCells, structureCenterLeptons } from './scenario';
+import { SHADOW_TABLE, cellShadowIndex, shadowTransFadeForRGBA, RA_COLOR_BLACK, RA_COLOR_DKGREY, RA_COLOR_LTGREY, RA_COLOR_WHITE, RA_COLOR_YELLOW, makeFadingTable, makeRemapFadingTable, nearestPaletteIndex } from './shadow';
 import { NonCriticalRandom } from './random';
 import { RA_MESSAGE_DELAY_TICKS } from './tutorialText';
 import { logicAnimRenderSpec, type LogicAnim } from './logicAnim';
@@ -88,6 +88,41 @@ function cppEntityRenderSortKey(entity: Entity): number {
   return (entity.leptonY + yOffset) * 0x10000 + entity.leptonX;
 }
 
+function cppEntityRenderLayer(entity: Entity): 'ground' | 'top' {
+  // C++ ObjectClass::In_Which_Layer keeps objects below
+  // FLIGHT_LEVEL-(FLIGHT_LEVEL/3) in LAYER_GROUND. AircraftClass promotes
+  // fixed-wing aircraft to LAYER_TOP as soon as Height is non-zero.
+  if (!entity.stats.isAircraft) return 'ground';
+  const height = entity.objectHeightLeptons();
+  if (entity.stats.isFixedWing && height > 0) return 'top';
+  const topThreshold = Entity.FLIGHT_LEVEL_LEPTONS - Math.floor(Entity.FLIGHT_LEVEL_LEPTONS / 3);
+  return height < topThreshold ? 'ground' : 'top';
+}
+
+function cppStructureRenderSortKey(structure: MapStructure): { y: number; x: number } {
+  // C++ BuildingClass::Sort_Y special-cases repair bays, barracks/tents, and
+  // refineries, otherwise sorting from Center_Coord()+Height/3.
+  const origin = {
+    x: structure.cx * LEPTON_SIZE,
+    y: structure.cy * LEPTON_SIZE,
+  };
+  if (structure.type === 'FIX') return origin;
+
+  const center = structureCenterLeptons(structure);
+  if (structure.type === 'BARR' || structure.type === 'TENT' || structure.type === 'PROC') {
+    return { x: center.lx, y: center.ly };
+  }
+  if (structure.type === 'MINP' || structure.type === 'MINV') {
+    return { x: center.lx, y: center.ly - LEPTON_SIZE };
+  }
+
+  const [, h] = STRUCTURE_SIZE[structure.type] ?? [1, 1];
+  return {
+    x: center.lx,
+    y: center.ly + Math.trunc((h * LEPTON_SIZE) / 3),
+  };
+}
+
 function normalMovePointOffset(dir: number, distance: number): { dx: number; dy: number } {
   const facing = dir & 0xff;
   const dx = (COS_TABLE_256[facing] * distance) >> 7;
@@ -151,12 +186,12 @@ export const HOUSE_MINIMAP_COLOR: Record<string, string> = {
 // C++ TACTION_TEXT_TRIGGER: PCOLOR_GREEN with TPF_6PT_GRAD|TPF_USE_GRAD_PAL.
 // init.cpp fills FontRemap[10..15] from PALETTE.CPS row PCOLOR_GREEN columns 2..7.
 const PCOLOR_GREEN_FONT_RAMP = [
-  '#c7e786',
-  '#b2d37d',
-  '#9ebe75',
-  '#8aae6d',
-  '#799a65',
-  '#698a5d',
+  '#c4e484',
+  '#b0d07c',
+  '#9cbc74',
+  '#88ac6c',
+  '#789864',
+  '#68885c',
 ] as const;
 
 const PCOLOR_GREEN_FULLSHADOW_FONT_PALETTE = [
@@ -183,22 +218,23 @@ const PCOLOR_GREEN_FULLSHADOW_FONT_PALETTE = [
 // palette colors C++ installs for TPF_METAL12 | TPF_USE_GRAD_PAL.
 const METAL12_FONT_PALETTE = [
   '#000000',
-  '#efefef', // palette index 128
+  '#ececec', // palette index 128
   '#000000', // palette index 12
-  '#555555', // palette index 13
-  '#aaaaaa', // palette index 14
-  '#ffff55',
-  '#ff5555',
-  '#aa5500',
-  '#aa0000',
-  '#55ffff',
-  '#5151ff',
-  '#0000aa',
+  '#545454', // palette index 13
+  '#a8a8a8', // palette index 14
+  '#fcfc54',
+  '#fc5454',
+  '#a85400',
+  '#a80000',
+  '#54fcfc',
+  '#5050fc',
+  '#0000a8',
   '#000000',
-  '#555555',
-  '#aaaaaa',
-  '#ffffff',
+  '#545454',
+  '#a8a8a8',
+  '#fcfcfc',
 ] as const;
+const METAL12_TEXT_COLOR = '#ececec';
 
 // TEMPERATE.PAL palette index ranges for terrain rendering
 // These are the actual palette indices from the extracted TEMPERAT.PAL
@@ -228,6 +264,175 @@ const RADAR_LAND_COLOR = [
   141, // TREE extension: TerrainClass over clear land
 ] as const;
 const RADAR_TERRAIN_OBJECT_COLOR = 21; // C++ Render_Terrain(size==1)
+
+function toCppRgbComponent(value: number): number {
+  return (Math.max(0, Math.min(255, value)) >> 2) << 2;
+}
+
+export function cppDefaultAdjustedPaletteColor(r: number, g: number, b: number): [number, number, number] {
+  // C++ OptionsClass::Adjust_Palette with default sliders still round-trips
+  // each RGBClass through HSVClass and back. RGBClass stores 6-bit guns, so
+  // HSV results are truncated through RGBClass(red >> 2, ...).
+  const red = toCppRgbComponent(r);
+  const green = toCppRgbComponent(g);
+  const blue = toCppRgbComponent(b);
+  const value = Math.max(red, green, blue);
+  const white = Math.min(red, green, blue);
+  const saturation = value !== 0 ? Math.floor(((value - white) * 255) / value) : 0;
+  let hue = 0;
+
+  if (saturation !== 0) {
+    const delta = value - white;
+    const r1 = Math.floor(((value - red) * 255) / delta);
+    const g1 = Math.floor(((value - green) * 255) / delta);
+    const b1 = Math.floor(((value - blue) * 255) / delta);
+    let tmp: number;
+
+    if (value === red) {
+      tmp = white === green ? 5 * 256 + b1 : 1 * 256 - g1;
+    } else if (value === green) {
+      tmp = white === blue ? 1 * 256 + r1 : 3 * 256 - b1;
+    } else {
+      tmp = white === red ? 3 * 256 + g1 : 5 * 256 - r1;
+    }
+    hue = Math.floor(tmp / 6);
+  }
+
+  const scaledHue = hue * 6;
+  const f = scaledHue % 255;
+  const values: number[] = [];
+  values[1] = value;
+  values[2] = value;
+  let tmp = Math.floor((saturation * f) / 255);
+  values[3] = Math.floor((value * (255 - tmp)) / 255);
+  values[4] = Math.floor((value * (255 - saturation)) / 255);
+  values[5] = values[4];
+  tmp = 255 - Math.floor((saturation * (255 - f)) / 255);
+  values[6] = Math.floor((value * tmp) / 255);
+
+  let section = Math.floor(scaledHue / 255);
+  section += section > 4 ? -4 : 2;
+  const outR = values[section] ?? 0;
+  section += section > 4 ? -4 : 2;
+  const outB = values[section] ?? 0;
+  section += section > 4 ? -4 : 2;
+  const outG = values[section] ?? 0;
+
+  return [
+    toCppRgbComponent(outR),
+    toCppRgbComponent(outG),
+    toCppRgbComponent(outB),
+  ];
+}
+
+function paletteKey(r: number, g: number, b: number): number {
+  return (r << 16) | (g << 8) | b;
+}
+
+const RA_COLOR_LTGREEN = 4;
+const CPP_GROUND_ANIM_SORT_Y_OFFSET_LEPTONS = Math.round(14 * LEPTON_SIZE / CELL_SIZE);
+const CPP_MAGIC_TRANSLUCENT_CONTROLS: readonly TranslucentControl[] = [
+  { sourceColorIndex: 32, destColorIndex: 32, frac: 110 },
+  { sourceColorIndex: 33, destColorIndex: 33, frac: 110 },
+  { sourceColorIndex: 34, destColorIndex: 34, frac: 110 },
+  { sourceColorIndex: 35, destColorIndex: 35, frac: 110 },
+  { sourceColorIndex: 36, destColorIndex: 36, frac: 110 },
+  { sourceColorIndex: 37, destColorIndex: 37, frac: 110 },
+  { sourceColorIndex: 38, destColorIndex: 38, frac: 110 },
+  { sourceColorIndex: 39, destColorIndex: 39, frac: 110 },
+  { sourceColorIndex: RA_COLOR_BLACK, destColorIndex: RA_COLOR_BLACK, frac: 200 },
+  { sourceColorIndex: RA_COLOR_WHITE, destColorIndex: RA_COLOR_BLACK, frac: 40 },
+  { sourceColorIndex: RA_COLOR_LTGREY, destColorIndex: RA_COLOR_BLACK, frac: 80 },
+  { sourceColorIndex: RA_COLOR_DKGREY, destColorIndex: RA_COLOR_BLACK, frac: 140 },
+  { sourceColorIndex: RA_COLOR_LTGREEN, destColorIndex: RA_COLOR_BLACK, frac: 130 },
+];
+
+function pixelToNearestLepton(pixel: number): number {
+  return Math.round(pixel * LEPTON_SIZE / CELL_SIZE);
+}
+
+function cppGroundAnimSortKey(anim: LogicAnim): { y: number; x: number } {
+  return {
+    y: pixelToNearestLepton(anim.y) + CPP_GROUND_ANIM_SORT_Y_OFFSET_LEPTONS,
+    x: pixelToNearestLepton(anim.x),
+  };
+}
+
+interface TerrainObjectSprite {
+  name: string;
+  x: number;
+  y: number;
+  sortX: number;
+  sortY: number;
+  logicIndexHint?: number;
+}
+
+type GroundLayerEntry =
+  | {
+      kind: 'terrain';
+      sortX: number;
+      sortY: number;
+      order: number;
+      terrain: TerrainObjectSprite;
+    }
+  | {
+      kind: 'anim';
+      sortX: number;
+      sortY: number;
+      order: number;
+      anim: LogicAnim;
+    }
+  | {
+      kind: 'structure';
+      sortX: number;
+      sortY: number;
+      order: number;
+      structure: MapStructure;
+      structureIndex: number;
+    }
+  | {
+      kind: 'entity';
+      sortX: number;
+      sortY: number;
+      order: number;
+      entity: Entity;
+    };
+
+export function buildCppDefaultPaletteAdjustmentMap(
+  palette: readonly (readonly number[])[] | null,
+): Map<number, [number, number, number]> {
+  const map = new Map<number, [number, number, number]>();
+  if (!palette) return map;
+
+  for (const color of palette) {
+    if (!color || color.length < 3) continue;
+    const r = toCppRgbComponent(color[0] ?? 0);
+    const g = toCppRgbComponent(color[1] ?? 0);
+    const b = toCppRgbComponent(color[2] ?? 0);
+    const adjusted = cppDefaultAdjustedPaletteColor(r, g, b);
+    if (adjusted[0] !== r || adjusted[1] !== g || adjusted[2] !== b) {
+      map.set(paletteKey(r, g, b), adjusted);
+    }
+  }
+
+  return map;
+}
+
+export function applyCppDefaultPaletteAdjustment(
+  data: Uint8ClampedArray | Uint8Array,
+  adjustment: ReadonlyMap<number, readonly [number, number, number]>,
+): void {
+  if (adjustment.size === 0) return;
+
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] === 0) continue;
+    const adjusted = adjustment.get(paletteKey(data[i], data[i + 1], data[i + 2]));
+    if (!adjusted) continue;
+    data[i] = adjusted[0];
+    data[i + 1] = adjusted[1];
+    data[i + 2] = adjusted[2];
+  }
+}
 
 export function waterPaletteCycleShift(elapsedMs: number): number {
   // C++ conquer.cpp:1667-1677 rotates CYCLE_COLOR_START..+6 from
@@ -368,7 +573,7 @@ function wallConnectionMask(map: GameMap, cx: number, cy: number, wallType: stri
 }
 
 export interface Effect {
-  type: 'explosion' | 'muzzle' | 'blood' | 'tesla' | 'projectile' | 'marker' | 'debris' | 'text';
+  type: 'explosion' | 'muzzle' | 'blood' | 'tesla' | 'projectile' | 'marker' | 'text';
   x: number;
   y: number;
   frame: number;
@@ -433,6 +638,7 @@ export class Renderer {
   private height: number;
   private pal: number[][] | null = null;
   private palTheatre = ''; // which theatre the current palette is for
+  private paletteAdjustmentCache: { palette: number[][]; map: Map<number, [number, number, number]> } | null = null;
   screenShake = 0;      // remaining shake ticks
   /** C++ WASM agent harness returns immediately from Shake_The_Screen. */
   suppressScreenShake = false;
@@ -536,6 +742,7 @@ export class Renderer {
   } | null = null;
   private radarBrightenTableCache: { palette: number[][]; table: Uint8Array } | null = null;
   private radarYellowTableCache: { palette: number[][]; table: Uint8Array } | null = null;
+  private pendingTerrainObjectSprites: TerrainObjectSprite[] = [];
   placementValid = false;
   placementCells: boolean[] | null = null; // per-cell passability for placement preview
   // Dynamic player houses (set by game on start, used for sidebar filtering)
@@ -565,8 +772,8 @@ export class Renderer {
   private drainDir = 0;
   private powerBounce = 0;          // bounce counter (12→0)
   private drainBounce = 0;
-  private recordedPower = 0;        // last known power value (detect changes)
-  private recordedDrain = 0;
+  private recordedPower = -1;       // C++ Init_Clear starts recorded values at -1
+  private recordedDrain = -1;
   private powerFlashTimer = 0;      // ticks remaining for flash effect
 
   constructor(canvas: HTMLCanvasElement) {
@@ -722,7 +929,8 @@ export class Renderer {
     tick: number,
   ): void {
     const ctx = this.ctx;
-    ctx.clearRect(0, 0, this.width, this.height);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, this.width, this.height);
     this._selectedIds = selectedIds;
 
     // Cache palette reference from assets (refresh if theatre changed)
@@ -749,17 +957,24 @@ export class Renderer {
     const shaking = this.beginScreenShake(ctx);
 
     this._cachedAssets = assets; // cache for helpers that lack the param
-    this.renderTerrain(camera, map, tick, assets);
+    this.pendingTerrainObjectSprites = [];
+    this.renderTerrain(camera, map, tick, assets, false);
     this.renderDecals(camera, map, assets);
     this.renderOverlays(camera, map, tick, assets);
     this.renderCorpses(camera, map, assets, tick);
-    this.renderStructures(camera, map, structures, assets, tick);
+    this.renderGroundLayer(camera, map, entities, structures, assets, selectedIds, tick);
     this.renderCrates(camera, map, tick);
-    this.renderEntities(camera, map, entities, assets, selectedIds, tick);
     this.renderTargetLines(camera, entities, selectedIds);
     this.renderWaypoints(camera, entities, selectedIds);
-    this.renderLogicAnims(camera, assets, 'ground');
     this.renderLogicAnims(camera, assets, 'air');
+    this.renderEntities(
+      camera,
+      map,
+      entities.filter(entity => cppEntityRenderLayer(entity) === 'top'),
+      assets,
+      selectedIds,
+      tick,
+    );
     this.renderEffects(camera, effects, assets);
     this.renderFogOfWar(camera, map, assets);
 
@@ -801,14 +1016,17 @@ export class Renderer {
     this.renderSidebar(assets);
     this.renderMinimap(map, entities, structures, camera, assets);
     this.renderSidebarButtonRow(assets);
-    // C++ PowerClass redraws independently of SidebarClass button redraws during
-    // animated power updates, so the bar can land over the bottom edge of the
-    // repair button in the final back buffer.
-    this.renderVerticalPowerBar(
-      assets,
-      this.width - this.sidebarW,
-      this.sidebarPowerConsumed > this.sidebarPowerProduced && this.sidebarPowerProduced > 0,
-    );
+    // C++ PowerClass redraws independently of SidebarClass button redraws when
+    // power state is active/dirty, so the full bar can land over sidebar chrome
+    // in the final back buffer. In a zero-power complete redraw, SidebarClass
+    // covers the initial PowerClass pass instead.
+    if (this.shouldRedrawPowerBarAfterSidebar()) {
+      this.renderVerticalPowerBar(
+        assets,
+        this.width - this.sidebarW,
+        this.sidebarPowerConsumed > this.sidebarPowerProduced && this.sidebarPowerProduced > 0,
+      );
+    }
     // U6: Fullscreen radar overlay
     if (this.isRadarFullscreen && this.hasRadar) {
       this.renderFullscreenRadar(map, entities, structures, camera);
@@ -876,23 +1094,60 @@ export class Renderer {
         this.renderOverlays(camera, map, tick, assets);
         break;
       case 'full-no-ui':
-        this.renderTerrain(camera, map, tick, assets);
+        this.pendingTerrainObjectSprites = [];
+        this.renderTerrain(camera, map, tick, assets, false);
         this.renderDecals(camera, map, assets);
         this.renderOverlays(camera, map, tick, assets);
         this.renderCorpses(camera, map, assets, tick);
-        this.renderStructures(camera, map, structures, assets, tick);
+        this.renderGroundLayer(camera, map, entities, structures, assets, selectedIds, tick);
         this.renderCrates(camera, map, tick);
-        this.renderEntities(camera, map, entities, assets, selectedIds, tick);
-        this.renderLogicAnims(camera, assets, 'ground');
         this.renderLogicAnims(camera, assets, 'air');
+        this.renderEntities(
+          camera,
+          map,
+          entities.filter(entity => cppEntityRenderLayer(entity) === 'top'),
+          assets,
+          selectedIds,
+          tick,
+        );
         this.renderEffects(camera, effects, assets);
         break;
     }
 
     try {
+      this.applyGamePaletteAdjustment();
       return ctx.canvas.toDataURL('image/png');
     } catch {
       return null;
+    }
+  }
+
+  private getGamePaletteAdjustment(): Map<number, [number, number, number]> | null {
+    if (!this.pal) return null;
+    if (!this.paletteAdjustmentCache || this.paletteAdjustmentCache.palette !== this.pal) {
+      this.paletteAdjustmentCache = {
+        palette: this.pal,
+        map: buildCppDefaultPaletteAdjustmentMap(this.pal),
+      };
+    }
+    return this.paletteAdjustmentCache.map;
+  }
+
+  finalizeFramePalette(): void {
+    this.applyGamePaletteAdjustment();
+  }
+
+  private applyGamePaletteAdjustment(): void {
+    const adjustment = this.getGamePaletteAdjustment();
+    if (!adjustment || adjustment.size === 0) return;
+
+    try {
+      const imageData = this.ctx.getImageData(0, 0, this.width, this.height);
+      applyCppDefaultPaletteAdjustment(imageData.data, adjustment);
+      this.ctx.putImageData(imageData, 0, 0);
+    } catch {
+      // Some canvas backends can reject pixel reads. Rendering should continue;
+      // the parity harnesses run same-origin and exercise this path.
     }
   }
 
@@ -1456,7 +1711,7 @@ export class Renderer {
   private getRadarBrightenTable(): Uint8Array | null {
     if (!this.pal) return null;
     if (this.radarBrightenTableCache?.palette === this.pal) return this.radarBrightenTableCache.table;
-    const table = makeFadingTable(this.pal, RA_COLOR_WHITE, 25);
+    const table = makeRemapFadingTable(this.pal, RA_COLOR_WHITE, 25);
     this.radarBrightenTableCache = { palette: this.pal, table };
     return table;
   }
@@ -1676,7 +1931,13 @@ export class Renderer {
     return canvas;
   }
 
-  private renderTerrain(camera: Camera, map: GameMap, tick: number, assets: AssetManager): void {
+  private renderTerrain(
+    camera: Camera,
+    map: GameMap,
+    tick: number,
+    assets: AssetManager,
+    drawTerrainObjects = true,
+  ): void {
     const ctx = this.ctx;
     const startCX = Math.floor(camera.x / CELL_SIZE);
     const startCY = Math.floor(camera.y / CELL_SIZE);
@@ -1689,8 +1950,23 @@ export class Renderer {
 
     // Deferred tree sprite draws — rendered after all ground tiles to prevent
     // clump sprites (TC01-TC05, 72-96px wide) from being overwritten by
-    // neighboring _clump satellite cells' grass fill.
-    const deferredTrees: { name: string; x: number; y: number }[] = [];
+    // neighboring _clump satellite cells' grass fill. Full-frame renders sort
+    // these TerrainClass objects with ground AnimClass objects by C++ Sort_Y.
+    const deferredTrees: TerrainObjectSprite[] = [];
+
+    const queueTreeSprite = (treeType: string, cx: number, cy: number, x: number, y: number): void => {
+      const sheetName = this.theatreSheetName(assets, treeType);
+      if (!assets.hasSheet(sheetName)) return;
+      const [sortPx, sortPy] = TREE_CENTER_OFFSET[treeType] ?? [CELL_SIZE / 2, CELL_SIZE];
+      deferredTrees.push({
+        name: sheetName,
+        x,
+        y,
+        sortX: pixelToNearestLepton(cx * CELL_SIZE + sortPx),
+        sortY: pixelToNearestLepton(cy * CELL_SIZE + sortPy),
+        logicIndexHint: map.getTreeAtOrigin(cx, cy)?.logicIndexHint,
+      });
+    };
 
     for (let cy = startCY; cy <= endCY; cy++) {
       for (let cx = startCX; cx <= endCX; cx++) {
@@ -1745,8 +2021,7 @@ export class Renderer {
         // objects do not replace Land_Type.
         if (atlasDrawn && terrain !== Terrain.TREE) {
           if (treeType && treeType !== '_clump') {
-            const treeSheet = this.theatreSheetName(assets, treeType);
-            if (assets.hasSheet(treeSheet)) deferredTrees.push({ name: treeSheet, x: screen.x, y: screen.y });
+            queueTreeSprite(treeType, cx, cy, screen.x, screen.y);
           }
           continue;
         }
@@ -1901,7 +2176,7 @@ export class Renderer {
                 // Covered by a nearby clump origin sprite — just show grass
               } else if (treeType && assets.hasSheet(this.theatreSheetName(assets, treeType))) {
                 // Defer tree sprite to second pass (clump sprites span multiple cells)
-                deferredTrees.push({ name: this.theatreSheetName(assets, treeType), x: screen.x, y: screen.y });
+                queueTreeSprite(treeType, cx, cy, screen.x, screen.y);
               } else {
                 // Procedural fallback (MapPack trees or missing sprites)
                 // Tree shadow on ground
@@ -1969,19 +2244,132 @@ export class Renderer {
         }
 
         if (terrain !== Terrain.TREE && treeType && treeType !== '_clump') {
-          const treeSheet = this.theatreSheetName(assets, treeType);
-          if (assets.hasSheet(treeSheet)) deferredTrees.push({ name: treeSheet, x: screen.x, y: screen.y });
+          queueTreeSprite(treeType, cx, cy, screen.x, screen.y);
         }
       }
     }
 
-    // Second pass: draw deferred tree sprites on top of all ground tiles
-    for (const dt of deferredTrees) {
-      const shadowOptions = this.unitShadowOptions();
-      if (shadowOptions) {
-        assets.drawFrame(ctx, dt.name, 0, dt.x, dt.y, shadowOptions);
-      } else {
-        assets.drawFrame(ctx, dt.name, 0, dt.x, dt.y);
+    if (drawTerrainObjects) {
+      this.renderTerrainObjectSprites(assets, deferredTrees);
+    } else {
+      this.pendingTerrainObjectSprites.push(...deferredTrees);
+    }
+  }
+
+  private renderTerrainObjectSprites(
+    assets: AssetManager,
+    sprites = this.pendingTerrainObjectSprites,
+  ): void {
+    for (const dt of sprites) {
+      this.renderTerrainObjectSprite(assets, dt);
+    }
+  }
+
+  private renderTerrainObjectSprite(assets: AssetManager, sprite: TerrainObjectSprite): void {
+    const shadowOptions = this.unitShadowOptions();
+    if (shadowOptions) {
+      assets.drawFrame(this.ctx, sprite.name, 0, sprite.x, sprite.y, shadowOptions);
+    } else {
+      assets.drawFrame(this.ctx, sprite.name, 0, sprite.x, sprite.y);
+    }
+  }
+
+  private collectGroundLayerEntries(entities: Entity[], structures: MapStructure[]): GroundLayerEntry[] {
+    const entries: GroundLayerEntry[] = [];
+
+    for (const terrain of this.pendingTerrainObjectSprites) {
+      entries.push({
+        kind: 'terrain',
+        sortX: terrain.sortX,
+        sortY: terrain.sortY,
+        order: terrain.logicIndexHint ?? 0,
+        terrain,
+      });
+    }
+
+    for (const anim of this.logicAnims) {
+      if (anim.delay > 0) continue;
+      const spec = logicAnimRenderSpec(anim.type);
+      if (!spec.groundLayer) continue;
+      const sort = cppGroundAnimSortKey(anim);
+      entries.push({
+        kind: 'anim',
+        sortX: sort.x,
+        sortY: sort.y,
+        order: anim.logicIndexHint ?? 0,
+        anim,
+      });
+    }
+
+    for (let structureIndex = 0; structureIndex < structures.length; structureIndex++) {
+      const structure = structures[structureIndex];
+      const sort = cppStructureRenderSortKey(structure);
+      entries.push({
+        kind: 'structure',
+        sortX: sort.x,
+        sortY: sort.y,
+        order: structure.logicIndexHint ?? structureIndex,
+        structure,
+        structureIndex,
+      });
+    }
+
+    for (const entity of entities) {
+      if (cppEntityRenderLayer(entity) !== 'ground') continue;
+      entries.push({
+        kind: 'entity',
+        sortX: entity.leptonX,
+        sortY: Math.trunc(cppEntityRenderSortKey(entity) / 0x10000),
+        order: entity.logicIndexHint ?? entity.id,
+        entity,
+      });
+    }
+
+    entries.sort((a, b) => {
+      const dy = a.sortY - b.sortY;
+      if (dy !== 0) return dy;
+      const dx = a.sortX - b.sortX;
+      if (dx !== 0) return dx;
+      return a.order - b.order;
+    });
+
+    return entries;
+  }
+
+  private renderGroundTerrainObjectsAndAnims(camera: Camera, assets: AssetManager): void {
+    const entries = this.collectGroundLayerEntries([], []);
+    for (const entry of entries) {
+      if (entry.kind === 'terrain') {
+        this.renderTerrainObjectSprite(assets, entry.terrain);
+      } else if (entry.kind === 'anim') {
+        this.renderLogicAnim(camera, assets, entry.anim);
+      }
+    }
+  }
+
+  private renderGroundLayer(
+    camera: Camera,
+    map: GameMap,
+    entities: Entity[],
+    structures: MapStructure[],
+    assets: AssetManager,
+    selectedIds: Set<number>,
+    tick: number,
+  ): void {
+    for (const entry of this.collectGroundLayerEntries(entities, structures)) {
+      switch (entry.kind) {
+        case 'terrain':
+          this.renderTerrainObjectSprite(assets, entry.terrain);
+          break;
+        case 'anim':
+          this.renderLogicAnim(camera, assets, entry.anim);
+          break;
+        case 'structure':
+          this.renderStructures(camera, map, [entry.structure], assets, tick, [entry.structureIndex]);
+          break;
+        case 'entity':
+          this.renderEntities(camera, map, [entry.entity], assets, selectedIds, tick);
+          break;
       }
     }
   }
@@ -2121,11 +2509,17 @@ export class Renderer {
   }
 
   private renderStructures(
-    camera: Camera, map: GameMap, structures: MapStructure[], assets: AssetManager, tick: number,
+    camera: Camera,
+    map: GameMap,
+    structures: MapStructure[],
+    assets: AssetManager,
+    tick: number,
+    structureIndices?: number[],
   ): void {
     const ctx = this.ctx;
     for (let structIdx = 0; structIdx < structures.length; structIdx++) {
       const s = structures[structIdx];
+      const originalStructIdx = structureIndices?.[structIdx] ?? structIdx;
       if (!s.alive) {
         // C++ BuildingClass::Take_Damage leaves a zero-strength building on
         // the map for CountDown frames. It still draws through Draw_It with
@@ -2390,7 +2784,7 @@ export class Renderer {
       //   Dimensions: width = Width() * ICON_PIXEL_W - Width() * ICON_PIXEL_W / 5
       //   = Width() * 24 * 4/5  (building footprint width scaled to 80%)
       //   Bar is centered on building center.
-      if (s.alive && vis === 2 && this.selectedStructureIdx === structIdx) {
+      if (s.alive && vis === 2 && this.selectedStructureIdx === originalStructIdx) {
         const [fw] = STRUCTURE_SIZE[s.type] ?? [2, 2];
         const cppBarW = Math.floor(fw * CELL_SIZE * 4 / 5);
         const barX = screenX + (fw * CELL_SIZE) / 2;
@@ -2399,7 +2793,7 @@ export class Renderer {
       }
 
       // Selection highlight — white border when structure is selected
-      if (s.alive && this.selectedStructureIdx === structIdx) {
+      if (s.alive && this.selectedStructureIdx === originalStructIdx) {
         const [selW, selH] = STRUCTURE_SIZE[s.type] ?? [2, 2];
         ctx.strokeStyle = 'rgba(255,255,255,0.7)';
         ctx.lineWidth = 1;
@@ -2407,7 +2801,7 @@ export class Renderer {
       }
 
       // Repair indicator: pulsing green border + wrench icon
-      if (s.alive && this.repairingStructures.has(structIdx)) {
+      if (s.alive && this.repairingStructures.has(originalStructIdx)) {
         const pulse = 0.4 + 0.4 * Math.sin(tick * 0.3);
         ctx.strokeStyle = `rgba(80,255,80,${pulse})`;
         ctx.lineWidth = 2;
@@ -2466,7 +2860,7 @@ export class Renderer {
       if (screen.x < -32 || screen.x > this.width + 32 || screen.y < -32 || screen.y > this.height + 32) continue;
 
       const sheetName = this.theatreSheetName(assets, corpseAnim.sprite);
-      assets.drawFrame(ctx, sheetName, frame, screen.x, screen.y, {
+      assets.drawFrameTranslucent(ctx, sheetName, frame, screen.x, screen.y, this.pal, CPP_MAGIC_TRANSLUCENT_CONTROLS, {
         centerX: true,
         centerY: true,
       });
@@ -3140,8 +3534,23 @@ export class Renderer {
 
   // ─── Effects ─────────────────────────────────────────────
 
+  private renderLogicAnim(camera: Camera, assets: AssetManager, anim: LogicAnim): void {
+    const spec = logicAnimRenderSpec(anim.type);
+    const sheet = assets.getSheet(spec.sprite);
+    if (!sheet) return;
+    const screen = camera.worldToScreen(anim.x, anim.y);
+    const margin = Math.max(sheet.meta.frameWidth, sheet.meta.frameHeight);
+    if (screen.x < -margin || screen.y < -margin || screen.x > this.width + margin || screen.y > this.height + margin) {
+      return;
+    }
+    const frame = Math.max(0, Math.min(anim.stage, sheet.meta.frameCount - 1));
+    assets.drawFrame(this.ctx, spec.sprite, frame, screen.x, screen.y, {
+      centerX: true,
+      centerY: true,
+    });
+  }
+
   private renderLogicAnims(camera: Camera, assets: AssetManager, layer: 'ground' | 'air'): void {
-    const ctx = this.ctx;
     const anims = this.logicAnims.filter(anim => {
       if (anim.delay > 0) return false;
       const spec = logicAnimRenderSpec(anim.type);
@@ -3150,26 +3559,18 @@ export class Renderer {
 
     const sorted = layer === 'ground'
       ? [...anims].sort((a, b) => {
-          const dy = (a.y + 14) - (b.y + 14);
+          const ak = cppGroundAnimSortKey(a);
+          const bk = cppGroundAnimSortKey(b);
+          const dy = ak.y - bk.y;
           if (dy !== 0) return dy;
+          const dx = ak.x - bk.x;
+          if (dx !== 0) return dx;
           return (a.logicIndexHint ?? 0) - (b.logicIndexHint ?? 0);
         })
       : anims;
 
     for (const anim of sorted) {
-      const spec = logicAnimRenderSpec(anim.type);
-      const sheet = assets.getSheet(spec.sprite);
-      if (!sheet) continue;
-      const screen = camera.worldToScreen(anim.x, anim.y);
-      const margin = Math.max(sheet.meta.frameWidth, sheet.meta.frameHeight);
-      if (screen.x < -margin || screen.y < -margin || screen.x > this.width + margin || screen.y > this.height + margin) {
-        continue;
-      }
-      const frame = Math.max(0, Math.min(anim.stage, sheet.meta.frameCount - 1));
-      assets.drawFrame(ctx, spec.sprite, frame, screen.x, screen.y, {
-        centerX: true,
-        centerY: true,
-      });
+      this.renderLogicAnim(camera, assets, anim);
     }
   }
 
@@ -3535,21 +3936,6 @@ export class Renderer {
           ctx.beginPath();
           ctx.arc(sEnd.x, sEnd.y, 3 + (1 - progress) * 3, 0, Math.PI * 2);
           ctx.fill();
-          break;
-        }
-        case 'debris': {
-          // Flying debris pieces from vehicle destruction
-          const alpha = 1 - progress;
-          const seed = (fx.x * 7 + fx.y * 11) | 0;
-          for (let i = 0; i < 4; i++) {
-            const angle = ((seed + i * 90) % 360) * Math.PI / 180;
-            const dist = progress * fx.size * (1.5 + (i % 2));
-            const arcY = -Math.sin(progress * Math.PI) * 15; // arc upward
-            const px = screen.x + Math.cos(angle) * dist;
-            const py = screen.y + Math.sin(angle) * dist + arcY;
-            ctx.fillStyle = `rgba(60,55,50,${alpha * 0.8})`;
-            ctx.fillRect(px - 2, py - 1, 3 + (i % 2), 2);
-          }
           break;
         }
         case 'text': {
@@ -3931,10 +4317,7 @@ export class Renderer {
     const sheet = assets?.getSheet(sheetName);
     if (!sheet) return;
 
-    const prevSmoothing = ctx.imageSmoothingEnabled;
-    ctx.imageSmoothingEnabled = false;
-    assets!.drawFrame(ctx, sheetName, 1, this.width - this.sidebarW, Renderer.RADAR_COVER_DRAW_Y);
-    ctx.imageSmoothingEnabled = prevSmoothing;
+    this.drawRadarSheetClipped(ctx, assets!, sheetName, 1);
   }
 
   private radarEntityBlipColor(e: Entity, selectedBlink: boolean): string {
@@ -4056,17 +4439,31 @@ export class Renderer {
       // C++ radar.h: RADAR_ACTIVATED_FRAME=22, MAX_RADAR_FRAMES=41
       // DoesRadarExist -> frame 41 (closed cover plate), !DoesRadarExist -> frame 0 (ornate panel)
       const frame = this.radarCoverFrame ?? (this.doesRadarExist ? 41 : 0);
-      // Preserve pixel art for the unscaled HIRES frame.
-      const prevSmoothing = ctx.imageSmoothingEnabled;
-      ctx.imageSmoothingEnabled = false;
-      assets!.drawFrame(ctx, sheetName, frame, x, y);
-      ctx.imageSmoothingEnabled = prevSmoothing;
+      this.drawRadarSheetClipped(ctx, assets!, sheetName, frame);
       return;
     }
 
     // Procedural fallback (only if natoradr/ussrradr sprite assets are missing)
     ctx.fillStyle = '#000';
-    ctx.fillRect(x, y, Renderer.RADAR_COVER_W, Renderer.RADAR_COVER_W);
+    ctx.fillRect(x, y, Renderer.RADAR_COVER_W, Renderer.RADAR_COVER_H);
+  }
+
+  private drawRadarSheetClipped(
+    ctx: CanvasRenderingContext2D,
+    assets: AssetManager,
+    sheetName: string,
+    frame: number,
+  ): void {
+    const x = this.width - this.sidebarW;
+    const prevSmoothing = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = false;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, Renderer.RADAR_COVER_Y, Renderer.RADAR_COVER_W, Renderer.RADAR_COVER_H);
+    ctx.clip();
+    assets.drawFrame(ctx, sheetName, frame, x, Renderer.RADAR_COVER_DRAW_Y);
+    ctx.restore();
+    ctx.imageSmoothingEnabled = prevSmoothing;
   }
 
   // ─── Fullscreen Radar (U6) ──────────────────────────────
@@ -4290,7 +4687,7 @@ export class Renderer {
 
     // OPTIONS button (left, centered at x=40*RF -- EVA_WIDTH/2)
     // C++ tab.cpp:123 uses TPF_METAL12 | TPF_CENTER | TPF_USE_GRAD_PAL at y=0.
-    this.drawBitmapText(this._cachedAssets, 'Options', 40 * RF, 0, '#efefef', 'metal12', metalText);
+    this.drawBitmapText(this._cachedAssets, 'Options', 40 * RF, 0, METAL12_TEXT_COLOR, 'metal12', metalText);
 
     // Mission timer (center, x=200*RF). Only show if active.
     if (this.missionTimer > 0) {
@@ -4303,13 +4700,13 @@ export class Renderer {
       const timerText = hours > 0
         ? `Time:${hours.toString().padStart(2, '0')}:${displayMins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
         : `Time:${displayMins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-      this.drawBitmapText(this._cachedAssets, timerText, 200 * RF, 0, '#efefef', 'metal12', metalText);
+      this.drawBitmapText(this._cachedAssets, timerText, 200 * RF, 0, METAL12_TEXT_COLOR, 'metal12', metalText);
       void tick;
     }
 
     // Credits amount (right, over the credits tab at x=280*RF)
     const creditsText = `${this.sidebarCredits}`;
-    this.drawBitmapText(this._cachedAssets, creditsText, 280 * RF, 0, '#efefef', 'metal12', metalText);
+    this.drawBitmapText(this._cachedAssets, creditsText, 280 * RF, 0, METAL12_TEXT_COLOR, 'metal12', metalText);
   }
 
   // ─── EVA Messages & Mission Timer ──────────────────────
@@ -4745,6 +5142,7 @@ export class Renderer {
     const ctx = this.ctx;
     const x = this.width - this.sidebarW;
     const w = this.sidebarW;
+    const lowPower = this.sidebarPowerConsumed > this.sidebarPowerProduced && this.sidebarPowerProduced > 0;
 
     // Background — house-specific 3-section shapes (C++ SidebarClass::Draw_It)
     const isAllied = this.isPlayerAllied();
@@ -4752,6 +5150,9 @@ export class Renderer {
     const bgMid = assets.getSheet(isAllied ? 'side2na' : 'side2us');
     const bgBot = assets.getSheet(isAllied ? 'side3na' : 'side3us');
     if (bgTop && bgMid && bgBot) {
+      // C++ SidebarClass::Draw_It calls PowerClass::Draw_It before repainting
+      // the sidebar art, so the static chrome covers the initial powerbar pass.
+      this.renderVerticalPowerBar(assets, x, lowPower);
       // LORES shapes drawn at RESFACTOR× scale to fill sidebar.
       // Nearest-neighbor sampling preserves pixel art (no bilinear blur).
       const prevSmoothing = ctx.imageSmoothingEnabled;
@@ -4773,27 +5174,8 @@ export class Renderer {
         ctx.fillStyle = 'rgba(20,20,25,0.95)';
         ctx.fillRect(x, 0, w, this.height);
       }
+      this.renderVerticalPowerBar(assets, x, lowPower);
     }
-
-    // Beveled left edge — C++ sidebar shapes have a metallic beveled border.
-    // Draw a subtle highlight/shadow pair instead of a flat line to match
-    // the ornate C++ look. The sidebar sprites provide the main metallic
-    // texture; this adds the beveled separation from the game area.
-    ctx.strokeStyle = 'rgba(100,100,110,0.6)'; // highlight (light metallic edge)
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(x + 0.5, 0);
-    ctx.lineTo(x + 0.5, this.height);
-    ctx.stroke();
-    ctx.strokeStyle = 'rgba(20,20,25,0.8)'; // shadow (dark inner edge)
-    ctx.beginPath();
-    ctx.moveTo(x + 1.5, 0);
-    ctx.lineTo(x + 1.5, this.height);
-    ctx.stroke();
-
-    // Power bar (C++ PowerClass::Draw_It)
-    const lowPower = this.sidebarPowerConsumed > this.sidebarPowerProduced && this.sidebarPowerProduced > 0;
-    this.renderVerticalPowerBar(assets, x, lowPower);
 
     // Dual production strips
     const leftItems = this.sidebarItems.filter(it => getStripSide(it) === 'left');
@@ -4837,6 +5219,15 @@ export class Renderer {
       this.powerFlashTimer !== 0;
   }
 
+  /** Whether PowerClass can repaint over sidebar chrome after SidebarClass. */
+  private shouldRedrawPowerBarAfterSidebar(): boolean {
+    return this.sidebarPowerProduced !== 0 ||
+      this.powerHeight !== 0 ||
+      this.desiredPowerHeight !== 0 ||
+      this.powerBounce !== 0 ||
+      this.powerFlashTimer !== 0;
+  }
+
   /** Render vertical power bar (C++ PowerClass::Draw_It — bounce animation, palette colors) */
   private renderVerticalPowerBar(assets: AssetManager, sidebarX: number, lowPower: boolean): void {
     const ctx = this.ctx;
@@ -4853,17 +5244,11 @@ export class Renderer {
     const pwrSheet = assets.getSheet('powerbar');
     if (pwrSheet) {
       const frameH = pwrSheet.meta.frameHeight;
-      const frameW = Math.max(0, pwrSheet.meta.frameWidth - 1);
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(pwrFrameX, pwrY, frameW, frameH * Math.max(1, Math.min(2, pwrSheet.meta.frameCount)));
-      ctx.clip();
       // Frame 0 = top half, frame 1 = bottom half
       assets.drawFrame(ctx, 'powerbar', 0, pwrFrameX, pwrY);
       if (pwrSheet.meta.frameCount > 1) {
         assets.drawFrame(ctx, 'powerbar', 1, pwrFrameX, pwrY + frameH);
       }
-      ctx.restore();
     } else {
       ctx.fillStyle = '#111';
       ctx.fillRect(pwrFrameX, pwrY, Renderer.POWER_BAR_W, pwrH);

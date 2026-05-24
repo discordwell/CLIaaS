@@ -16,10 +16,19 @@ import { AssetManager } from '../engine/assets';
 import { Camera } from '../engine/camera';
 import { Entity } from '../engine/entity';
 import { GameMap, Terrain } from '../engine/map';
-import { applyWaterPaletteCycle, BUILDING_FRAME_TABLE, HOUSE_MINIMAP_COLOR, Renderer, waterPaletteCycleShift } from '../engine/renderer';
+import {
+  applyCppDefaultPaletteAdjustment,
+  applyWaterPaletteCycle,
+  buildCppDefaultPaletteAdjustmentMap,
+  BUILDING_FRAME_TABLE,
+  cppDefaultAdjustedPaletteColor,
+  HOUSE_MINIMAP_COLOR,
+  Renderer,
+  waterPaletteCycleShift,
+} from '../engine/renderer';
 import { NonCriticalRandom } from '../engine/random';
 import { RA_COLOR_BLACK, conquerBuildFadingTable, nearestPaletteIndex } from '../engine/shadow';
-import { CELL_SIZE, House, UnitType } from '../engine/types';
+import { CELL_SIZE, House, LEPTON_SIZE, UnitType } from '../engine/types';
 
 describe('sprite SHAPE_CENTER placement (2keyfbuf.cpp Buffer_Frame_To_Page)', () => {
   function managerWithSheet(width: number, height: number): AssetManager {
@@ -1312,14 +1321,20 @@ describe('renderer corpse AnimClass art (infantry.cpp corpse follow-up)', () => 
       hasSheet: vi.fn((name: string) => name === 'corpse3_snow'),
       getSheet: vi.fn(() => ({ meta: { frameWidth: 50, frameHeight: 39, frameCount: 6 } })),
       drawFrame: vi.fn(),
+      drawFrameTranslucent: vi.fn(),
     };
 
     (renderer as any).renderCorpses(camera, map, assets, 50);
 
-    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'corpse3_snow', 0, 100, 80, {
+    expect(assets.drawFrameTranslucent).toHaveBeenCalledWith(ctx, 'corpse3_snow', 0, 100, 80, null, expect.arrayContaining([
+      { sourceColorIndex: 32, destColorIndex: 32, frac: 110 },
+      { sourceColorIndex: 15, destColorIndex: 12, frac: 40 },
+      { sourceColorIndex: 4, destColorIndex: 12, frac: 130 },
+    ]), {
       centerX: true,
       centerY: true,
     });
+    expect(assets.drawFrame).not.toHaveBeenCalled();
     expect(ctx.ellipse).not.toHaveBeenCalled();
     expect(ctx.fillRect).not.toHaveBeenCalled();
   });
@@ -1353,6 +1368,49 @@ describe('renderer corpse AnimClass art (infantry.cpp corpse follow-up)', () => 
       centerX: true,
       centerY: true,
     });
+  });
+
+  it('sorts ground AnimClass draws by C++ Sort_Y coordinate, including x tie-break', () => {
+    // C++ LayerClass::Sorted_Add compares AnimClass::Sort_Y() as a packed
+    // COORDINATE. For ground animations, Sort_Y is Center_Coord()+(0,14px), so
+    // equal Y values are ordered by X before allocation/logic index.
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    renderer.logicAnims = [
+      {
+        type: 'fire_small',
+        x: 130,
+        y: 80,
+        stage: 1,
+        timer: 1,
+        loops: 1,
+        delay: 0,
+        isBrandNew: false,
+        logicIndexHint: 1,
+      } as any,
+      {
+        type: 'fire_small',
+        x: 100,
+        y: 80,
+        stage: 2,
+        timer: 1,
+        loops: 1,
+        delay: 0,
+        isBrandNew: false,
+        logicIndexHint: 2,
+      } as any,
+    ];
+
+    const assets = {
+      getSheet: vi.fn(() => ({ meta: { frameWidth: 23, frameHeight: 23, frameCount: 15 } })),
+      drawFrame: vi.fn(),
+    };
+
+    (renderer as any).renderLogicAnims(new Camera(0, 0), assets, 'ground');
+
+    expect((assets.drawFrame as any).mock.calls.map((call: unknown[]) => call[3])).toEqual([100, 130]);
+    expect((assets.drawFrame as any).mock.calls.map((call: unknown[]) => call[2])).toEqual([2, 1]);
+    expect(ctx.ellipse).not.toHaveBeenCalled();
   });
 
   it('skips linked Effect copies for C++ AnimClass visuals', () => {
@@ -1422,9 +1480,10 @@ describe('renderer corpse AnimClass art (infantry.cpp corpse follow-up)', () => 
     expect(healthSpy).not.toHaveBeenCalled();
   });
 
-  it('renders the corpse surface layer after overlays but before structures', () => {
+  it('renders the corpse surface layer after overlays but before the ground object layer', () => {
     // C++ DisplayClass redraws surface-layer AnimClass objects before the
-    // ground layer (buildings/units), so corpses cannot cover structures.
+    // ground layer (terrain objects/buildings/units/ground anims), so corpses
+    // cannot cover structures or TerrainClass objects.
     const { canvas } = mockCanvas();
     const renderer = new Renderer(canvas);
     const order: string[] = [];
@@ -1433,11 +1492,11 @@ describe('renderer corpse AnimClass art (infantry.cpp corpse follow-up)', () => 
       'renderDecals',
       'renderOverlays',
       'renderCorpses',
-      'renderStructures',
+      'renderGroundLayer',
       'renderCrates',
-      'renderEntities',
       'renderTargetLines',
       'renderWaypoints',
+      'renderEntities',
       'renderEffects',
       'renderFogOfWar',
       'renderPlacementGhost',
@@ -1462,8 +1521,266 @@ describe('renderer corpse AnimClass art (infantry.cpp corpse follow-up)', () => 
     renderer.render(new Camera(640, 400), new GameMap(), [], [], assets as any, {} as any, new Set(), [], 1);
 
     expect(order.indexOf('renderOverlays')).toBeLessThan(order.indexOf('renderCorpses'));
-    expect(order.indexOf('renderCorpses')).toBeLessThan(order.indexOf('renderStructures'));
-    expect(order.indexOf('renderCorpses')).toBeLessThan(order.indexOf('renderEntities'));
+    expect(order.indexOf('renderCorpses')).toBeLessThan(order.indexOf('renderGroundLayer'));
+  });
+
+  it('draws TerrainClass tree objects after ore overlays in full-frame renders', () => {
+    // C++ CellClass::Draw_It paints overlays in the ground pass, then draws
+    // TerrainClass objects in the later object pass. Tree pixels must therefore
+    // cover ore/shadow pixels where their SHPs overlap.
+    const { canvas } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    (renderer as any).pal = Array.from({ length: 256 }, () => [0, 0, 0, 255]);
+
+    const camera = new Camera(CELL_SIZE, CELL_SIZE);
+    camera.x = 10 * CELL_SIZE;
+    camera.y = 10 * CELL_SIZE;
+
+    const map = new GameMap();
+    map.setBounds(10, 10, 1, 1);
+    map.setTerrain(10, 10, Terrain.ORE);
+    map.setTreeType(10, 10, 't16');
+    map.overlay[10 * 128 + 10] = GameMap.OVERLAY_GOLD1;
+    map.oreDensity[10 * 128 + 10] = 3;
+
+    const calls: string[] = [];
+    const assets = {
+      getTheatrePalette: vi.fn(() => Array.from({ length: 256 }, () => [0, 0, 0, 255])),
+      hasTileset: vi.fn(() => false),
+      hasSheet: vi.fn((name: string) => name === 't16'),
+      drawFrame: vi.fn((_ctx: unknown, name: string) => calls.push(name)),
+    };
+
+    for (const method of [
+      'renderCorpses',
+      'renderStructures',
+      'renderCrates',
+      'renderEntities',
+      'renderTargetLines',
+      'renderWaypoints',
+      'renderLogicAnims',
+      'renderEffects',
+      'renderFogOfWar',
+      'renderSelectionBox',
+      'renderOffscreenIndicators',
+      'renderSidebar',
+      'renderMinimap',
+      'renderSidebarButtonRow',
+      'renderVerticalPowerBar',
+      'renderCursor',
+    ]) {
+      (renderer as any)[method] = vi.fn();
+    }
+
+    renderer.render(camera, map, [], [], assets as any, {} as any, new Set(), [], 1);
+
+    expect(calls).toContain('gold01');
+    expect(calls).toContain('t16');
+    expect(calls.indexOf('gold01')).toBeLessThan(calls.indexOf('t16'));
+  });
+
+  it('sorts TerrainClass tree sprites with ground AnimClass objects by C++ Sort_Y', () => {
+    // C++ DisplayClass puts TerrainClass and ground AnimClass objects in the
+    // same sorted LAYER_GROUND vector. A tree whose CenterBase sorts below a
+    // fire animation must draw after that fire; drawing all trees before all
+    // anims leaves TS-only fire pixels at shroud/tree boundaries.
+    const { canvas } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    (renderer as any).pal = Array.from({ length: 256 }, () => [0, 0, 0, 255]);
+    renderer.logicAnims = [{
+      type: 'fire_small',
+      x: 62,
+      y: 45,
+      stage: 8,
+      timer: 1,
+      loops: 1,
+      delay: 0,
+      isBrandNew: false,
+      logicIndexHint: 315,
+    } as any];
+
+    const camera = new Camera(CELL_SIZE, CELL_SIZE);
+    camera.x = 0;
+    camera.y = 0;
+
+    const map = new GameMap();
+    map.setBounds(0, 0, 8, 8);
+    map.setTreeType(1, 1, 'tc02');
+
+    const calls: string[] = [];
+    const assets = {
+      getTheatrePalette: vi.fn(() => Array.from({ length: 256 }, () => [0, 0, 0, 255])),
+      hasTileset: vi.fn(() => false),
+      hasSheet: vi.fn((name: string) => name === 'tc02'),
+      getSheet: vi.fn((name: string) => name === 'fire3'
+        ? { meta: { frameWidth: 23, frameHeight: 23, frameCount: 15 } }
+        : undefined),
+      drawFrame: vi.fn((_ctx: unknown, name: string) => calls.push(name)),
+    };
+
+    for (const method of [
+      'renderCorpses',
+      'renderStructures',
+      'renderCrates',
+      'renderEntities',
+      'renderTargetLines',
+      'renderWaypoints',
+      'renderLogicAnims',
+      'renderEffects',
+      'renderFogOfWar',
+      'renderSelectionBox',
+      'renderOffscreenIndicators',
+      'renderSidebar',
+      'renderMinimap',
+      'renderSidebarButtonRow',
+      'renderVerticalPowerBar',
+      'renderCursor',
+    ]) {
+      (renderer as any)[method] = vi.fn();
+    }
+
+    renderer.render(camera, map, [], [], assets as any, {} as any, new Set(), [], 1);
+
+    expect(calls).toEqual(['fire3', 'tc02']);
+  });
+
+  it('interleaves buildings, ground units, TerrainClass, and ground AnimClass in one C++ LAYER_GROUND sort', () => {
+    // C++ conquer.cpp sorts DisplayClass::Layer[LAYER_GROUND] as one vector.
+    // That vector contains BuildingClass, FootClass, TerrainClass, and ground
+    // AnimClass objects together; separate TS buckets draw the unit/building
+    // before the fire/tree regardless of ObjectClass::Sort_Y.
+    const { canvas } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    renderer.logicAnims = [{
+      type: 'fire_small',
+      x: 62,
+      y: 45,
+      stage: 8,
+      timer: 1,
+      loops: 1,
+      delay: 0,
+      isBrandNew: false,
+      logicIndexHint: 1,
+    } as any];
+
+    const infantry = new Entity(UnitType.I_E1, House.USSR, 0, 0);
+    infantry.leptonX = 0;
+    infantry.leptonY = 780; // FootClass::Sort_Y = 828, after the fire and before the GUN/tree.
+    infantry.pos = { x: 0, y: infantry.leptonY * CELL_SIZE / LEPTON_SIZE };
+    infantry.prevPos = { ...infantry.pos };
+    infantry.logicIndexHint = 2;
+
+    const gun = {
+      type: 'GUN',
+      image: 'gun',
+      house: House.USSR,
+      cx: 0,
+      cy: 3,
+      hp: 256,
+      maxHp: 256,
+      alive: true,
+      rubble: false,
+      attackCooldown: 0,
+      ammo: -1,
+      maxAmmo: -1,
+      missionTimer: 0,
+      logicIndexHint: 3,
+    } as any;
+
+    const map = new GameMap();
+    vi.spyOn(map, 'getDisplayVisibility').mockReturnValue(2);
+
+    const calls: string[] = [];
+    const assets = {
+      getTheatrePalette: vi.fn(() => Array.from({ length: 256 }, () => [0, 0, 0, 255])),
+      hasTileset: vi.fn(() => false),
+      getSheet: vi.fn((name: string) => {
+        if (name === 'fire3') return { meta: { frameWidth: 23, frameHeight: 23, frameCount: 15 } };
+        if (name === 'e1') return { meta: { frameWidth: 50, frameHeight: 39, frameCount: 400 } };
+        if (name === 'gun') return { meta: { frameWidth: 24, frameHeight: 24, frameCount: 1 } };
+        return undefined;
+      }),
+      getRemappedSheet: vi.fn(() => null),
+      drawFrame: vi.fn((_ctx: unknown, name: string) => calls.push(name)),
+    };
+
+    (renderer as any).renderTerrain = vi.fn(() => {
+      (renderer as any).pendingTerrainObjectSprites = [{
+        name: 'tc02',
+        x: 0,
+        y: 0,
+        sortX: 0,
+        sortY: 1000,
+        order: 4,
+        logicIndexHint: 4,
+      }];
+    });
+    for (const method of [
+      'renderDecals',
+      'renderOverlays',
+      'renderCorpses',
+      'renderCrates',
+      'renderTargetLines',
+      'renderWaypoints',
+      'renderLogicAnims',
+      'renderEffects',
+      'renderFogOfWar',
+      'renderSelectionBox',
+      'renderOffscreenIndicators',
+      'renderSidebar',
+      'renderMinimap',
+      'renderSidebarButtonRow',
+      'renderVerticalPowerBar',
+      'renderCursor',
+    ]) {
+      (renderer as any)[method] = vi.fn();
+    }
+
+    renderer.render(new Camera(640, 400), map, [infantry], [gun], assets as any, {} as any, new Set(), [], 1);
+
+    expect(calls).toEqual(['fire3', 'e1', 'gun', 'tc02']);
+  });
+
+  it('starts full-frame renders from an opaque black C++ HidPage backbuffer', () => {
+    // C++ agent_render converts every HidPage byte to opaque RGBA. Canvas
+    // clearRect leaves alpha=0 holes in transparent SHP pixels, which shows up
+    // as TS-only transparent pixels in the visual harness.
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    for (const method of [
+      'renderTerrain',
+      'renderDecals',
+      'renderOverlays',
+      'renderGroundLayer',
+      'renderCorpses',
+      'renderStructures',
+      'renderCrates',
+      'renderEntities',
+      'renderTargetLines',
+      'renderWaypoints',
+      'renderEffects',
+      'renderFogOfWar',
+      'renderSelectionBox',
+      'renderOffscreenIndicators',
+      'renderSidebar',
+      'renderMinimap',
+      'renderSidebarButtonRow',
+      'renderVerticalPowerBar',
+      'renderCursor',
+    ]) {
+      (renderer as any)[method] = vi.fn();
+    }
+
+    const assets = {
+      getTheatrePalette: vi.fn(() => Array.from({ length: 256 }, () => [0, 0, 0])),
+      hasTileset: vi.fn(() => false),
+    };
+
+    renderer.render(new Camera(640, 400), new GameMap(), [], [], assets as any, {} as any, new Set(), [], 1);
+
+    expect(ctx.clearRect).not.toHaveBeenCalledWith(0, 0, 640, 400);
+    expect(ctx.fillRect.mock.calls[0]).toEqual([0, 0, 640, 400]);
+    expect(ctx.fillStyle).toBe('#000');
   });
 });
 
@@ -1690,6 +2007,40 @@ describe('renderer terrain palette cycling (conquer.cpp:1667-1677)', () => {
         value: previousDocument,
       });
     }
+  });
+});
+
+describe('renderer default GamePalette adjustment (options.cpp:505-545)', () => {
+  it('round-trips raw palette RGB through C++ HSVClass/RGBClass defaults', () => {
+    expect(cppDefaultAdjustedPaletteColor(88, 132, 144)).toEqual([88, 128, 144]);
+    expect(cppDefaultAdjustedPaletteColor(104, 148, 196)).toEqual([104, 144, 196]);
+    expect(cppDefaultAdjustedPaletteColor(168, 152, 84)).toEqual([168, 148, 84]);
+    expect(cppDefaultAdjustedPaletteColor(252, 252, 252)).toEqual([252, 252, 252]);
+  });
+
+  it('maps final canvas palette pixels to the adjusted C++ GamePalette colors', () => {
+    const palette = Array.from({ length: 256 }, () => [0, 0, 0, 255]);
+    palette[64] = [88, 132, 144, 255];
+    palette[67] = [104, 148, 196, 255];
+    palette[85] = [168, 152, 84, 255];
+    const map = buildCppDefaultPaletteAdjustmentMap(palette);
+    const data = new Uint8ClampedArray([
+      88, 132, 144, 255,
+      104, 148, 196, 255,
+      168, 152, 84, 255,
+      1, 2, 3, 255,
+      88, 132, 144, 0,
+    ]);
+
+    applyCppDefaultPaletteAdjustment(data, map);
+
+    expect([...data]).toEqual([
+      88, 128, 144, 255,
+      104, 144, 196, 255,
+      168, 148, 84, 255,
+      1, 2, 3, 255,
+      88, 132, 144, 0,
+    ]);
   });
 });
 
@@ -2322,7 +2673,7 @@ describe('renderer top tab font (tab.cpp:123, credits.cpp:118-157)', () => {
       'Options',
       80,
       0,
-      '#efefef',
+      '#ececec',
       expect.objectContaining({ align: 'center', indexedPalette: expect.any(Array), letterSpacing: 1 }),
     );
     expect(metalFont.drawText).toHaveBeenCalledWith(
@@ -2330,7 +2681,7 @@ describe('renderer top tab font (tab.cpp:123, credits.cpp:118-157)', () => {
       '1000',
       560,
       0,
-      '#efefef',
+      '#ececec',
       expect.objectContaining({ align: 'center', indexedPalette: expect.any(Array), letterSpacing: 1 }),
     );
   });
@@ -2376,7 +2727,7 @@ describe('renderer top tab font (tab.cpp:123, credits.cpp:118-157)', () => {
       'Time:04:04:53',
       400,
       0,
-      '#efefef',
+      '#ececec',
       expect.objectContaining({ align: 'center', indexedPalette: expect.any(Array), letterSpacing: 1 }),
     );
   });
@@ -2419,6 +2770,7 @@ describe('renderer screen shake parity (conquer.cpp:5523-5566)', () => {
       'renderTerrain',
       'renderDecals',
       'renderOverlays',
+      'renderGroundLayer',
       'renderStructures',
       'renderCrates',
       'renderCorpses',

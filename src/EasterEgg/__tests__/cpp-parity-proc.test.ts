@@ -481,14 +481,14 @@ describe('PROC destruction side effects', () => {
     expect(ctx.screenShake).toBe(5);
   });
 
-  it('spawns explosion and debris effects on destruction', () => {
+  it('spawns C++ explosion anims without generic flying debris on destruction', () => {
     const proc = makePROC(10, 10, 50, House.USSR);
     const ctx = makeCombatCtx([proc]);
     structureDamage(ctx, proc, 100);
     const explosions = ctx.effects.filter(e => e.type === 'explosion');
-    const debris = ctx.effects.filter(e => e.type === 'debris');
+    const effectTypes = ctx.effects.map(e => e.type as string);
     expect(explosions.length).toBeGreaterThan(0);
-    expect(debris.length).toBeGreaterThan(0);
+    expect(effectTypes).not.toContain('debris');
   });
 
   it('calls clearStructureFootprint on destruction', () => {

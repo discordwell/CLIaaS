@@ -183,6 +183,50 @@ export function makeFadingTable(
   return table;
 }
 
+/** Faithful port of RA/jshell.cpp Make_Fading_Table.
+ * Used for DisplayClass::FadingBrighten/FadingWayDark. Unlike SDLLIB's
+ * Build_Fading_Table, this adjusts raw RGBClass 6-bit guns and then searches
+ * the whole palette with PaletteClass::Closest_Color's Manhattan distance. */
+export function makeRemapFadingTable(
+  palette: readonly (readonly number[])[],
+  destColorIndex: number,
+  frac: number,
+): Uint8Array {
+  const table = new Uint8Array(256);
+  const ratio = frac & 0xff;
+  const dest = paletteGuns(palette[destColorIndex] ?? [0, 0, 0, 255]);
+
+  for (let index = 0; index < 256; index++) {
+    const source = paletteGuns(palette[index] ?? [0, 0, 0, 255]);
+    const adjusted = [
+      source[0] + Math.trunc(((dest[0] - source[0]) * ratio) / 256),
+      source[1] + Math.trunc(((dest[1] - source[1]) * ratio) / 256),
+      source[2] + Math.trunc(((dest[2] - source[2]) * ratio) / 256),
+    ];
+
+    let best = 0;
+    let bestValue = 256 * 3;
+    for (let colorIndex = 0; colorIndex < Math.min(256, palette.length); colorIndex++) {
+      const color = paletteGuns(palette[colorIndex] ?? [0, 0, 0, 255]);
+      const diff =
+        Math.abs((adjusted[0] << 2) - (color[0] << 2)) +
+        Math.abs((adjusted[1] << 2) - (color[1] << 2)) +
+        Math.abs((adjusted[2] << 2) - (color[2] << 2));
+      if (diff === 0) {
+        best = colorIndex;
+        break;
+      }
+      if (diff < bestValue) {
+        best = colorIndex;
+        bestValue = diff;
+      }
+    }
+    table[index] = best;
+  }
+
+  return table;
+}
+
 export function nearestPaletteIndex(
   palette: readonly (readonly number[])[],
   r: number,

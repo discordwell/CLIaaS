@@ -61,6 +61,39 @@ function tsEnglandCruiser(state: AgentState): AgentUnit {
   return cruiser!;
 }
 
+async function tsEnglandCruiserFacing(handle: Parameters<typeof stepBoth>[0]): Promise<{
+  turretFacing256: number;
+  desiredTurretFacing256: number;
+  attackCooldown: number;
+}> {
+  const page = (handle.ts as unknown as {
+    page: {
+      evaluate<T>(fn: () => T): Promise<T>;
+    };
+  }).page;
+
+  return page.evaluate(() => {
+    const game = (window as unknown as {
+      __agentGame: {
+        entities: Array<{
+          type: string;
+          house: string;
+          turretFacing256: number;
+          desiredTurretFacing256: number;
+          attackCooldown: number;
+        }>;
+      };
+    }).__agentGame;
+    const cruiser = game.entities.find(e => e.type === 'CA' && e.house === 'England');
+    if (!cruiser) throw new Error('TS England CA not found');
+    return {
+      turretFacing256: cruiser.turretFacing256,
+      desiredTurretFacing256: cruiser.desiredTurretFacing256,
+      attackCooldown: cruiser.attackCooldown,
+    };
+  });
+}
+
 async function stepBothOneTickAtATime(
   handle: Parameters<typeof stepBoth>[0],
   ticks: number,
@@ -81,6 +114,21 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCG12EA vessel map-exit tim
   afterAll(async () => {
     await stopParityServer(serverHandle);
   }, 20_000);
+
+  it('keeps rotating the cruiser turret toward TarCom while Arm is cooling down', async () => {
+    await withDualScenario('SCG12EA', async (handle) => {
+      await handle.ts.syncRngSeed(handle.wasmState.rngState!);
+
+      const result = await stepBothOneTickAtATime(handle, 24);
+      const wasmCruiser = findWasmEnglandCruiser(result.wasm.state);
+      expect(wasmCruiser, 'C++ England CA still tracking the V19 target').toBeDefined();
+      const tsFacing = await tsEnglandCruiserFacing(handle);
+
+      expect((wasmCruiser as unknown as { arm: number }).arm).toBeGreaterThan(0);
+      expect(tsFacing.attackCooldown).toBeGreaterThan(0);
+      expect(tsFacing.turretFacing256).toBe((wasmCruiser as unknown as { sf: number }).sf);
+    }, { wasmSeed: 0 });
+  }, 180_000);
 
   it('keeps the England cruiser alive while it is still inside the radar rectangle', async () => {
     await withDualScenario('SCG12EA', async (handle) => {

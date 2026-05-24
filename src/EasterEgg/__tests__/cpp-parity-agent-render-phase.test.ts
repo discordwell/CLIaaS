@@ -66,7 +66,7 @@ describe('C++ agent-step render phase', () => {
     expect((game as any).tick).toBe(3);
   });
 
-  it('advances power-bar AI during logic ticks, not render-only captures', () => {
+  it('advances power-bar AI in the pre-render input phase, matching SidebarClass::AI', () => {
     const game = new Game(createCanvas());
     const powerAiSpy = vi
       .spyOn((game as any).renderer, 'updatePowerAnimation')
@@ -81,7 +81,7 @@ describe('C++ agent-step render phase', () => {
 
     game.step(3);
 
-    expect(callsBeforeRender).toEqual([2]);
+    expect(callsBeforeRender).toEqual([3]);
     expect(powerAiSpy).toHaveBeenCalledTimes(3);
   });
 
@@ -205,5 +205,54 @@ describe('C++ agent-step render phase', () => {
     expect(renderSpy).not.toHaveBeenCalled();
     expect(setTimeoutSpy).not.toHaveBeenCalled();
     expect((game as any).timerId).toBe(0);
+  });
+
+  it('keeps Color_Cycle out of manual-step agent captures', () => {
+    // The C++ Emscripten agent harness exits Sync_Delay before Color_Cycle, so
+    // the pre-logic HidPage read by agent_render stays on the scenario's
+    // current palette phase. Interactive TS can run visual palette scrolling,
+    // but comparison mode must not advance it through the startup gameLoop.
+    const game = new Game(createCanvas());
+    const advanceSpy = vi
+      .spyOn((game as any).renderer, 'advancePaletteCycle')
+      .mockImplementation(() => undefined);
+    const setTimeoutSpy = vi
+      .spyOn(window, 'setTimeout')
+      .mockImplementation((() => 321) as typeof window.setTimeout);
+
+    (game as any).state = 'playing';
+    (game as any).tick = 0;
+    (game as any).lastTime = performance.now() - 16;
+    (game as any).render = vi.fn();
+    (game as any).update = vi.fn(function updateProbe(this: Game) {
+      (this as any).tick += 1;
+    });
+    game.comparisonMode = true;
+
+    (game as any).gameLoop();
+
+    expect(advanceSpy).not.toHaveBeenCalled();
+    expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('still advances visual Color_Cycle in normal interactive renders', () => {
+    const game = new Game(createCanvas());
+    const advanceSpy = vi
+      .spyOn((game as any).renderer, 'advancePaletteCycle')
+      .mockImplementation(() => undefined);
+    vi.spyOn(window, 'setTimeout')
+      .mockImplementation((() => 321) as typeof window.setTimeout);
+
+    (game as any).state = 'playing';
+    (game as any).tick = 0;
+    (game as any).lastTime = performance.now() - 16;
+    (game as any).render = vi.fn();
+    (game as any).update = vi.fn(function updateProbe(this: Game) {
+      (this as any).tick += 1;
+    });
+
+    (game as any).gameLoop();
+
+    expect(advanceSpy).toHaveBeenCalledTimes(1);
   });
 });

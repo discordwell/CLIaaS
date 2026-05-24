@@ -748,7 +748,7 @@ describe('MOVE_FLASH force-move cursor flash (adata.cpp:1701-1724)', () => {
 describe('TS Effect interface supports C++ animation features (renderer.ts)', () => {
   it('Effect type includes muzzle for ANIM_MUZZLE_FLASH equivalent', () => {
     // C++ uses discrete anim types; TS uses effect type union
-    const validTypes = ['explosion', 'muzzle', 'blood', 'tesla', 'projectile', 'marker', 'debris', 'text'];
+    const validTypes = ['explosion', 'muzzle', 'blood', 'tesla', 'projectile', 'marker', 'text'];
     expect(validTypes).toContain('muzzle');
   });
 

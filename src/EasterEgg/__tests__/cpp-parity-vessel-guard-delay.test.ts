@@ -36,4 +36,31 @@ describe('Vessel Mission_Guard delay parity', () => {
       { cx: 94, cy: 41, mt: 28 },
     ]);
   });
+
+  it('SCG12EA cruiser continues turret Rotation_AI while its Arm timer cools down', async () => {
+    // C++ vessel.cpp:620-633 runs Rotation_AI before Combat_AI every tick.
+    // The England CA fires at the V19 on tick 5, then continues refreshing
+    // SecondaryFacing.Desired and rotating while Arm is nonzero as it moves.
+    adapter = new NodeAgentAdapter();
+    await adapter.loadScenario('SCG12EA', 'normal');
+
+    adapter.step(24);
+
+    const game = (adapter as unknown as {
+      game: {
+        entities: Array<{
+          type: string;
+          house: string;
+          turretFacing256: number;
+          desiredTurretFacing256: number;
+          attackCooldown: number;
+        }>;
+      };
+    }).game;
+    const cruiser = game.entities.find(e => e.type === 'CA' && e.house === 'England');
+    expect(cruiser, 'SCG12EA England cruiser').toBeDefined();
+    expect(cruiser!.attackCooldown).toBeGreaterThan(0);
+    expect(cruiser!.turretFacing256).toBe(252);
+    expect(cruiser!.desiredTurretFacing256).toBe(252);
+  });
 });

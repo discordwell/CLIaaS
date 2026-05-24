@@ -1223,11 +1223,15 @@ char* agent_get_state(void)
 			buf_cat("{\"i\":%d,\"logicIndex\":%d,\"id\":%d,\"name\":\"%s\",\"type\":%d,"
 				"\"cx\":%d,\"cy\":%d,\"lx\":%d,\"ly\":%d,"
 				"\"stage\":%d,\"rate\":%d,\"about\":%s,"
-				"\"biggest\":%d,\"stages\":%d,\"loopStart\":%d,\"loopEnd\":%d,\"loops\":%d}",
+				"\"biggest\":%d,\"stages\":%d,\"loopStart\":%d,\"loopEnd\":%d,\"loops\":%d,"
+				"\"display\":%s,\"down\":%s,\"limbo\":%s}",
 				ai, logic_index, AGENT_ID(RTTI_ANIM, ai), Anim_Name(atype), (int)atype,
 				Coord_XCell(ac), Coord_YCell(ac), Coord_X(ac), Coord_Y(ac),
 				a->Fetch_Stage(), a->Fetch_Rate(), a->About_To_Change() ? "true" : "false",
-				aclass.Biggest, aclass.Stages, aclass.LoopStart, aclass.LoopEnd, (int)a->Loops);
+				aclass.Biggest, aclass.Stages, aclass.LoopStart, aclass.LoopEnd, (int)a->Loops,
+				a->IsToDisplay ? "true" : "false",
+				a->IsDown ? "true" : "false",
+				a->IsInLimbo ? "true" : "false");
 		}
 	}
 		buf_cat("],");
@@ -2365,6 +2369,131 @@ char* agent_debug_eval_target(int scanner_id, int target_id)
 		target->IsInLimbo ? "true" : "false",
 		(int)target->Cloak);
 	return s_cmd_buf;
+}
+
+/* ======================================================================
+ * EXPORT: agent_dump_layer — serialize one DisplayClass layer.
+ * Generic visual-parity diagnostic: exposes the real C++ draw-layer vector
+ * without invoking object virtual layer logic from the serializer.
+ * ====================================================================== */
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+char* agent_dump_layer(int layer, int min_cx, int min_cy, int max_cx, int max_cy)
+{
+	buf_init(s_state_buf, STATE_BUF_SIZE);
+	if (layer < LAYER_FIRST || layer >= LAYER_COUNT) {
+		buf_cat("{\"error\":\"bad-layer\",\"layer\":%d}", layer);
+		return s_state_buf;
+	}
+
+	buf_cat("{\"frame\":%d,\"layer\":%d,\"count\":%d,\"objects\":[", Frame, layer, DisplayClass::Layer[layer].Count());
+	bool first = true;
+	for (int i = 0; i < DisplayClass::Layer[layer].Count(); i++) {
+		ObjectClass * object = DisplayClass::Layer[layer][i];
+		if (!object || !object->IsActive) continue;
+		COORDINATE center = object->Center_Coord();
+		int cx = Coord_XCell(center);
+		int cy = Coord_YCell(center);
+		if (cx < min_cx || cx > max_cx || cy < min_cy || cy > max_cy) continue;
+
+		RTTIType rtti = object->What_Am_I();
+		COORDINATE render = object->Render_Coord();
+		COORDINATE sort = object->Sort_Y();
+		int obj_index = agent_object_index(object, rtti);
+		int logic_index = -1;
+		for (int li = 0; li < Logic.Count(); li++) {
+			if (Logic[li] == object) {
+				logic_index = li;
+				break;
+			}
+		}
+
+		const char * name = object->Class_Of().Name();
+		int type = -1;
+		int stage = -1;
+		if (rtti == RTTI_ANIM) {
+			AnimClass * anim = (AnimClass *)object;
+			type = (int)((AnimType)(*anim));
+			name = Anim_Name((AnimType)type);
+			stage = anim->Fetch_Stage();
+		}
+
+		if (!first) buf_cat(",");
+		first = false;
+		buf_cat("{\"i\":%d,\"rtti\":%d,\"id\":%d,\"logicIndex\":%d,\"name\":\"%s\",\"type\":%d,"
+			"\"cx\":%d,\"cy\":%d,\"lx\":%d,\"ly\":%d,"
+			"\"rx\":%d,\"ry\":%d,\"sx\":%d,\"sy\":%d,\"stage\":%d,"
+			"\"display\":%s,\"down\":%s,\"limbo\":%s}",
+			i, (int)rtti, obj_index >= 0 ? AGENT_ID(rtti, obj_index) : -1, logic_index,
+			name, type,
+			cx, cy, Coord_X(center), Coord_Y(center),
+			Coord_X(render), Coord_Y(render), Coord_X(sort), Coord_Y(sort), stage,
+			object->IsToDisplay ? "true" : "false",
+			object->IsDown ? "true" : "false",
+			object->IsInLimbo ? "true" : "false");
+	}
+	buf_cat("]}");
+	return s_state_buf;
+}
+
+/* ======================================================================
+ * EXPORT: agent_dump_anim_shape — decode one C++ AnimTypeClass SHP frame.
+ * This is a parity harness helper: it exposes the original Build_Frame
+ * output so TS asset extraction can be compared against the engine's own
+ * keyframe/delta decoder without relying on rendered mission pixels.
+ * ====================================================================== */
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+char* agent_dump_anim_shape(int anim_type, int frame)
+{
+	buf_init(s_state_buf, STATE_BUF_SIZE);
+
+	AnimTypeClass const &atype = AnimTypeClass::As_Reference((AnimType)anim_type);
+	void const *shapedata = atype.Get_Image_Data();
+	if (shapedata == NULL) {
+		buf_cat("{\"error\":\"no-shape\",\"type\":%d}", anim_type);
+		return s_state_buf;
+	}
+
+	int frame_count = Get_Build_Frame_Count(shapedata);
+	int width = Get_Build_Frame_Width(shapedata);
+	int height = Get_Build_Frame_Height(shapedata);
+	int total = width * height;
+	if (frame < 0 || frame >= frame_count || width <= 0 || height <= 0 || total > (1024 * 1024)) {
+		buf_cat("{\"error\":\"bad-frame\",\"type\":%d,\"frame\":%d,\"frames\":%d,\"w\":%d,\"h\":%d}",
+			anim_type, frame, frame_count, width, height);
+		return s_state_buf;
+	}
+
+	static unsigned char shape_buf[1024 * 1024];
+	memset(shape_buf, 0, sizeof(shape_buf));
+	if (Build_Frame(shapedata, (unsigned short)frame, shape_buf) == 0) {
+		buf_cat("{\"error\":\"decode-failed\",\"type\":%d,\"frame\":%d}", anim_type, frame);
+		return s_state_buf;
+	}
+
+	int nonzero = 0;
+	for (int i = 0; i < total; i++) {
+		if (shape_buf[i] != 0) nonzero++;
+	}
+
+	buf_cat("{\"type\":%d,\"name\":\"%s\",\"frame\":%d,\"frames\":%d,\"w\":%d,\"h\":%d,\"nonzero\":%d,\"pixels\":[",
+		anim_type, atype.IniName, frame, frame_count, width, height, nonzero);
+	bool first = true;
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			int off = y * width + x;
+			unsigned char px = shape_buf[off];
+			if (px == 0) continue;
+			if (!first) buf_cat(",");
+			first = false;
+			buf_cat("[%d,%d,%d]", x, y, (int)px);
+		}
+	}
+	buf_cat("]}");
+	return s_state_buf;
 }
 
 /* ======================================================================

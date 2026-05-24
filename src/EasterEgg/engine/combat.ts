@@ -2745,9 +2745,6 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
     spriteStart: 0,
     ...deathExplosionLink,
   } as Effect);
-  if (opts.debris && !victim.stats.isInfantry) {
-    ctx.effects.push({ type: 'debris', x: kx, y: ky, frame: 0, maxFrames: 12, size: 18 } as Effect);
-  }
   const deathScreenShake = victim.stats.isInfantry ? 0 : opts.screenShake;
   ctx.screenShake = Math.max(ctx.screenShake, deathScreenShake);
   if (victim.isAnt) ctx.playSoundAt('die_ant', kx, ky);
@@ -4885,18 +4882,12 @@ export function structureDamage(
     ctx.clearStructureFootprint(s);
     const wx = s.cx * CELL_SIZE + CELL_SIZE;
     const wy = s.cy * CELL_SIZE + CELL_SIZE;
-    const [fw, fh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
     // Attached AnimClass fires stay in the fixed Anims heap until their next
     // AI pass, but are marked to delete without running further logic.
     detachStructureAttachedAnims(ctx, s);
     // C++ building.cpp:1299-1308 — immediate RESULT_DESTROYED visuals run
     // during Take_Damage. Rubble smoke/survivors are delayed until Drop_Debris.
     runBuildingDestroyedTakeDamageEffects(ctx, s);
-    // Flying debris
-    ctx.effects.push({
-      type: 'debris', x: wx, y: wy,
-      frame: 0, maxFrames: 20, size: fw * CELL_SIZE * 0.8,
-    } as Effect);
     // C++ building.cpp:1460 — shakes = Class->Cost_Of() / 400
     // Only shakes if result > 0 (cheap buildings like walls/silos don't shake).
     const prodItemForShake = PRODUCTION_ITEMS.find(p => p.type === s.type);

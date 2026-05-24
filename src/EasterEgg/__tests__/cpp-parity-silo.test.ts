@@ -502,7 +502,7 @@ describe('SILO damage absorption (HP=300)', () => {
 
 // -- Destruction Visual/Audio Effects -----------------------------------------
 //
-// When destroyed, SILO produces explosion effects, debris, screen shake,
+// When destroyed, SILO produces explosion effects, screen shake,
 // and the building_explode sound. 1x1 structures produce fewer pre-explosions
 // and less screen shake than larger buildings.
 
@@ -516,12 +516,12 @@ describe('SILO destruction effects (1x1 building)', () => {
     expect(explosions.length).toBeGreaterThan(0);
   });
 
-  it('produces debris effect on destruction', () => {
+  it('does not produce generic flying debris on destruction', () => {
     const silo = makeSILO(10, 10, 50, House.USSR);
     const ctx = makeCombatCtx([silo]);
     structureDamage(ctx, silo, 100);
-    const debris = ctx.effects.filter((e: Effect) => e.type === 'debris');
-    expect(debris.length).toBe(1);
+    const effectTypes = ctx.effects.map((e: Effect) => e.type as string);
+    expect(effectTypes).not.toContain('debris');
   });
 
   it('does not set screen shake on destruction (SILO cost=150 < 400)', () => {

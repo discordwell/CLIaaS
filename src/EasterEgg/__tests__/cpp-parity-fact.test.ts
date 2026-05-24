@@ -31,6 +31,7 @@ import {
   powerOutput, calculatePowerGrid, sellRefund, repairCostPerStep,
 } from '../engine/repairSell';
 import type { Effect } from '../engine/renderer';
+import { ScenarioRandom } from '../engine/random';
 
 beforeEach(() => resetEntityIds());
 
@@ -446,18 +447,18 @@ describe('FACT 3x3 destruction effects scaling', () => {
     const ctx = makeCombatCtx([fact]);
     structureDamage(ctx, fact, 100);
     // numPreExplosions = max(3, min(6, 3*3)) = 6
-    // Plus final fball1 + debris = at least 8 total effects
+    // Plus final fball1 = at least 7 total effects.
     const explosions = ctx.effects.filter(e => e.type === 'explosion');
     expect(explosions.length).toBeGreaterThanOrEqual(7); // 6 pre + 1 final
   });
 
-  it('generates debris effect on destruction', () => {
+  it('does not generate generic flying debris on destruction', () => {
     const fact = makeFACT(10, 10, 50);
     fact.house = House.USSR;
     const ctx = makeCombatCtx([fact]);
     structureDamage(ctx, fact, 100);
-    const debris = ctx.effects.filter(e => e.type === 'debris');
-    expect(debris.length).toBe(1);
+    const effectTypes = ctx.effects.map(e => e.type as string);
+    expect(effectTypes).not.toContain('debris');
   });
 
   it('scatters FIRE_SMALL/FIRE_MED across footprint (C++ building.cpp:1442-1458)', () => {
@@ -479,14 +480,16 @@ describe('FACT 3x3 destruction effects scaling', () => {
     const ctx = makeCombatCtx([fact]);
     structureDamage(ctx, fact, 100);
     expect(ctx.effects.filter(e => e.sprite === 'smoke_m')).toHaveLength(0);
+    ScenarioRandom.seed = 1974182732;
     ctx.tick = fact.debrisDropTick ?? 8;
     tickDestroyedStructureDebris(ctx, fact);
-    const smoke = ctx.effects.filter(e => e.sprite === 'smoke_m');
-    // C++ Drop_Debris runs later from BuildingClass::AI and may create smoke on each footprint cell.
+    const smoke = ctx.logicAnims.filter(anim => anim.type === 'smoke_m');
+    // C++ Drop_Debris runs later from BuildingClass::AI and may create SMOKE_M
+    // AnimClass entries on footprint cells; those are logicAnims, not legacy effects.
     expect(smoke.length).toBeGreaterThan(0);
     // Each should be a looping effect
     for (const s of smoke) {
-      expect(s.loopEnd).toBeDefined();
+      expect(s.loops).toBeGreaterThan(0);
     }
   });
 

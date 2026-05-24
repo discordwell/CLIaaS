@@ -2195,6 +2195,7 @@ export class Game {
     this.playerHouse = scenario.playerHouse;
     this.playerFaction = HOUSE_FACTION[this.playerHouse] ?? 'allied';
     this.playerTechLevel = scenario.playerTechLevel ?? 10;
+    this.initializeScenarioPowerDrain();
     // Calculate initial silo capacity (do NOT cap starting credits — C++ parity)
     // C++ house.cpp:7146-7147: starting credits go into the uncapped Credits pool,
     // not the Tiberium pool. Silo capacity only limits HARVESTED ore.
@@ -2418,6 +2419,18 @@ export class Game {
     this.gameLoop();
   }
 
+  private initializeScenarioPowerDrain(): void {
+    let consumed = 0;
+    for (const s of this.structures) {
+      if (!s.alive || s.sellProgress !== undefined || s.house !== this.playerHouse) continue;
+      consumed += structurePowerContribution(s).consumed;
+    }
+    this.powerProduced = 0;
+    this.powerConsumed = consumed;
+    this.renderer.sidebarPowerProduced = this.powerProduced;
+    this.renderer.sidebarPowerConsumed = this.powerConsumed;
+  }
+
   /** Stop the game */
   stop(): void {
     this.state = 'paused';
@@ -2616,6 +2629,7 @@ export class Game {
       // frame. Agent screenshots read that back buffer after agent_step(), so
       // the visible frame is the state before the final stepped logic tick.
       if (this.tick > 0) this.advanceCreditDisplay();
+      this.advanceSidebarInputAI();
       if (i === n - 1) {
         this.renderer.interpolationAlpha = 1;
         this.render();
@@ -2644,6 +2658,16 @@ export class Game {
     );
     this.displayCredits = next.current;
     this.displayCreditsCountdown = next.countdown;
+  }
+
+  private advanceSidebarInputAI(): void {
+    // C++ Main_Loop calls Map.Input before Map.Render. SidebarClass::AI then
+    // advances PowerClass::AI and RadarClass::AI, so these visual animations
+    // are current in the pre-Logic frame captured by the agent harness.
+    this.renderer.sidebarPowerProduced = this.powerProduced;
+    this.renderer.sidebarPowerConsumed = this.powerConsumed;
+    this.renderer.updatePowerAnimation();
+    advanceRadarAnimation(this.radarVisual);
   }
 
   /** Disable fog of war (reveal entire map) */
@@ -2692,6 +2716,7 @@ export class Game {
     while (this.accumulator >= this.tickInterval && ticksThisFrame < maxTicksPerFrame) {
       this.accumulator -= this.tickInterval;
       if (this.tick > 0) this.advanceCreditDisplay();
+      this.advanceSidebarInputAI();
       this.update();
       ticksThisFrame++;
       if (this.state !== 'playing') break;
@@ -2711,7 +2736,9 @@ export class Game {
     // C++ Color_Cycle is a visual Sync_Delay/SystemTimer effect. Keep it out
     // of agent-step logic so deterministic harness captures stay on the same
     // palette phase as the C++ harness path.
-    this.renderer.advancePaletteCycle(dt);
+    if (!this.comparisonMode) {
+      this.renderer.advancePaletteCycle(dt);
+    }
     this.scheduleNext();
   };
 
@@ -3921,15 +3948,7 @@ export class Game {
     this.powerConsumed = powerGrid.consumed;
     this.renderer.sidebarPowerProduced = this.powerProduced;
     this.renderer.sidebarPowerConsumed = this.powerConsumed;
-    // C++ PowerClass::AI advances power-bar animation once per game frame.
-    // Keep it in the logic tick so agent-step screenshots do not depend on
-    // how many times the TS renderer happened to run between captured frames.
-    this.renderer.updatePowerAnimation();
     this.updatePlayerRadarAvailability();
-    // C++ RadarClass::AI advances the natoradr/ussrradr cover animation once
-    // per game frame. Advancing it from render makes batched agent-step visual
-    // captures lag far behind the original.
-    advanceRadarAnimation(this.radarVisual);
 
     // Low power warning (every 10 seconds when power demand exceeds supply)
     if (this.powerConsumed > this.powerProduced && this.powerProduced > 0 &&
@@ -6047,6 +6066,13 @@ export class Game {
         }
       }
 
+      // C++ VesselClass::AI runs Rotation_AI after DriveClass::AI and before
+      // Combat_AI. This pass is independent of Arm/rearm cooldown, so a moving
+      // ship keeps tracking a live TarCom while it waits for its next shot.
+      if (entity.stats.isVessel) {
+        this.runVesselRotationAI(entity);
+      }
+
       // C++ UnitClass::AI/VesselClass::AI combat pass runs after DriveClass::AI.
       // This also runs when MissionClass::AI dispatched this tick; if the mission
       // handler already fired, attackCooldown/firePrep gates make this idempotent,
@@ -6172,6 +6198,59 @@ export class Game {
     this._updateEntityPostDispatch(entity, missionTimerFired);
     this.decrementEntityCdTimersEndOfLogic(entity);
     return;
+  }
+
+  private vesselTurretRotationRate(entity: Entity): number {
+    // C++ vessel.cpp:2189 uses (Class->ROT * House->GroundspeedBias) + 1.
+    // fixed::operator*(int) rounds with +128 before the 8.8 downshift.
+    const groundspeedRaw = Math.trunc(this.getGroundspeedBias(entity.house) * 256 + 1e-9);
+    return Math.trunc((entity.stats.rot * groundspeedRaw + 128) / 256) + 1;
+  }
+
+  private vesselTarComLeptons(entity: Entity): LeptonPos | null {
+    if (entity.target?.alive) {
+      return entity.target.targetCoordLeptons();
+    }
+    if (entity.targetStructure?.alive) {
+      return scenarioStructureTargetLeptons(entity.targetStructure);
+    }
+    if (entity.forceFirePos) {
+      return {
+        lx: pixelToLepton(entity.forceFirePos.x),
+        ly: pixelToLepton(entity.forceFirePos.y),
+      };
+    }
+    return null;
+  }
+
+  /** C++ vessel.cpp:2166-2197 — VesselClass::Rotation_AI. */
+  private runVesselRotationAI(entity: Entity): void {
+    if (!entity.alive || !entity.stats.isVessel || !entity.hasTurret) return;
+
+    const target = this.vesselTarComLeptons(entity);
+    if (target && !entity.turretIsRotating) {
+      const dir256 = directionToLeptons256(
+        entity.leptonX, entity.leptonY,
+        target.lx, target.ly,
+      );
+      entity.desiredTurretFacing256 = dir256;
+      entity.desiredTurretFacing = dir256ToFacing8(dir256);
+    }
+
+    const current = entity.turretFacing256 >= 0
+      ? entity.turretFacing256 & 0xff
+      : (entity.turretFacing * 32) & 0xff;
+    const desired = entity.desiredTurretFacing256 >= 0
+      ? entity.desiredTurretFacing256 & 0xff
+      : (entity.desiredTurretFacing * 32) & 0xff;
+    if (current !== desired) {
+      entity.tickTurretRotation(this.vesselTurretRotationRate(entity));
+    } else {
+      entity.turretIsRotating = false;
+      entity.turretFacing = dir256ToFacing8(current);
+      entity.turretFacing32 = dir256ToFacing32(current);
+      entity.desiredTurretFacing = dir256ToFacing8(desired);
+    }
   }
 
   /** C++ UnitClass::Reload_AI — V2 launchers reload one rocket when stationary
@@ -17437,6 +17516,8 @@ export class Game {
         survivors,
       );
     }
+
+    this.renderer.finalizeFramePalette();
 
     // Fire onPostRender callback (used by QA screenshot capture)
     this.onPostRender?.();

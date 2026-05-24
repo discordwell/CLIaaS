@@ -5,7 +5,7 @@
  */
 
 import { BitmapFont, type BitmapFontMeta } from './bitmapFont';
-import { RA_COLOR_BLACK, conquerBuildFadingTable, nearestPaletteIndex } from './shadow';
+import { RA_COLOR_BLACK, conquerBuildFadingTable, makeFadingTable, nearestPaletteIndex } from './shadow';
 
 export interface SpriteSheetMeta {
   frameWidth: number;
@@ -34,6 +34,12 @@ export interface DrawFrameOptions {
   scale?: number;
   flip?: boolean;
   ghostShadow?: GhostShadowOptions;
+}
+
+export interface TranslucentControl {
+  sourceColorIndex: number;
+  destColorIndex: number;
+  frac: number;
 }
 
 export interface AssetManifest {
@@ -358,6 +364,21 @@ export class AssetManager {
     return table;
   }
 
+  private getBuildFadingTable(palette: number[][], destColorIndex: number, frac: number): Uint8Array {
+    const key = palette as object;
+    let tables = this.fadingTableCache.get(key);
+    if (!tables) {
+      tables = new Map<string, Uint8Array>();
+      this.fadingTableCache.set(key, tables);
+    }
+    const tableKey = `build:${destColorIndex}:${frac}`;
+    const cached = tables.get(tableKey);
+    if (cached) return cached;
+    const table = makeFadingTable(palette, destColorIndex, frac);
+    tables.set(tableKey, table);
+    return table;
+  }
+
   private drawFrameWithGhostShadow(
     ctx: CanvasRenderingContext2D,
     source: CanvasImageSource,
@@ -518,6 +539,119 @@ export class AssetManager {
         dest.data[destOff + 1] = ghost[1];
         dest.data[destOff + 2] = ghost[2];
         dest.data[destOff + 3] = 255;
+      }
+    }
+
+    ctx.putImageData(dest, clipX0, clipY0);
+  }
+
+  /** Draw a shape through C++ SHAPE_GHOST + DisplayClass::TranslucentTable.
+   *
+   * Build_Translucent_Table stores a 256-byte source-control map followed by
+   * one Build_Fading_Table row per translucent source color. If a source pixel
+   * is listed in the control map, C++ remaps the already-rendered destination
+   * pixel through that row; otherwise it draws the source pixel normally. */
+  drawFrameTranslucent(
+    ctx: CanvasRenderingContext2D,
+    sheetName: string,
+    frameIndex: number,
+    x: number,
+    y: number,
+    palette: number[][] | null,
+    controls: readonly TranslucentControl[],
+    options?: DrawFrameOptions,
+  ): void {
+    if (!palette || controls.length === 0 || !ctx.getImageData || !ctx.putImageData || !ctx.canvas) {
+      this.drawFrame(ctx, sheetName, frameIndex, x, y, options);
+      return;
+    }
+
+    const sheet = this.getSheet(sheetName);
+    if (!sheet) {
+      this.drawMissingAsset(ctx, sheetName, x, y, options);
+      return;
+    }
+    const src = this.getSourcePixels(sheet.image);
+    if (!src) {
+      this.drawFrame(ctx, sheetName, frameIndex, x, y, options);
+      return;
+    }
+
+    const meta = sheet.meta;
+    const scale = options?.scale ?? 1;
+    if (options?.flip || scale !== 1) {
+      this.drawFrame(ctx, sheetName, frameIndex, x, y, options);
+      return;
+    }
+
+    let destX = Math.round(x);
+    let destY = Math.round(y);
+    if (options?.centerX) destX -= Math.floor(meta.frameWidth / 2);
+    if (options?.centerY) destY -= Math.floor(meta.frameHeight / 2);
+
+    const clipX0 = Math.max(0, destX);
+    const clipY0 = Math.max(0, destY);
+    const clipX1 = Math.min(ctx.canvas.width, destX + meta.frameWidth);
+    const clipY1 = Math.min(ctx.canvas.height, destY + meta.frameHeight);
+    const clipW = clipX1 - clipX0;
+    const clipH = clipY1 - clipY0;
+    if (clipW <= 0 || clipH <= 0) return;
+
+    const controlBySource = new Map<number, TranslucentControl>();
+    for (const control of controls) controlBySource.set(control.sourceColorIndex, control);
+
+    const col = frameIndex % meta.columns;
+    const row = Math.floor(frameIndex / meta.columns);
+    const sx = col * meta.frameWidth;
+    const sy = row * meta.frameHeight;
+    const dest = ctx.getImageData(clipX0, clipY0, clipW, clipH);
+    const globalAlpha = Math.max(0, Math.min(1, ctx.globalAlpha ?? 1));
+
+    for (let py = 0; py < clipH; py++) {
+      const frameY = clipY0 - destY + py;
+      for (let px = 0; px < clipW; px++) {
+        const frameX = clipX0 - destX + px;
+        const srcOff = ((sy + frameY) * src.width + (sx + frameX)) * 4;
+        const sa = src.data[srcOff + 3];
+        if (sa === 0) continue;
+
+        const sr = src.data[srcOff];
+        const sg = src.data[srcOff + 1];
+        const sb = src.data[srcOff + 2];
+        const destOff = (py * clipW + px) * 4;
+        const srcIndex = nearestPaletteIndex(palette, sr, sg, sb);
+        const control = controlBySource.get(srcIndex);
+
+        if (control) {
+          const dstIndex = nearestPaletteIndex(
+            palette,
+            dest.data[destOff],
+            dest.data[destOff + 1],
+            dest.data[destOff + 2],
+          );
+          const table = this.getBuildFadingTable(palette, control.destColorIndex, control.frac);
+          const remapped = palette[table[dstIndex]];
+          if (!remapped) continue;
+          dest.data[destOff] = remapped[0];
+          dest.data[destOff + 1] = remapped[1];
+          dest.data[destOff + 2] = remapped[2];
+          dest.data[destOff + 3] = 255;
+          continue;
+        }
+
+        const alpha = (sa / 255) * globalAlpha;
+        if (alpha >= 1) {
+          dest.data[destOff] = sr;
+          dest.data[destOff + 1] = sg;
+          dest.data[destOff + 2] = sb;
+          dest.data[destOff + 3] = 255;
+        } else {
+          const inv = 1 - alpha;
+          dest.data[destOff] = Math.round(sr * alpha + dest.data[destOff] * inv);
+          dest.data[destOff + 1] = Math.round(sg * alpha + dest.data[destOff + 1] * inv);
+          dest.data[destOff + 2] = Math.round(sb * alpha + dest.data[destOff + 2] * inv);
+          dest.data[destOff + 3] = Math.round(255 * alpha + dest.data[destOff + 3] * inv);
+        }
       }
     }
 

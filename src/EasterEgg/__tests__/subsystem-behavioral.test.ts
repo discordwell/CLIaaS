@@ -177,7 +177,7 @@ describe('handleUnitDeath — direct behavioral tests', () => {
     expect(explosion!.y).toBe(victim.pos.y);
   });
 
-  it('creates debris effect for vehicles (not infantry)', () => {
+  it('does not create generic flying debris for vehicle deaths', () => {
     const ctx = makeCombatContext();
     const tank = makeEntity(UnitType.V_2TNK, House.USSR, 100, 100);
     tank.alive = false;
@@ -188,8 +188,9 @@ describe('handleUnitDeath — direct behavioral tests', () => {
       attackerIsPlayer: false, trackLoss: false,
     });
 
-    const debris = ctx.effects.find(e => e.type === 'debris');
-    expect(debris).toBeDefined();
+    const effectTypes = ctx.effects.map(e => e.type as string);
+    expect(effectTypes).not.toContain('debris');
+    expect(ctx.logicAnims.some(anim => anim.type === 'frag1')).toBe(true);
   });
 
   it('does NOT create debris effect for infantry', () => {
@@ -203,8 +204,8 @@ describe('handleUnitDeath — direct behavioral tests', () => {
       attackerIsPlayer: false, trackLoss: false,
     });
 
-    const debris = ctx.effects.find(e => e.type === 'debris');
-    expect(debris).toBeUndefined();
+    const effectTypes = ctx.effects.map(e => e.type as string);
+    expect(effectTypes).not.toContain('debris');
   });
 
   it('increments killCount when attackerIsPlayer is true', () => {

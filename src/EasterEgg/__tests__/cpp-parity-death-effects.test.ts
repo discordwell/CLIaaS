@@ -396,16 +396,14 @@ describe('Unit death scarring does not use handleUnitDeath decals', () => {
     expect(soldier.stats.isInfantry).toBe(true);
   });
 
-  it('vehicle death creates debris effect (non-infantry path)', () => {
-    // combat.ts:477-479:
-    //   if (opts.debris && !victim.stats.isInfantry) {
-    //     ctx.effects.push({ type: 'debris', ... });
-    //   }
-    // Only non-infantry units produce debris on death.
+  it('vehicle death uses its configured AnimClass explosion, not generic debris', () => {
+    // C++ unit.cpp:1009-1020 creates UnitTypeClass::Explosion
+    // (FRAG1 for tanks in udata.cpp). There is no procedural flying-debris
+    // draw pass in the original renderer.
     const tank = new Entity(UnitType.V_2TNK, House.Greece, 100, 100);
     const soldier = new Entity(UnitType.I_E1, House.Greece, 200, 100);
-    expect(tank.stats.isInfantry).toBe(false);  // tank gets debris
-    expect(soldier.stats.isInfantry).toBe(true); // soldier does NOT get debris
+    expect(tank.stats.isInfantry).toBe(false);
+    expect(soldier.stats.isInfantry).toBe(true);
   });
 
   it('crush death has no C++ smudge/decal side effect', () => {
@@ -456,10 +454,11 @@ describe('Aircraft crash animation (air unit death)', () => {
     expect(hind.deathVariant).toBe(iniInfDeath);
   });
 
-  it('aircraft are not isInfantry — death produces debris (not infantry death anim)', () => {
+  it('aircraft are not infantry, but still do not use generic debris', () => {
     const hind = new Entity(UnitType.V_HIND, House.USSR, 100, 100);
     expect(hind.stats.isInfantry).toBe(false);
-    // handleUnitDeath: debris only for !isInfantry
+    // Aircraft death visuals must come from C++ aircraft/unit death paths,
+    // not the removed generic debris effect.
   });
 
   it('combatAnim uses "air" land type for airborne targets → flak sprite', () => {
@@ -673,7 +672,7 @@ describe('Death sound effects match unit type category', () => {
 // ============================================================================
 // 11. Building death explosion chain (visual effects)
 //     C++ building.cpp death creates pre-explosions + final large blast
-//     TS combat.ts:1174-1201 — staggered pre-explosions + fball1 + debris
+//     TS combat.ts:1174-1201 — staggered pre-explosions + fball1
 // ============================================================================
 
 describe('Building death explosion chain (combat.ts structureDamage)', () => {

@@ -2134,7 +2134,7 @@ export class Entity {
    *  C++ RA unit.cpp:542: SecondaryFacing.Rotation_Adjust(Class->ROT+1).
    *  Turret rotates in exact 256-step DirType space; 32-step turretFacing32 is
    *  only the rounded sprite-facing derivative. */
-  tickTurretRotation(): boolean {
+  tickTurretRotation(rateOverride?: number): boolean {
     if (this.turretFacing256 < 0 ||
         dir256ToFacing32(this.turretFacing256) !== this.turretFacing32 ||
         dir256ToFacing8(this.turretFacing256) !== this.turretFacing) {
@@ -2161,7 +2161,7 @@ export class Entity {
 
     // C++ FacingClass::Rotation_Adjust: clamp to 127, then apply the full rate
     // in 256-dir space using signed-char shortest-path difference.
-    const rate = Math.min(this.stats.rot + 1, 127);
+    const rate = Math.min(rateOverride ?? (this.stats.rot + 1), 127);
     if (rate > 0) {
       let diff = (desired256 - this.turretFacing256) & 0xff;
       if (diff >= 128) diff -= 256;
