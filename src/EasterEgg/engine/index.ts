@@ -43,6 +43,7 @@ import {
   processFallingParachuteAnim, shortenFallingParachuteAnim,
 } from './entity';
 import { GameMap, Terrain, MoveResult, type MapTree, type MapTerrainObject } from './map';
+import { SHADOW_TABLE } from './shadow';
 import { ScenarioRandom } from './random';
 import {
   CPP_FIXED_ONE_RAW,
@@ -669,6 +670,7 @@ export class Game {
   playerFaction: Faction = 'allied';
   playerTechLevel = 10; // default high for skirmish; scenario INI overrides
   private isNoSpyPlane = false;
+  private gpsTechLevel = 8;
   private airstripSpecialTechLevels = { spyPlane: 5, paraBomb: 8, paraInfantry: 5 };
 
   // Difficulty
@@ -852,6 +854,7 @@ export class Game {
   /** C++ CellClass::IsMapped for PlayerPtr. Kept separate from display fog
    *  because agent/compare modes reveal the whole TS map for inspection. */
   private playerMappedCells = new Uint8Array(MAP_CELLS * MAP_CELLS);
+  private playerVisibleMappedCells = new Uint8Array(MAP_CELLS * MAP_CELLS);
   /** C++ house.h:268 IsGPSActive — GPS satellite launched, full map revealed.
    *  Cleared when ATEK is destroyed (house.cpp:1420-1425). */
   gpsActive = false;
@@ -1652,6 +1655,7 @@ export class Game {
       powerProduced: this.powerProduced,
       powerConsumed: this.powerConsumed,
       houseTechLevel: (house) => this.houseTechLevels.get(house) ?? this.defaultScenarioTechLevel(),
+      gpsTechLevel: this.gpsTechLevel,
       airstripSpecialTechLevels: this.airstripSpecialTechLevels,
       isNoSpyPlane: this.isNoSpyPlane,
       killCount: this.killCount,
@@ -2221,6 +2225,7 @@ export class Game {
     this.playerFaction = HOUSE_FACTION[this.playerHouse] ?? 'allied';
     this.playerTechLevel = scenario.playerTechLevel ?? 10;
     this.isNoSpyPlane = scenario.isNoSpyPlane ?? false;
+    this.gpsTechLevel = scenario.gpsTechLevel ?? 8;
     this.airstripSpecialTechLevels = scenario.airstripSpecialTechLevels ?? { spyPlane: 5, paraBomb: 8, paraInfantry: 5 };
     this.initializeScenarioPowerDrain();
     // Calculate initial silo capacity (do NOT cap starting credits — C++ parity)
@@ -2246,6 +2251,7 @@ export class Game {
     this.autocreateEnabled = false;
     this.baseDiscovered = true;
     this.playerMappedCells.fill(0);
+    this.playerVisibleMappedCells.fill(0);
     this.productionQueue.clear();
     this.pendingPlacement = null;
     this.superweapons.clear();
@@ -14377,23 +14383,76 @@ export class Game {
    * (techno.cpp:1061-1064). The debug/agent fogDisabled override paints
    * visibility=2 across the whole map, but must NOT trigger Revealed().
    */
-  private markPlayerMappedCell(cx: number, cy: number): boolean {
-    if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
+  private playerMappedCellShadow(cx: number, cy: number): number {
+    // C++ DisplayClass::Cell_Shadow returns -1 at the top/bottom map edge to
+    // avoid neighbor reads; the TS display shroud path already uses this rule.
+    if (cy <= 0 || cy >= MAP_CELLS - 1) return -1;
     const idx = cy * MAP_CELLS + cx;
-    if (this.playerMappedCells[idx] !== 0) return false;
+    if (!this.playerVisibleMappedCells[idx] && !this.playerMappedCells[idx]) return -2;
+    if (!this.playerMappedCells[idx]) return -1;
+
+    let mask = 0;
+    if (!this.isCellMappedForPlayer(cx - 1, cy - 1)) mask |= 0x40;
+    if (!this.isCellMappedForPlayer(cx,     cy - 1)) mask |= 0x80;
+    if (!this.isCellMappedForPlayer(cx + 1, cy - 1)) mask |= 0x01;
+    if (!this.isCellMappedForPlayer(cx - 1, cy    )) mask |= 0x20;
+    if (!this.isCellMappedForPlayer(cx + 1, cy    )) mask |= 0x02;
+    if (!this.isCellMappedForPlayer(cx - 1, cy + 1)) mask |= 0x10;
+    if (!this.isCellMappedForPlayer(cx,     cy + 1)) mask |= 0x08;
+    if (!this.isCellMappedForPlayer(cx + 1, cy + 1)) mask |= 0x04;
+    return SHADOW_TABLE[mask];
+  }
+
+  private mapPlayerCell(cx: number, cy: number, changed: number[]): boolean {
+    if (cx < this.map.boundsX || cx >= this.map.boundsX + this.map.boundsW ||
+        cy < this.map.boundsY || cy >= this.map.boundsY + this.map.boundsH) {
+      return false;
+    }
+    const idx = cy * MAP_CELLS + cx;
+    if (this.playerMappedCells[idx]) return false;
+
     this.playerMappedCells[idx] = 1;
+    changed.push(idx);
+    if (this.playerMappedCellShadow(cx, cy) === -1) {
+      this.playerVisibleMappedCells[idx] = 1;
+    }
+
+    const facingOrder: Array<[number, number]> = [
+      [0, -1], [1, -1], [1, 0], [1, 1],
+      [0, 1], [-1, 1], [-1, 0], [-1, -1],
+    ];
+    for (const [dx, dy] of facingOrder) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (nx < this.map.boundsX || nx >= this.map.boundsX + this.map.boundsW ||
+          ny < this.map.boundsY || ny >= this.map.boundsY + this.map.boundsH) {
+        continue;
+      }
+      const nIdx = ny * MAP_CELLS + nx;
+      if (this.playerVisibleMappedCells[nIdx]) continue;
+
+      const shadow = this.playerMappedCellShadow(nx, ny);
+      if (shadow === -1) {
+        if (!this.playerMappedCells[nIdx]) {
+          this.mapPlayerCell(nx, ny, changed);
+        } else {
+          this.playerVisibleMappedCells[nIdx] = 1;
+        }
+      } else if (shadow !== -2 && !this.playerMappedCells[nIdx]) {
+        this.mapPlayerCell(nx, ny, changed);
+      }
+    }
     return true;
   }
 
-  private markPlayerMappedSight(cx: number, cy: number, radius: number, incremental = false): boolean {
-    if (!this.map.inBounds(cx, cy)) return false;
-    if (!radius || radius > 10) return false;
-    let changed = false;
+  private markPlayerMappedSight(cx: number, cy: number, radius: number, incremental = false): number[] {
+    if (!this.map.inBounds(cx, cy)) return [];
+    if (!radius || radius > 10) return [];
+    const changed: number[] = [];
     for (const { dx, dy } of radiusCellOffsets(radius, incremental)) {
       const rx = cx + dx;
       const ry = cy + dy;
-      if (rx < 0 || rx >= MAP_CELLS || ry < 0 || ry >= MAP_CELLS) continue;
-      changed = this.markPlayerMappedCell(rx, ry) || changed;
+      this.mapPlayerCell(rx, ry, changed);
     }
     return changed;
   }
@@ -14417,7 +14476,7 @@ export class Game {
         if (!s.alive || s.house !== this.playerHouse) continue;
         if (!this.isStructureFootprintMappedForPlayer(s)) continue;
         const look = structureLookCell(s);
-        changed = this.markPlayerMappedSight(look.cx, look.cy, STRUCTURE_SIGHT[s.type] ?? 5) || changed;
+        changed = this.markPlayerMappedSight(look.cx, look.cy, STRUCTURE_SIGHT[s.type] ?? 5).length > 0 || changed;
       }
     }
   }
@@ -15408,6 +15467,7 @@ export class Game {
     if (result.revealAll) {
       this.map.revealAll();
       this.playerMappedCells.fill(1);
+      this.playerVisibleMappedCells.fill(1);
       this.markAllObjectsRevealedToPlayer();
     }
     if (result.revealWaypoint !== undefined) {
@@ -15492,10 +15552,12 @@ export class Game {
       const wp = this.waypoints.get(result.revealZone);
       if (wp) {
         const revealed = _revealZoneFloodFill(this.map, wp.cx, wp.cy);
+        const mappedCells: number[] = [];
         for (let i = 0; i < revealed.length; i++) {
-          if (revealed[i]) this.playerMappedCells[i] = 1;
+          if (!revealed[i]) continue;
+          this.mapPlayerCell(i % MAP_CELLS, Math.floor(i / MAP_CELLS), mappedCells);
         }
-        this.markObjectsRevealedByCellMask(revealed);
+        this.markObjectsRevealedByMappedCells(mappedCells);
       }
     }
     // Charge one superweapon of trigger house
@@ -16173,7 +16235,7 @@ export class Game {
 
     const ownedByPlayer = entity.house === this.playerHouse;
     const discoveredByPlayer = this.discoveredEntityIds.has(entity.id);
-    const mapped = this.map.getDisplayVisibility(entity.cell.cx, entity.cell.cy) > 0;
+    const mapped = this.isCellMappedForPlayer(entity.cell.cx, entity.cell.cy);
     const shouldReveal =
       (!ownedByPlayer && !discoveredByPlayer) ||
       (!mapped && (!entity.isAirUnit || !ownedByPlayer));
@@ -16188,9 +16250,9 @@ export class Game {
   private revealSightFromPlayer(cx: number, cy: number, radius: number, incremental = false): void {
     if (!this.map.inBounds(cx, cy)) return;
     this.revealAroundCell(cx, cy, radius, incremental);
-    this.markPlayerMappedSight(cx, cy, radius, incremental);
+    const mappedCells = this.markPlayerMappedSight(cx, cy, radius, incremental);
     this.revealMappedPlayerStructures();
-    this.markObjectsRevealedToPlayer(cx, cy, radius, incremental);
+    this.markObjectsRevealedByMappedCells(mappedCells);
   }
 
   /** C++ mobile TechnoClass::Look() remapped to PlayerPtr for player-allied houses.
@@ -16236,61 +16298,16 @@ export class Game {
     }
   }
 
-  /** Mirror DisplayClass::Map_Cell's `tech->Revealed(PlayerPtr)` side effect
-   *  for cells exposed by a non-standard reveal path such as Fire_At. */
-  private markObjectsRevealedToPlayer(cx: number, cy: number, radius: number, incremental = false): void {
-    const offsets = new Set(radiusCellOffsets(radius, incremental).map(({ dx, dy }) => `${dx},${dy}`));
-    const inSight = (x: number, y: number): boolean => {
-      return offsets.has(`${x - cx},${y - cy}`);
-    };
-
-    const revealEntity = (e: Entity): void => {
-      if (!e.alive || e.house === this.playerHouse) return;
-      if (e.isAirUnit) return;
-      if (!inSight(e.cell.cx, e.cell.cy)) return;
-      if (this.discoveredEntityIds.has(e.id)) return;
-
-      this.discoveredEntityIds.add(e.id);
-      const hi = Game.HOUSE_TO_INDEX[e.house];
-      if (hi !== undefined) this.houseDiscovered.set(hi, true);
-
-      if (e.triggerName) {
-        this.springDiscoveredTriggerByName(e.triggerName);
-      }
-    };
-
-    for (const e of this.entities) revealEntity(e);
-
-    for (let si = 0; si < this.structures.length; si++) {
-      const s = this.structures[si];
-      if (!s.alive || s.house === this.playerHouse) continue;
-      if (this.discoveredStructureIds.has(si)) continue;
-
-      let footprintInSight = false;
-      const [sw, sh] = STRUCTURE_SIZE[s.type] ?? [1, 1];
-      for (let y = 0; y < sh && !footprintInSight; y++) {
-        for (let x = 0; x < sw; x++) {
-          if (inSight(s.cx + x, s.cy + y)) {
-            footprintInSight = true;
-            break;
-          }
-        }
-      }
-      if (!footprintInSight) continue;
-
-      this.discoveredStructureIds.add(si);
-      const hi = Game.HOUSE_TO_INDEX[s.house];
-      if (hi !== undefined) this.houseDiscovered.set(hi, true);
-
-      if (s.triggerName) {
-        this.springDiscoveredTriggerByName(s.triggerName);
-      }
-    }
-  }
-
   /** C++ DisplayClass::Map_Cell calls Revealed(PlayerPtr) for a techno in each
    *  newly mapped cell. TACTION_REVEAL_ZONE maps a whole movement zone, so use
    *  the revealed-cell mask rather than a radius predicate. */
+  private markObjectsRevealedByMappedCells(cells: number[]): void {
+    if (cells.length === 0) return;
+    const mask = new Uint8Array(MAP_CELLS * MAP_CELLS);
+    for (const idx of cells) mask[idx] = 1;
+    this.markObjectsRevealedByCellMask(mask);
+  }
+
   private markObjectsRevealedByCellMask(mask: Uint8Array): void {
     const includesCell = (cx: number, cy: number): boolean => {
       if (cx < 0 || cx >= MAP_CELLS || cy < 0 || cy >= MAP_CELLS) return false;
@@ -17583,7 +17600,11 @@ export class Game {
     this.renderer.hasRadar = isRadarActive(this.radarVisual, this.gpsActive);
     const radarZoomable = isRadarZoomableForMap(this.map.boundsW, this.map.boundsH);
     this.renderer.radarZoomEnabled = (this.radarVisual.isZoomEnabled || this.gpsActive) && radarZoomable;
-    this.renderer.radarZoomPressed = this.renderer.radarZoomEnabled;
+    this.renderer.radarZoomPressed = this.input.state.mouseDown &&
+      this.input.state.mouseX >= this.canvas.width - Game.SIDEBAR_W + Renderer.BUTTON_THREE_X &&
+      this.input.state.mouseX < this.canvas.width - Game.SIDEBAR_W + Renderer.BUTTON_THREE_X + Renderer.BUTTON_THREE_W &&
+      this.input.state.mouseY >= Renderer.BUTTON_ROW_Y &&
+      this.input.state.mouseY < Renderer.BUTTON_ROW_Y + Renderer.BUTTON_H;
     this.renderer.isRadarJammed = this.radarJammed && !this.gpsActive;
     this.renderer.radarCoverFrame = radarDisplayFrame(this.radarVisual, this.renderer.isRadarJammed);
     // U6: Pass fullscreen radar state to renderer

@@ -353,9 +353,24 @@ export class GameMap {
   }
 
   /** Place a C++ CellClass smudge. Non-bib smudges occupy one slot per cell. */
-  addSmudge(type: string, cx: number, cy: number, data = 0): boolean {
+  addSmudge(
+    type: string,
+    cx: number,
+    cy: number,
+    data = 0,
+    options: { craterTypeResolved?: boolean } = {},
+  ): boolean {
     if (!this.isClearToMoveTrackIgnoringOccupants(cx, cy)) return false;
-    const smudgeType = type.toLowerCase();
+    let smudgeType = type.toLowerCase();
+    if (smudgeType.startsWith('cr') && !options.craterTypeResolved) {
+      // C++ SmudgeClass::Mark reselects empty-cell craters from
+      // CellClass::Spot_Index(Coord), ignoring the requested CRn. Callers that
+      // pass only a cell coordinate are equivalent to Cell_Coord(cell), whose
+      // Spot_Index is the center slot, so the actual type is CR1.
+      const requested = smudgeType;
+      smudgeType = 'cr1';
+      if (requested !== smudgeType) data = 0;
+    }
     const existing = this.smudges.find(s => s.cx === cx && s.cy === cy);
     if (existing && existing.type.toLowerCase().startsWith('cr') && smudgeType.startsWith('cr')) {
       existing.data = Math.min((existing.data ?? 0) + 1, 4);

@@ -60,6 +60,16 @@ const scenarios = SCENARIO_FILES.map(id => {
   return { id, text, raw: parseINI(text), parsed: parseScenarioINI(text) };
 });
 
+describe('cpp-parity: [General] superweapon tech overrides', () => {
+  it('parses GPSTechLevel overrides used by HouseClass::Super_Weapon_Handler', () => {
+    const text = readFileSync(join(assetsDir, 'SCG08EA.ini'), 'utf-8');
+    const raw = parseINI(text);
+    const parsed = parseScenarioINI(text);
+
+    expect(parsed.gpsTechLevel).toBe(parseInt(raw.General.GPSTechLevel));
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 1. [Basic] section parsing
 //    C++ scenario.cpp Read_INI():

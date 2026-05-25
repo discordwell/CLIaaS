@@ -619,32 +619,50 @@ describe('GPSTechLevel gating (house.cpp:1469, rules.ini GPSTechLevel=8)', () =>
    * Lower tech level scenarios (e.g., early missions) cannot get GPS even
    * with an ATEK.
    *
-   * PARITY NOTE: TS superweapon.ts does NOT check tech level when creating
-   * GPS entries. Any ATEK building unconditionally enables GPS charging.
-   * This is a known gap — the TS engine does not propagate scenario tech
-   * level into the superweapon system. The gap is acceptable because:
-   * 1. Scenarios that provide an ATEK typically have tech level >= 8
-   * 2. The production system separately gates ATEK behind tech level
-   *
-   * We document this gap here but do not test for it to fail, since the
-   * TS behavior (always allow GPS from ATEK) is an intentional simplification.
+   * TS parity: superweapon.ts receives both the house Control.TechLevel and
+   * scenario-overridden GPSTechLevel, and only creates GPS when the C++ gate
+   * passes.
    */
 
-  it('DOCUMENT: rules.ini GPSTechLevel=8 — C++ gates GPS behind tech level', () => {
-    // This test documents the authoritative C++ value.
-    // C++ rules.cpp:425: GPSTechLevel = ini.Get_Int(GENERAL, "GPSTechLevel", GPSTechLevel)
-    // rules.ini [General] GPSTechLevel=8
-    const RULES_INI_GPS_TECH_LEVEL = 8;
+  it('does not create GPS when house tech is below GPSTechLevel', () => {
+    const atek = makeStructure('ATEK', House.Spain, 10, 10);
+    const ctx = makeSuperweaponCtx({
+      structures: [atek],
+      houseTechLevel: () => 7,
+      gpsTechLevel: 8,
+    });
 
-    // TS does not have a GPSTechLevel constant or check in superweapon.ts.
-    // The superweapon system creates entries for ANY alive ATEK regardless
-    // of tech level.
-    //
-    // To verify: superweapon.ts line 110 checks `!s.alive` and `s.buildProgress`
-    // but does NOT check any tech level constraint.
-    //
-    // This is documented as a known simplification.
-    expect(RULES_INI_GPS_TECH_LEVEL).toBe(8);
+    updateSuperweapons(ctx);
+
+    expect(ctx.superweapons.has(`${House.Spain}:${SuperweaponType.GPS_SATELLITE}`)).toBe(false);
+  });
+
+  it('creates GPS when house tech meets GPSTechLevel', () => {
+    const atek = makeStructure('ATEK', House.Spain, 10, 10);
+    const ctx = makeSuperweaponCtx({
+      structures: [atek],
+      houseTechLevel: () => 8,
+      gpsTechLevel: 8,
+    });
+
+    updateSuperweapons(ctx);
+
+    expect(ctx.superweapons.has(`${House.Spain}:${SuperweaponType.GPS_SATELLITE}`)).toBe(true);
+  });
+
+  it('respects scenario GPSTechLevel overrides', () => {
+    // SCG08EA overrides [General] GPSTechLevel=10 while Greece TechLevel=8.
+    const atek = makeStructure('ATEK', House.Greece, 10, 10);
+    const ctx = makeSuperweaponCtx({
+      structures: [atek],
+      playerHouse: House.Greece,
+      houseTechLevel: () => 8,
+      gpsTechLevel: 10,
+    });
+
+    updateSuperweapons(ctx);
+
+    expect(ctx.superweapons.has(`${House.Greece}:${SuperweaponType.GPS_SATELLITE}`)).toBe(false);
   });
 });
 

@@ -1808,6 +1808,24 @@ describe('Smudges — pre-placed marks from scenario INI', () => {
     expect(map.smudges).toEqual([{ type: 'cr1', cx: 12, cy: 12, data: 2 }]);
   });
 
+  it('normalizes cell-centered scenario crater smudges through C++ Spot_Index', () => {
+    // C++ smudge.cpp:207 ignores the requested CRn on an empty cell and uses
+    // SMUDGE_CRATER1 + CellClass::Spot_Index(Coord). Scenario Read_INI passes
+    // Cell_Coord(cell), so Spot_Index is center (0), and the CR5 data override
+    // does not apply because the cell became CR1 instead of the requested CR5.
+    expect(map.addSmudge('CR5', 12, 12, 4)).toBe(true);
+
+    expect(map.smudges).toEqual([{ type: 'cr1', cx: 12, cy: 12, data: 0 }]);
+  });
+
+  it('preserves crater types already resolved from exact impact coordinates', () => {
+    // C++ runtime craters use the actual impact Coord for Spot_Index. Combat
+    // and AnimClass callers resolve that Coord before they write the cell slot.
+    expect(map.addSmudge('CR5', 12, 12, 0, { craterTypeResolved: true })).toBe(true);
+
+    expect(map.smudges).toEqual([{ type: 'cr5', cx: 12, cy: 12, data: 0 }]);
+  });
+
   it('addSmudge ignores building footprint occupancy but still uses the underlying land', () => {
     // C++ cell.cpp:2766-2772 drops the vehicle/building occupy bit when
     // Is_Clear_To_Move(..., ignorevehicles=true) is called from SmudgeClass.

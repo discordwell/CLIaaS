@@ -650,6 +650,8 @@ function addCraterSmudge(ctx: CombatContext, point: { x: number; y: number }): v
     craterSmudgeTypeForCoord(point),
     Math.floor(point.x / CELL_SIZE),
     Math.floor(point.y / CELL_SIZE),
+    0,
+    { craterTypeResolved: true },
   );
 }
 
@@ -2723,6 +2725,12 @@ function wideAreaDamage(
         sourceHouse,
         source,
       );
+      if (warhead === 'Fire' && damage > 100) {
+        // C++ combat.cpp:433-439 — Wide_Area_Damage plants a random scorch on
+        // every covered fire-warhead cell whose computed damage remains > 100.
+        const scorch = withScenarioRandomSourceTag(50001, () => ScenarioRandom.nextInRange(1, 6));
+        ctx.map.addSmudge(`sc${scorch}`, cx, cy);
+      }
     }
   }
 }

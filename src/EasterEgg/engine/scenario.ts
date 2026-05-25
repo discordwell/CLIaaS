@@ -623,6 +623,8 @@ interface ScenarioData {
   isTanyaEvac: boolean;
   /** C++ Scen.IsNoSpyPlane — [Basic] NoSpyPlane=yes suppresses free airstrip recon. */
   isNoSpyPlane: boolean;
+  /** C++ RulesClass::GPSTechLevel after scenario [General] override pass. */
+  gpsTechLevel: number;
   /** Scenario [General] airstrip special tech overrides. */
   airstripSpecialTechLevels: {
     spyPlane: number;
@@ -1056,6 +1058,7 @@ export function parseScenarioINI(text: string, scenarioId = ''): ScenarioData {
     toInherit: get('Basic', 'ToInherit', 'no').toLowerCase() === 'yes',
     isTanyaEvac: get('Basic', 'CivEvac', 'no').toLowerCase() === 'yes',
     isNoSpyPlane: get('Basic', 'NoSpyPlane', 'no').toLowerCase() === 'yes',
+    gpsTechLevel: parseGeneralInt(sections, 'GPSTechLevel', 8),
     airstripSpecialTechLevels: {
       spyPlane: parseGeneralInt(sections, 'SpyPlaneTech', 5),
       paraBomb: parseGeneralInt(sections, 'ParabombTech', 8),
@@ -2236,6 +2239,8 @@ export interface ScenarioResult {
   playerTechLevel: number;
   /** C++ Scen.IsNoSpyPlane — [Basic] NoSpyPlane=yes suppresses free airstrip recon. */
   isNoSpyPlane: boolean;
+  /** C++ RulesClass::GPSTechLevel after scenario [General] override pass. */
+  gpsTechLevel: number;
   /** Scenario [General] airstrip special tech overrides. */
   airstripSpecialTechLevels: {
     spyPlane: number;
@@ -2762,6 +2767,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     playerHouse: toHouse(data.playerHouse ?? 'Spain'),
     playerTechLevel: data.playerTechLevel,
     isNoSpyPlane: data.isNoSpyPlane,
+    gpsTechLevel: data.gpsTechLevel,
     airstripSpecialTechLevels: data.airstripSpecialTechLevels,
     houseAllies: new Map(
       Array.from(data.houseAllies.entries()).map(([k, v]) => [toHouse(k), v.flatMap(expandAllyToken)])

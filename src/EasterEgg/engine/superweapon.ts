@@ -59,6 +59,8 @@ export interface SuperweaponContext {
   powerProduced: number;
   powerConsumed: number;
   houseTechLevel?: (house: House) => number;
+  /** C++ RulesClass::GPSTechLevel, overridden by scenario [General] GPSTechLevel=. */
+  gpsTechLevel?: number;
   airstripSpecialTechLevels?: {
     spyPlane: number;
     paraBomb: number;
@@ -126,6 +128,7 @@ const DEFAULT_AIRSTRIP_SPECIAL_TECH = {
   paraBomb: 8,
   paraInfantry: 5,
 };
+const DEFAULT_GPS_TECH_LEVEL = 8;
 
 function isAirstripSpecialAvailable(ctx: SuperweaponContext, type: SuperweaponType, house: House): boolean {
   const techLevel = ctx.houseTechLevel?.(house) ?? Number.POSITIVE_INFINITY;
@@ -140,6 +143,17 @@ function isAirstripSpecialAvailable(ctx: SuperweaponContext, type: SuperweaponTy
     default:
       return true;
   }
+}
+
+function isSuperweaponProviderAvailable(ctx: SuperweaponContext, type: SuperweaponType, house: House): boolean {
+  if (type === SuperweaponType.GPS_SATELLITE) {
+    const techLevel = ctx.houseTechLevel?.(house) ?? Number.POSITIVE_INFINITY;
+    return techLevel >= (ctx.gpsTechLevel ?? DEFAULT_GPS_TECH_LEVEL);
+  }
+  if (type === SuperweaponType.SPY_PLANE || type === SuperweaponType.PARABOMB || type === SuperweaponType.PARAINFANTRY) {
+    return isAirstripSpecialAvailable(ctx, type, house);
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +173,7 @@ export function updateSuperweapons(ctx: SuperweaponContext): void {
     // Check each superweapon def to see if this structure provides it
     for (const def of Object.values(SUPERWEAPON_DEFS)) {
       if (s.type !== def.building) continue;
-      if (s.type === 'AFLD' && !isAirstripSpecialAvailable(ctx, def.type, s.house)) continue;
+      if (!isSuperweaponProviderAvailable(ctx, def.type, s.house)) continue;
 
       const key = `${s.house}:${def.type}`;
       activeBuildings.add(key);

@@ -2901,6 +2901,19 @@ describe('renderer vessel and aircraft body frames', () => {
     }
   });
 
+  it('does not draw destroyed vessels retained for logic bookkeeping', () => {
+    // C++ vessel.cpp:958-973 removes destroyed vessels from the map draw path:
+    // Mark(MARK_UP) erases the shape, then delete this clears the active object.
+    const sub = new Entity(UnitType.V_SS, House.USSR, 64, 64);
+    sub.alive = false;
+    sub.hp = 0;
+    sub.mission = Mission.DIE;
+
+    const calls = renderSingleCalls(sub, 32);
+
+    expect(calls).toEqual([]);
+  });
+
   it('draws PT MGUN turret with C++ VesselTypeClass::Turret_Adjust offset', () => {
     // C++ vessel.cpp:453-456 uses MGunShapes for VESSEL_PT, frame
     // BodyShape[Dir_To_32(SecondaryFacing)]. vdata.cpp:621-624 offsets it by
@@ -3241,17 +3254,18 @@ describe('renderer sidebar map button state (sidebar.cpp:341-344)', () => {
     expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'map_btn', 2, 480 + Renderer.BUTTON_THREE_X, Renderer.BUTTON_ROW_Y);
   });
 
-  it('keeps MAP.SHP pressed while low power closes an existing radar cover', () => {
+  it('keeps MAP.SHP enabled but unpressed while low power closes an existing radar cover', () => {
     // C++ HouseClass::AI low-power path calls Radar_Activate(0), which starts
     // closing the cover but does not Disable() SidebarClass::Zoom. Once the
     // radar has reached Radar_Activate(3), the button stays enabled until the
-    // sidebar gadgets are removed.
+    // sidebar gadgets are removed. MAP.SHP does not use ReflectButtonState,
+    // so it still draws the up frame unless the mouse is pressing it.
     const { canvas, ctx } = mockCanvas();
     const renderer = new Renderer(canvas);
     renderer.hasRadar = false;
     renderer.doesRadarExist = true;
     renderer.radarZoomEnabled = true;
-    renderer.radarZoomPressed = true;
+    renderer.radarZoomPressed = false;
 
     const assets = {
       getSheet: vi.fn(() => ({ meta: { frameWidth: 34, frameHeight: 28, frameCount: 3 } })),
@@ -3260,7 +3274,7 @@ describe('renderer sidebar map button state (sidebar.cpp:341-344)', () => {
 
     (renderer as any).renderButtonRow(480, 160, assets);
 
-    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'map_btn', 1, 480 + Renderer.BUTTON_THREE_X, Renderer.BUTTON_ROW_Y);
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'map_btn', 0, 480 + Renderer.BUTTON_THREE_X, Renderer.BUTTON_ROW_Y);
   });
 
   it('draws MAP.SHP unpressed when zoom is enabled but not selected', () => {

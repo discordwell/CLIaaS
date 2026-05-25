@@ -50,6 +50,7 @@ function makeGame(overrides: Partial<MockGame> = {}): MockGame {
       boundsY: 40,
       boundsW: 50,
       boundsH: 50,
+      smudges: [],
       isPassable: () => true,
       isTerrainPassable: () => true,
     },
@@ -113,8 +114,13 @@ beforeEach(() => {
 // ═══════════════════════════════════════════════════════════
 
 describe('serializeState', () => {
-  it('returns correct tick, state, credits, and power', () => {
+  it('returns correct tick, state, credits, and computed structure power', () => {
     const game = makeGame();
+    (game as unknown as { structures: MapStructure[] }).structures = [
+      makeStructure('APWR', House.Spain, 45, 45),
+      makeStructure('STEK', House.Spain, 49, 45),
+    ];
+
     const s = serializeState(game as unknown as Parameters<typeof serializeState>[0]);
     expect(s.tick).toBe(100);
     expect(s.state).toBe('paused');

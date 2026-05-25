@@ -3117,6 +3117,10 @@ export class Renderer {
       // Logic slot is gone. Dying infantry and sunk vessels still occupy the
       // original active paths through Entity.occupiesCppLogic().
       if (!entity.occupiesCppLogic()) continue;
+      // C++ vessel.cpp:958-973 removes destroyed vessels from the rendered map
+      // path with Mark(MARK_UP) before delete this. TS may retain the object to
+      // preserve logic/RNG side effects, but the dead vessel sprite is gone.
+      if (!entity.alive && entity.stats.isVessel) continue;
 
       const ecx = Math.floor(entity.pos.x / CELL_SIZE);
       const ecy = Math.floor(entity.pos.y / CELL_SIZE);

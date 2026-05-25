@@ -230,6 +230,7 @@ export function spawnLogicAnim(
   delay = 0,
   attachedTreeKey?: number,
   createdLogicTick?: number,
+  startMap?: GameMap,
 ): boolean {
   if (!animSlotReserved && reserveAnimSlot && !reserveAnimSlot()) return false;
 
@@ -250,7 +251,7 @@ export function spawnLogicAnim(
   };
   logicAnims.push(anim);
   void render;
-  if (delay === 0) logicAnimStart(anim, logicAnims, effects, undefined, allocateLogicIndex, reserveAnimSlot, createdLogicTick);
+  if (delay === 0) logicAnimStart(anim, logicAnims, effects, startMap, allocateLogicIndex, reserveAnimSlot, createdLogicTick);
   return true;
 }
 
@@ -431,7 +432,7 @@ function logicAnimMiddle(
     const cx = Math.floor(anim.x / CELL_SIZE);
     const cy = Math.floor(anim.y / CELL_SIZE);
     map.reduceOreLevels(cx, cy, 6);
-    map.addSmudge(craterSmudgeTypeForCoord(anim.x, anim.y), cx, cy);
+    map.addSmudge(craterSmudgeTypeForCoord(anim.x, anim.y), cx, cy, 0, { craterTypeResolved: true });
   }
 
   switch (anim.type) {
@@ -443,18 +444,18 @@ function logicAnimMiddle(
       // then loop RNG. SCG07EA t182 verifies the successful allocation ordering.
       spawnScatteredLogicAnim(
         logicAnims, effects, 'fire_small', anim.x, anim.y, 0x0040,
-        true, false, allocateLogicIndex, reserveAnimSlot, currentTick,
+        true, false, allocateLogicIndex, reserveAnimSlot, currentTick, map,
       );
       if (ScenarioRandom.percentChance(50)) {
         spawnScatteredLogicAnim(
           logicAnims, effects, 'fire_small', anim.x, anim.y, 0x00A0,
-          true, false, allocateLogicIndex, reserveAnimSlot, currentTick,
+          true, false, allocateLogicIndex, reserveAnimSlot, currentTick, map,
         );
       }
       if (ScenarioRandom.percentChance(50)) {
         spawnScatteredLogicAnim(
           logicAnims, effects, 'fire_med', anim.x, anim.y, 0x0070,
-          true, false, allocateLogicIndex, reserveAnimSlot, currentTick,
+          true, false, allocateLogicIndex, reserveAnimSlot, currentTick, map,
         );
       }
       break;
@@ -497,6 +498,7 @@ function spawnScatteredLogicAnim(
   allocateLogicIndex?: AllocateLogicIndex,
   reserveAnimSlot?: ReserveAnimSlot,
   createdLogicTick?: number,
+  map?: GameMap,
 ): boolean {
   // C++ source in this repo passes Coord_Scatter(...) and Random_Pick(1,2)
   // inline to new AnimClass(...). Allocation failure therefore skips both RNG
@@ -521,6 +523,7 @@ function spawnScatteredLogicAnim(
     0,
     undefined,
     createdLogicTick,
+    map,
   );
 }
 
