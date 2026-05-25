@@ -2850,6 +2850,10 @@ export class Game {
 
   /** Fixed-timestep game update */
   private update(): void {
+    const frameAtUpdateStart = this.tick;
+    const stateAtUpdateStart = this.state;
+    let missionTimerDecrementedThisFrame = false;
+
     this.tick++;
     this.logicAnimsProcessedThisTick = false;
     this.applyPendingCppLogicSlotReleases();
@@ -2937,6 +2941,7 @@ export class Game {
     }
     if (this.missionTimer > 0 && this.missionTimerRunning) {
       this.missionTimer--;
+      missionTimerDecrementedThisFrame = true;
       if (this.missionTimer <= 0) this.missionTimerExpired = true;
     }
 
@@ -4219,6 +4224,22 @@ export class Game {
     // Check win/lose — but only if triggers have had time to spawn ants
     // The trigger system spawns ants over time, so we need a grace period
     this.checkVictoryConditions();
+
+    // C++ Main_Loop applies Do_Win()/Do_Lose() and returns before Frame++.
+    // TS increments at update entry so in-frame logic sees tick-1 as C++ Frame;
+    // if that logic ends the mission, expose the pre-increment frame and undo
+    // the implicit CDTimer decrement.
+    if (
+      stateAtUpdateStart === 'playing' &&
+      (this.state === 'won' || this.state === 'lost')
+    ) {
+      this.tick = frameAtUpdateStart;
+      if (missionTimerDecrementedThisFrame) {
+        this.missionTimer++;
+        if (this.missionTimer > 0) this.missionTimerExpired = false;
+      }
+      this.missionTimerRunning = false;
+    }
   }
 
   /** Update fog of war — delegates to fog.ts */
