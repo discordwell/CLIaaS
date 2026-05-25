@@ -11,7 +11,7 @@ import { House, Mission, CELL_SIZE, worldToCell, pixelToLepton, leptonToPixel, c
 import { findPath } from './pathfinding';
 import { STRUCTURE_SIZE, type MapStructure } from './scenario';
 import { getEffectiveCost } from './production';
-import { powerMultiplier } from './repairSell';
+import { calculatePowerGrid, powerMultiplier } from './repairSell';
 import { ScenarioRandom } from './random';
 import { getActiveTeams } from './team';
 import { assignMission } from './missionLifecycle';
@@ -341,7 +341,12 @@ export function serializeState(game: Game): AgentState {
     });
   }
 
-  const pwrMult = powerMultiplier(game.powerProduced, game.powerConsumed);
+  const reportedPower = calculatePowerGrid(
+    game.structures,
+    game.playerHouse,
+    (a, b) => isAlliedHouse(a) && isAlliedHouse(b),
+  );
+  const pwrMult = powerMultiplier(reportedPower.produced, reportedPower.consumed);
   const weaponStats = ((game as unknown as { scenarioWeaponStats?: typeof WEAPON_STATS }).scenarioWeaponStats ?? WEAPON_STATS);
   const weapons: AgentWeapon[] = Object.entries(weaponStats).map(([name, stats]) => ({
     name,
@@ -362,7 +367,7 @@ export function serializeState(game: Game): AgentState {
     playerHouse: game.playerHouse,
     alliedHouses,
     credits: game.credits,
-    power: { produced: game.powerProduced, consumed: game.powerConsumed, multiplier: pwrMult },
+    power: { produced: reportedPower.produced, consumed: reportedPower.consumed, multiplier: pwrMult },
     siloCapacity: game.siloCapacity,
     units,
     enemies,

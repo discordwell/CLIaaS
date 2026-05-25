@@ -84,6 +84,20 @@ function generateIconAssets(): [string, string, string][] {
   );
 }
 
+/** Sidebar special weapon cameos: const.cpp SpecialWeaponFile[] + "ICON". */
+function generateSpecialWeaponIconAssets(): [string, string, string][] {
+  return [
+    ['HIRES.MIX', 'SONRICON.SHP', 'sonricon'],
+    ['HIRES.MIX', 'ATOMICON.SHP', 'atomicon'],
+    ['HIRES.MIX', 'WARPICON.SHP', 'warpicon'],
+    ['HIRES.MIX', 'PBMBICON.SHP', 'pbmbicon'],
+    ['HIRES.MIX', 'PINFICON.SHP', 'pinficon'],
+    ['HIRES.MIX', 'CAMICON.SHP', 'camicon'],
+    ['HIRES.MIX', 'INFXICON.SHP', 'infxicon'],
+    ['HIRES.MIX', 'GPSSICON.SHP', 'gpssicon'],
+  ];
+}
+
 /** Smudge/crater templates: SC1-SC6, CR1-CR6 in TEMPERAT.MIX */
 function generateSmudgeAssets(): [string, string, string][] {
   const entries: [string, string, string][] = [];
@@ -206,6 +220,7 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['CONQUER.MIX', 'NAPALM3.SHP', 'napalm3'],
   ['CONQUER.MIX', 'ATOMSFX.SHP', 'atomsfx'],      // Nuclear explosion
   ['CONQUER.MIX', 'SMOKEY.SHP', 'smokey'],         // Smoke effect
+  ['CONQUER.MIX', 'SMOKLAND.SHP', 'smokland'],     // Landing zone smoke (ANIM_LZ_SMOKE)
   ['CONQUER.MIX', 'LITNING.SHP', 'litning'],       // Lightning effect (Tesla)
   ['CONQUER.MIX', 'DOGBULLT.SHP', 'dogbullt'],     // Dog leap attack (C++ anim.cpp ANIM_DOGBITE, 32 frames)
   ['CONQUER.MIX', 'SPUTNIK.SHP', 'sputnik'],       // GPS satellite launch (C++ ANIM_SPUTNIK)
@@ -396,6 +411,16 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['SNOW.MIX', 'TC04.SNO', 'tc04_snow'],
   ['TEMPERAT.MIX', 'TC05.TEM', 'tc05'],
   ['SNOW.MIX', 'TC05.SNO', 'tc05_snow'],
+  // Interior TerrainClass objects (RA tdata.cpp TERRAIN_BOXES01..09)
+  ['INTERIOR.MIX', 'BOXES01.INT', 'boxes01'],
+  ['INTERIOR.MIX', 'BOXES02.INT', 'boxes02'],
+  ['INTERIOR.MIX', 'BOXES03.INT', 'boxes03'],
+  ['INTERIOR.MIX', 'BOXES04.INT', 'boxes04'],
+  ['INTERIOR.MIX', 'BOXES05.INT', 'boxes05'],
+  ['INTERIOR.MIX', 'BOXES06.INT', 'boxes06'],
+  ['INTERIOR.MIX', 'BOXES07.INT', 'boxes07'],
+  ['INTERIOR.MIX', 'BOXES08.INT', 'boxes08'],
+  ['INTERIOR.MIX', 'BOXES09.INT', 'boxes09'],
 ];
 
 // Combine manual entries with generated bulk categories
@@ -403,6 +428,7 @@ const SPRITE_ASSETS: [string, string, string][] = [
   ...SPRITE_ASSETS_MANUAL,
   ...generateMakeAssets(),
   ...generateIconAssets(),
+  ...generateSpecialWeaponIconAssets(),
   ...generateSmudgeAssets(),
   ...generateCorpseAssets(),
 ];

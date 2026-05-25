@@ -11,7 +11,7 @@ import { join } from 'path';
 import { Renderer } from '../engine/renderer';
 import { Game } from '../engine';
 import { getAvailableItems, type ProductionContext } from '../engine/production';
-import { PRODUCTION_ITEMS, RESFACTOR, UNIT_STATS, House } from '../engine/types';
+import { PRODUCTION_ITEMS, RESFACTOR, UNIT_STATS, House, SuperweaponType } from '../engine/types';
 
 function mockCanvas(): HTMLCanvasElement {
   return {
@@ -89,6 +89,80 @@ describe('sidebar production visuals', () => {
     // E1, E2, E3, E4, E6, E7, SPY, THF, MEDI, GENERAL, DOG.
     // With SCG08-like tech/prereqs, E7/THF are hidden but SPY still precedes MEDI.
     expect(infantryTypes).toEqual(['E1', 'E3', 'E6', 'SPY', 'MEDI']);
+  });
+
+  it('does not commit pre-Logic buildables before airstrip specials can be added', () => {
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    try {
+      const game = new Game(mockCanvas());
+      const mig = PRODUCTION_ITEMS.find(item => item.type === 'MIG');
+      const yak = PRODUCTION_ITEMS.find(item => item.type === 'YAK');
+      expect(mig).toBeTruthy();
+      expect(yak).toBeTruthy();
+
+      (game as any).tick = 0;
+      (game as any).playerHouse = House.USSR;
+      (game as any).alliances = new Map([[House.USSR, new Set([House.USSR])]]);
+      (game as any).cachedAvailableItems = [mig, yak];
+      (game as any).sidebarItems = [];
+      (game as any).superweapons = new Map();
+
+      const preLogic = (game as any).getSidebarItems().map((item: { type: string }) => item.type);
+      expect(preLogic).toEqual(['MIG', 'YAK']);
+      expect((game as any).sidebarItems).toEqual([]);
+
+      (game as any).superweapons.set(`${House.USSR}:${SuperweaponType.SPY_PLANE}`, {
+        type: SuperweaponType.SPY_PLANE,
+        house: House.USSR,
+        chargeTick: 0,
+        ready: false,
+        structureIndex: 0,
+        fired: false,
+      });
+
+      const firstLogic = (game as any).getSidebarItems().map((item: { type: string }) => item.type);
+      expect(firstLogic).toEqual([`SPECIAL:${SuperweaponType.SPY_PLANE}`, 'MIG', 'YAK']);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('applies the C++ MIG/YAK airfield-cap sidebar hack', () => {
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    vi.stubGlobal('Audio', class {
+      src = '';
+      preload = '';
+      addEventListener = vi.fn();
+    });
+    try {
+      const game = new Game(mockCanvas());
+      const mig = PRODUCTION_ITEMS.find(item => item.type === 'MIG');
+      expect(mig).toBeTruthy();
+
+      (game as any).playerHouse = House.USSR;
+      (game as any).structures = [
+        { type: 'AFLD', house: House.USSR, alive: true, cx: 10, cy: 10, hp: 400, maxHp: 400 },
+        { type: 'AFLD', house: House.USSR, alive: true, cx: 14, cy: 10, hp: 400, maxHp: 400 },
+      ];
+      (game as any).entities = [
+        { type: 'MIG', house: House.USSR, alive: true },
+        { type: 'YAK', house: House.USSR, alive: true },
+      ];
+      (game as any).productionQueue = new Map();
+
+      expect([...(game as any).getSidebarHackPreventedTypes()].sort()).toEqual(['MIG', 'YAK']);
+
+      (game as any).productionQueue.set('aircraft', { item: mig, progress: 1, queueCount: 1 });
+      expect([...(game as any).getSidebarHackPreventedTypes()]).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('draws the zero-state power frame but not the overwritten drain marker', () => {
@@ -349,7 +423,129 @@ describe('sidebar production visuals', () => {
     );
   });
 
-  it('redraws the power bar after the sidebar buttons in the final frame', () => {
+  it('draws power chrome before sidebar chunks so SIDE art can occlude its edge', () => {
+    const renderer = new Renderer(mockCanvas());
+    renderer.playerFaction = 'soviet';
+    renderer.sidebarPowerProduced = 100;
+    (renderer as any).powerHeight = 1;
+    const order: string[] = [];
+    const assets = {
+      getSheet: (name: string) => {
+        if (name === 'powerbar') return { meta: { frameWidth: 20, frameHeight: 112, frameCount: 2 } };
+        if (['side1us', 'side2us', 'side3us'].includes(name)) {
+          return { meta: { frameWidth: 160, frameHeight: 100, frameCount: 2 } };
+        }
+        return null;
+      },
+      drawFrame: vi.fn((_ctx, name: string) => order.push(name)),
+    };
+
+    (renderer as any).renderSidebar(assets);
+
+    expect(order.slice(0, 5)).toEqual([
+      'powerbar',
+      'powerbar',
+      'side1us',
+      'side2us',
+      'side3us',
+    ]);
+  });
+
+  it('uses update-frame sidebar chunks for ordinary sidebar chrome redraws', () => {
+    const renderer = new Renderer(mockCanvas());
+    renderer.playerFaction = 'soviet';
+    const drawFrame = vi.fn();
+    const assets = {
+      getSheet: (name: string) => {
+        if (['side1us', 'side2us', 'side3us'].includes(name)) {
+          return { meta: { frameWidth: 160, frameHeight: 100, frameCount: 2 } };
+        }
+        return null;
+      },
+      drawFrame,
+    };
+
+    renderer.sidebarItems = [];
+    renderer.syncSidebarChromeItems();
+    renderer.advanceSidebarChromeCache();
+    drawFrame.mockClear();
+
+    renderer.sidebarItems = [{ type: 'PROC' } as any];
+    renderer.syncSidebarChromeItems();
+    renderer.advanceSidebarChromeCache();
+    (renderer as any).renderSidebar(assets);
+
+    expect(drawFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      'side1us',
+      0,
+      expect.any(Number),
+      Renderer.SIDEBAR_BG_TOP_Y,
+      expect.anything(),
+    );
+    expect(drawFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      'side2us',
+      1,
+      expect.any(Number),
+      Renderer.SIDEBAR_BG_MID_Y,
+      expect.anything(),
+    );
+    expect(drawFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      'side3us',
+      1,
+      expect.any(Number),
+      Renderer.SIDEBAR_BG_BOT_Y,
+      expect.anything(),
+    );
+  });
+
+  it('uses complete-frame sidebar chunks for full tactical redraws', () => {
+    const renderer = new Renderer(mockCanvas());
+    renderer.playerFaction = 'soviet';
+    const drawFrame = vi.fn();
+    const assets = {
+      getSheet: (name: string) => {
+        if (['side1us', 'side2us', 'side3us'].includes(name)) {
+          return { meta: { frameWidth: 160, frameHeight: 100, frameCount: 2 } };
+        }
+        return null;
+      },
+      drawFrame,
+    };
+
+    renderer.sidebarItems = [];
+    renderer.syncSidebarChromeItems();
+    renderer.advanceSidebarChromeCache();
+    renderer.sidebarItems = [{ type: 'PROC' } as any];
+    renderer.syncSidebarChromeItems();
+    renderer.advanceSidebarChromeCache();
+    drawFrame.mockClear();
+
+    renderer.markSidebarChromeDirty(true);
+    renderer.advanceSidebarChromeCache();
+    (renderer as any).renderSidebar(assets);
+
+    expect(drawFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      'side2us',
+      0,
+      expect.any(Number),
+      Renderer.SIDEBAR_BG_MID_Y,
+      expect.anything(),
+    );
+    expect(drawFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      'side3us',
+      0,
+      expect.any(Number),
+      Renderer.SIDEBAR_BG_BOT_Y,
+      expect.anything(),
+    );
+  });
+
+  it('does not redraw active power chrome after the sidebar buttons', () => {
     const renderer = new Renderer(mockCanvas());
     renderer.sidebarPowerProduced = 100;
     (renderer as any).powerHeight = 1;
@@ -389,7 +585,234 @@ describe('sidebar production visuals', () => {
 
     renderer.render({} as any, {} as any, [], [], assets as any, {} as any, new Set(), [], 100);
 
-    expect(order).toEqual(['sidebar', 'radar', 'buttons', 'power']);
+    // C++ SidebarClass::Draw_It calls PowerClass::Draw_It first, then draws
+    // SIDE1/SIDE2/SIDE3 over it. A final full power redraw would overpaint the
+    // sidebar art's right edge.
+    expect(order).toEqual(['sidebar', 'radar', 'buttons']);
+  });
+
+  it('redraws power after sidebar when PowerClass is dirty and sidebar chrome is clean', () => {
+    const renderer = new Renderer(mockCanvas());
+    const order: string[] = [];
+    for (const method of [
+      'renderTerrain',
+      'renderDecals',
+      'renderOverlays',
+      'renderGroundLayer',
+      'renderStructures',
+      'renderCrates',
+      'renderCorpses',
+      'renderEntities',
+      'renderTargetLines',
+      'renderWaypoints',
+      'renderEffects',
+      'renderFogOfWar',
+      'renderPlacementGhost',
+      'renderSelectionBox',
+      'renderAttackMoveIndicator',
+      'renderModeLabel',
+      'renderOffscreenIndicators',
+      'renderFullscreenRadar',
+      'renderHelpOverlay',
+      'renderCursor',
+    ]) {
+      (renderer as any)[method] = vi.fn();
+    }
+    (renderer as any).renderMinimap = vi.fn(() => order.push('radar'));
+    (renderer as any).renderSidebarButtonRow = vi.fn(() => order.push('buttons'));
+    (renderer as any).renderVerticalPowerBar = vi.fn(() => order.push('power'));
+
+    const assets = {
+      getTheatrePalette: () => [[0, 0, 0]],
+      hasTileset: () => false,
+      getSheet: (name: string) => {
+        if (['side1na', 'side2na', 'side3na'].includes(name)) {
+          return { meta: { frameWidth: 160, frameHeight: 100, frameCount: 2 } };
+        }
+        return null;
+      },
+      drawFrame: vi.fn(),
+    };
+
+    renderer.render({} as any, {} as any, [], [], assets as any, {} as any, new Set(), [], 0);
+    order.length = 0;
+
+    renderer.sidebarPowerProduced = 100;
+    renderer.updatePowerAnimation();
+    renderer.render({} as any, {} as any, [], [], assets as any, {} as any, new Set(), [], 1);
+
+    expect(order).toEqual(['power', 'radar', 'buttons', 'power']);
+  });
+
+  it('preserves power-over-sidebar chrome across clean redraws', () => {
+    const renderer = new Renderer(mockCanvas());
+    const order: string[] = [];
+    for (const method of [
+      'renderTerrain',
+      'renderDecals',
+      'renderOverlays',
+      'renderGroundLayer',
+      'renderStructures',
+      'renderCrates',
+      'renderCorpses',
+      'renderEntities',
+      'renderTargetLines',
+      'renderWaypoints',
+      'renderEffects',
+      'renderFogOfWar',
+      'renderPlacementGhost',
+      'renderSelectionBox',
+      'renderAttackMoveIndicator',
+      'renderModeLabel',
+      'renderOffscreenIndicators',
+      'renderFullscreenRadar',
+      'renderHelpOverlay',
+      'renderCursor',
+    ]) {
+      (renderer as any)[method] = vi.fn();
+    }
+    (renderer as any).renderMinimap = vi.fn(() => order.push('radar'));
+    (renderer as any).renderSidebarButtonRow = vi.fn(() => order.push('buttons'));
+    (renderer as any).renderVerticalPowerBar = vi.fn(() => order.push('power'));
+
+    const assets = {
+      getTheatrePalette: () => [[0, 0, 0]],
+      hasTileset: () => false,
+      getSheet: (name: string) => {
+        if (['side1na', 'side2na', 'side3na'].includes(name)) {
+          return { meta: { frameWidth: 160, frameHeight: 100, frameCount: 2 } };
+        }
+        return null;
+      },
+      drawFrame: vi.fn(),
+    };
+
+    renderer.render({} as any, {} as any, [], [], assets as any, {} as any, new Set(), [], 0);
+    renderer.sidebarPowerProduced = 100;
+    renderer.updatePowerAnimation();
+    renderer.render({} as any, {} as any, [], [], assets as any, {} as any, new Set(), [], 1);
+    order.length = 0;
+
+    renderer.render({} as any, {} as any, [], [], assets as any, {} as any, new Set(), [], 2);
+
+    expect(order).toEqual(['power', 'radar', 'buttons', 'power']);
+  });
+
+  it('advances cached chrome state on skipped batch render ticks', () => {
+    const renderer = new Renderer(mockCanvas());
+    const order: string[] = [];
+    for (const method of [
+      'renderTerrain',
+      'renderDecals',
+      'renderOverlays',
+      'renderGroundLayer',
+      'renderStructures',
+      'renderCrates',
+      'renderCorpses',
+      'renderEntities',
+      'renderTargetLines',
+      'renderWaypoints',
+      'renderEffects',
+      'renderFogOfWar',
+      'renderPlacementGhost',
+      'renderSelectionBox',
+      'renderAttackMoveIndicator',
+      'renderModeLabel',
+      'renderOffscreenIndicators',
+      'renderFullscreenRadar',
+      'renderHelpOverlay',
+      'renderCursor',
+    ]) {
+      (renderer as any)[method] = vi.fn();
+    }
+    (renderer as any).renderMinimap = vi.fn(() => order.push('radar'));
+    (renderer as any).renderSidebarButtonRow = vi.fn(() => order.push('buttons'));
+    (renderer as any).renderVerticalPowerBar = vi.fn(() => order.push('power'));
+
+    const assets = {
+      getTheatrePalette: () => [[0, 0, 0]],
+      hasTileset: () => false,
+      getSheet: (name: string) => {
+        if (['side1na', 'side2na', 'side3na'].includes(name)) {
+          return { meta: { frameWidth: 160, frameHeight: 100, frameCount: 2 } };
+        }
+        return null;
+      },
+      drawFrame: vi.fn(),
+    };
+
+    renderer.render({} as any, {} as any, [], [], assets as any, {} as any, new Set(), [], 0);
+
+    renderer.sidebarPowerProduced = 100;
+    renderer.updatePowerAnimation();
+    renderer.advanceSidebarChromeCache();
+
+    renderer.sidebarItems = [{ type: 'PROC' } as any];
+    renderer.syncSidebarChromeItems();
+    renderer.updatePowerAnimation();
+    renderer.advanceSidebarChromeCache();
+
+    renderer.updatePowerAnimation();
+    renderer.advanceSidebarChromeCache();
+    order.length = 0;
+
+    renderer.render({} as any, {} as any, [], [], assets as any, {} as any, new Set(), [], 4);
+
+    expect(order).toEqual(['power', 'radar', 'buttons', 'power']);
+  });
+
+  it('lets dirty sidebar chrome cover the power edge even when power is also dirty', () => {
+    const renderer = new Renderer(mockCanvas());
+    const order: string[] = [];
+    for (const method of [
+      'renderTerrain',
+      'renderDecals',
+      'renderOverlays',
+      'renderGroundLayer',
+      'renderStructures',
+      'renderCrates',
+      'renderCorpses',
+      'renderEntities',
+      'renderTargetLines',
+      'renderWaypoints',
+      'renderEffects',
+      'renderFogOfWar',
+      'renderPlacementGhost',
+      'renderSelectionBox',
+      'renderAttackMoveIndicator',
+      'renderModeLabel',
+      'renderOffscreenIndicators',
+      'renderFullscreenRadar',
+      'renderHelpOverlay',
+      'renderCursor',
+    ]) {
+      (renderer as any)[method] = vi.fn();
+    }
+    (renderer as any).renderMinimap = vi.fn(() => order.push('radar'));
+    (renderer as any).renderSidebarButtonRow = vi.fn(() => order.push('buttons'));
+    (renderer as any).renderVerticalPowerBar = vi.fn(() => order.push('power'));
+
+    const assets = {
+      getTheatrePalette: () => [[0, 0, 0]],
+      hasTileset: () => false,
+      getSheet: (name: string) => {
+        if (['side1na', 'side2na', 'side3na'].includes(name)) {
+          return { meta: { frameWidth: 160, frameHeight: 100, frameCount: 2 } };
+        }
+        return null;
+      },
+      drawFrame: vi.fn(),
+    };
+
+    renderer.render({} as any, {} as any, [], [], assets as any, {} as any, new Set(), [], 0);
+    order.length = 0;
+
+    renderer.sidebarPowerProduced = 100;
+    renderer.updatePowerAnimation();
+    renderer.sidebarItems = [{ type: 'PROC' } as any];
+    renderer.render({} as any, {} as any, [], [], assets as any, {} as any, new Set(), [], 1);
+
+    expect(order).toEqual(['power', 'radar', 'buttons']);
   });
 
   it('does not redraw inert zero-power chrome after the sidebar buttons', () => {
@@ -729,6 +1152,11 @@ describe('sidebar production visuals', () => {
     vi.stubGlobal('window', {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
+    });
+    vi.stubGlobal('Audio', class {
+      src = '';
+      preload = '';
+      addEventListener = vi.fn();
     });
     const game = new Game(mockCanvas());
     game.playerHouse = House.Greece;

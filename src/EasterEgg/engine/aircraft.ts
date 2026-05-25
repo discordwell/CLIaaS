@@ -141,6 +141,8 @@ export interface AircraftContext {
   reserveAnimSlot?: () => boolean;
   /** C++ TeamClass::Remove path used when loaner aircraft break off to retreat. */
   removeFromTeamForRetreat?: (entity: Entity) => void;
+  /** C++ FootClass::Unlimbo -> Revealed(PlayerPtr) -> Look(false). */
+  runMobileLookForPlayer?: (entity: Entity, incremental?: boolean) => void;
 }
 
 // ── Pure Functions ─────────────────────────────────────────────────────────────
@@ -330,6 +332,21 @@ function setDesiredAircraftFacing256(entity: Entity, dir256: number): void {
     entity.desiredFacing256 = dir;
     entity.desiredFacing = Math.round(dir / 32) & 7;
   }
+}
+
+function copyAircraftSecondaryFacingToPrimary(entity: Entity): void {
+  const current = entity.turretFacing256 >= 0
+    ? entity.turretFacing256 & 0xff
+    : (entity.turretFacing * 32) & 0xff;
+  const desired = entity.desiredTurretFacing256 >= 0
+    ? entity.desiredTurretFacing256 & 0xff
+    : current;
+  entity.facing256 = current;
+  entity.desiredFacing256 = desired;
+  entity.facing = dir256ToFacing8(current);
+  entity.desiredFacing = dir256ToFacing8(desired);
+  entity.bodyFacing256 = current;
+  entity.bodyFacing32 = dir256ToFacing32(current);
 }
 
 function fixedWingTargetLeptons(targetPos: WorldPos): { lx: number; ly: number } {
@@ -1549,6 +1566,7 @@ function paradropOnePassenger(ctx: AircraftContext, entity: Entity): boolean {
   passenger.logicIndexHint = ctx.logicIndexHintForNewObject?.();
   ctx.entities.push(passenger);
   ctx.entityById.set(passenger.id, passenger);
+  ctx.runMobileLookForPlayer?.(passenger, false);
   // C++ ObjectClass::Paradrop (object.cpp:1853-1866):
   // Height = FLIGHT_LEVEL; IsFalling = true; attach parachute anim.
   startParadropFall(ctx, passenger);
@@ -1825,6 +1843,12 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
       // C++ Landing_Takeoff_AI stores exact Height in leptons and derives the
       // visible offset with rounded Lepton_To_Pixel.
       ensureAircraftHeight(entity);
+      // C++ AircraftClass::Process_Take_Off height 0 case copies
+      // PrimaryFacing = SecondaryFacing before Landing_Takeoff_AI raises
+      // Height. This matters for transports that landed facing Pose_Dir().
+      if (entity.isHelicopter && entity.aircraftHeightLeptons === 0) {
+        copyAircraftSecondaryFacingToPrimary(entity);
+      }
       setAircraftHeight(entity, entity.aircraftHeightLeptons + AIRCRAFT_HEIGHT_STEP_LEPTONS);
       entity.animState = AnimState.WALK;
       // Undock from pad
@@ -1953,6 +1977,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
             passenger.logicIndexHint = ctx.logicIndexHintForNewObject?.();
             ctx.entities.push(passenger);
             ctx.entityById.set(passenger.id, passenger);
+            ctx.runMobileLookForPlayer?.(passenger, false);
             // C++ ObjectClass::Paradrop (object.cpp:1853-1866):
             //   Height = FLIGHT_LEVEL; IsFalling = true; attach parachute anim.
             // C++ TechnoClass::AI (techno.cpp:2346) returns early for non-aircraft
@@ -2386,6 +2411,7 @@ export function updateAircraft(ctx: AircraftContext, entity: Entity): boolean {
         passenger.inLimbo = false;
         ctx.entities.push(passenger);
         ctx.entityById.set(passenger.id, passenger);
+        ctx.runMobileLookForPlayer?.(passenger, false);
       }
       if (entity.passengers.length === 0) {
         // All passengers unloaded — enter idle or retreat

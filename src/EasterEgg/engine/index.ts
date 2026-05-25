@@ -12,7 +12,7 @@ import {
 		  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell, pixelToLepton, leptonToPixel, leptonDist, cellDist, radiusCellOffsets, directionToLeptons, directionToLeptons256, cellTargetToLepton, DIR_DX, DIR_DY, COS_TABLE_256, SIN_TABLE_256,
 	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex, EXPLOSION_FRAMES,
   MISSION_CONTROL,
-  type ProductionItem, CursorType, type StripType, getStripSide, getFactoryType,
+  type ProductionItem, type SidebarItem, CursorType, type StripType, getStripSide, getFactoryType, isSidebarSpecialItem,
   type Faction, HOUSE_FACTION, COUNTRY_BONUSES, ANT_HOUSES,
   calcProjectileTravelFrames, modifyDamage,
   SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState,
@@ -25,6 +25,11 @@ import {
   TERRAIN_SPEED,
   CPP_CORPSE_FRAME_COUNT, CPP_CORPSE_FRAME_TICKS, cppCorpseAnimForInfantryDeath,
 } from './types';
+import {
+  buildCppSidebarCandidates,
+  getPlayerSidebarSpecialItems,
+  reconcileCppSidebarItems,
+} from './sidebar';
 // NOTE: For server-side code that needs rules.ini-derived faction data,
 // import from './rulesIniPipeline' instead of using PRODUCTION_ITEMS directly.
 import { AssetManager, getSharedAssets } from './assets';
@@ -53,6 +58,7 @@ import {
   createRadarVisualState,
   isRadarActive,
   isRadarExisting,
+  isRadarZoomableForMap,
   radarDisplayFrame,
   updateRadarAvailability,
   type RadarVisualState,
@@ -104,6 +110,7 @@ const DIR_NW = 224;
 const REPAIR_RATE_TICKS = 14;
 const CONDITION_YELLOW_RAW = Math.floor(CONDITION_YELLOW * 256);
 const CXX_ICON_PIXEL_W = CELL_SIZE;
+const RADAR_JAM_RADIUS_LEPTONS = 15 * LEPTON_SIZE;
 
 const CXX_GIGUNDO_UNIT_TYPES = new Set<UnitType>([
   UnitType.V_V2RL,
@@ -638,6 +645,7 @@ export class Game {
   sidebarScroll = 0; // scroll offset for sidebar items
   stripScrollPositions: Record<StripType, number> = { left: 0, right: 0 };
   private cachedAvailableItems: ProductionItem[] | null = null;
+  private sidebarItems: SidebarItem[] = [];
   /** Rally points: produced units auto-move here (per factory type) */
   private rallyPoints = new Map<string, WorldPos>(); // factory type → world position
   /** Deferred transport load removals (entity IDs to remove from entities after iteration) */
@@ -660,6 +668,8 @@ export class Game {
   playerHouse: House = House.Spain;
   playerFaction: Faction = 'allied';
   playerTechLevel = 10; // default high for skirmish; scenario INI overrides
+  private isNoSpyPlane = false;
+  private airstripSpecialTechLevels = { spyPlane: 5, paraBomb: 8, paraInfantry: 5 };
 
   // Difficulty
   difficulty: Difficulty = 'normal';
@@ -756,7 +766,10 @@ export class Game {
   // houseIdx (HOUSE_TO_INDEX) → set of structure types that house has built.
   private builtStructureTypesByHouse = new Map<number, Set<string>>();
   /** EVA text message queue — displayed by MessageListClass-equivalent renderer */
-  private evaMessages: { text: string; tick: number }[] = [];
+  private evaMessages: { text: string; tick: number; systemTick?: number }[] = [];
+  /** C++ MessageListClass timeouts use TickCount/SystemTimerClass, not logic Frame. */
+  private messageSystemTick = 0;
+  private messageSystemRemainderMs = 0;
   /** Count of units that have left the map (for TEVENT_LEAVES_MAP) */
   private unitsLeftMap = 0;
   /** TeamType indices for teams that emptied by leaving the map. */
@@ -828,6 +841,7 @@ export class Game {
   // driven only by explicit step() calls, like the C++ agent harness.
   comparisonMode = false;
   private radarVisual: RadarVisualState = createRadarVisualState();
+  private radarJammed = false;
   /** When true, fog of war is disabled (all cells visible) */
   fogDisabled = false;
   /** C++ RulesClass::IsAllyReveal after scenario [General] overrides. */
@@ -935,6 +949,8 @@ export class Game {
       movementSpeed: (e) => this.movementSpeed(e),
       isDiscoveredByPlayer: (e) => e.house === this.playerHouse || this.discoveredEntityIds.has(e.id),
       isRevealedToHouse: (cx, cy, hi) => this.isRevealedToHouse(cx, cy, hi),
+      markCompleteRedrawForTacticalLine: (source, dest) => this.markCompleteRedrawForTacticalLine(source, dest),
+      markCloakRedraw: (entity) => this.markCompleteRedrawForCloakChange(entity),
       stopInfantryDriver: (e) => this.stopInfantryDriver(e),
       infantryCanEnterCell: (e, cx, cy, facing) => this.infantryCanEnterCell(e, cx, cy, facing),
       clearInfantryOccupyBit: (cellIdx, subCell) => this.clearInfantryOccupyBit(cellIdx, subCell),
@@ -1635,6 +1651,9 @@ export class Game {
       playerHouse: this.playerHouse,
       powerProduced: this.powerProduced,
       powerConsumed: this.powerConsumed,
+      houseTechLevel: (house) => this.houseTechLevels.get(house) ?? this.defaultScenarioTechLevel(),
+      airstripSpecialTechLevels: this.airstripSpecialTechLevels,
+      isNoSpyPlane: this.isNoSpyPlane,
       killCount: this.killCount,
       lossCount: this.lossCount,
       map: this.map,
@@ -1654,6 +1673,7 @@ export class Game {
 	      addEntity: (e) => { this.markEntityCellOccupierDown(e); this.entities.push(e); this.entityById.set(e.id, e); },
       aiIQ: (h) => this.aiStates.get(h)?.iq ?? 0,
       getWarheadMult: (w, a) => this.getWarheadMult(w as WarheadType, a as ArmorType),
+      markCloakRedraw: (entity) => this.markCompleteRedrawForCloakChange(entity),
       cameraX: this.camera.x,
       cameraY: this.camera.y,
       cameraViewWidth: this.camera.viewWidth,
@@ -1805,6 +1825,7 @@ export class Game {
       releaseLogicSlotForEntity: (e) => this.releaseCppLogicSlotForEntity(e),
       reserveAnimSlot: () => this.reserveCppAnimSlot(),
       removeFromTeamForRetreat: (e) => this.removeFromTeamForRetreat(e),
+      runMobileLookForPlayer: (e, incremental) => this.runMobileLookForPlayer(e, incremental),
     };
   }
 
@@ -1812,7 +1833,8 @@ export class Game {
     let produced = 0;
     let consumed = 0;
     for (const s of this.structures) {
-      if (!s.alive || s.sellProgress !== undefined || s.house !== house) continue;
+      const inHousePower = s.alive || (!s.debrisDropped && s.debrisCountdown !== undefined);
+      if (!inHousePower || s.sellProgress !== undefined || s.house !== house) continue;
       const power = structurePowerContribution(s);
       produced += power.produced;
       consumed += power.consumed;
@@ -2021,6 +2043,8 @@ export class Game {
       spyInfiltrate: (s, st) => this.spyInfiltrate(s, st),
       minimapAlert: (cx, cy) => this.minimapAlert(cx, cy),
       isRevealedToHouse: (cx, cy, hi) => this.isRevealedToHouse(cx, cy, hi),
+      markCompleteRedrawForTacticalLine: (source, dest) => this.markCompleteRedrawForTacticalLine(source, dest),
+      markCloakRedraw: (entity) => this.markCompleteRedrawForCloakChange(entity),
     };
   }
 
@@ -2147,6 +2171,7 @@ export class Game {
     this.stopped = false;
     this.tick = 0;
     this.radarVisual = createRadarVisualState();
+    this.radarJammed = false;
     this.scenarioId = scenarioId;
     this.difficulty = difficulty;
     this.onStateChange?.('loading');
@@ -2195,6 +2220,8 @@ export class Game {
     this.playerHouse = scenario.playerHouse;
     this.playerFaction = HOUSE_FACTION[this.playerHouse] ?? 'allied';
     this.playerTechLevel = scenario.playerTechLevel ?? 10;
+    this.isNoSpyPlane = scenario.isNoSpyPlane ?? false;
+    this.airstripSpecialTechLevels = scenario.airstripSpecialTechLevels ?? { spyPlane: 5, paraBomb: 8, paraInfantry: 5 };
     this.initializeScenarioPowerDrain();
     // Calculate initial silo capacity (do NOT cap starting credits — C++ parity)
     // C++ house.cpp:7146-7147: starting credits go into the uncapped Credits pool,
@@ -2222,6 +2249,7 @@ export class Game {
     this.productionQueue.clear();
     this.pendingPlacement = null;
     this.superweapons.clear();
+    this.sidebarItems = [];
     this.superweaponCursorMode = null;
     this.superweaponCursorHouse = null;
     this.chronoTankTargeting = null;
@@ -2288,6 +2316,8 @@ export class Game {
     this.builtStructureTypes.clear();
     this.builtStructureTypesByHouse.clear();
     this.evaMessages = [];
+    this.messageSystemTick = 0;
+    this.messageSystemRemainderMs = 0;
     this.unitsLeftMap = 0;
     this.leftMapTeamTypes.clear();
     this.civiliansEvacuated = 0;
@@ -2625,14 +2655,23 @@ export class Game {
     }
 
     for (let i = 0; i < n; i++) {
+      if (this.state !== 'playing') break;
       // C++ Main_Loop renders the current HidPage before Logic.AI advances the
       // frame. Agent screenshots read that back buffer after agent_step(), so
       // the visible frame is the state before the final stepped logic tick.
       if (this.tick > 0) this.advanceCreditDisplay();
       this.advanceSidebarInputAI();
-      if (i === n - 1) {
+      // When a deferred win/loss is pending, the batch may stop before its
+      // requested final tick. Keep refreshing the pre-Logic frame during that
+      // short terminal countdown so the agent canvas matches C++ HidPage rather
+      // than an older chunk boundary.
+      const terminalStatePending = this.isToWin || this.isToLose || this.borrowedTime > 0;
+      const willRender = i === n - 1 || terminalStatePending;
+      if (willRender) {
         this.renderer.interpolationAlpha = 1;
         this.render();
+      } else {
+        this.renderer.advanceSidebarChromeCache();
       }
       // C++ agent_step breaks on do_tick() returning true (game over).
       // Match this: stop stepping when game enters won/lost state.
@@ -2666,8 +2705,60 @@ export class Game {
     // are current in the pre-Logic frame captured by the agent harness.
     this.renderer.sidebarPowerProduced = this.powerProduced;
     this.renderer.sidebarPowerConsumed = this.powerConsumed;
+    this.renderer.syncSidebarChromeItems(this.getSidebarItems());
     this.renderer.updatePowerAnimation();
-    advanceRadarAnimation(this.radarVisual);
+    advanceRadarAnimation(this.radarVisual, this.radarJammed);
+  }
+
+  private markCompleteRedrawForTacticalLine(source: WorldPos, dest: WorldPos): void {
+    const x1 = source.x;
+    const y1 = source.y;
+    const x2 = dest.x;
+    const y2 = dest.y;
+    if (![x1, y1, x2, y2].every(Number.isFinite)) return;
+
+    // C++ DisplayClass::Push_Onto_TacMap only rejects line effects when both
+    // endpoints are outside the same tactical-map side.
+    const left = this.camera.x;
+    const right = this.camera.x + this.camera.viewWidth;
+    const top = this.camera.y;
+    const bottom = this.camera.y + this.camera.viewHeight;
+    if (x1 < left && x2 < left) return;
+    if (x1 > right && x2 > right) return;
+    if (y1 < top && y2 < top) return;
+    if (y1 > bottom && y2 > bottom) return;
+    this.renderer.markSidebarChromeDirty(true);
+  }
+
+  private markCompleteRedrawForCloakChange(entity: Entity): void {
+    if (!entity.stats.isCloakable) return;
+    this.renderer.markSidebarChromeDirty(true);
+  }
+
+  private advanceMessageSystemTimer(elapsedMs: number): void {
+    // C++ Session.Messages expires against TickCount, a 60 Hz system timer.
+    // Manual agent steps intentionally do not advance this; they mirror the C++
+    // harness' synchronous frame stepping where wall-clock timers barely move.
+    this.messageSystemRemainderMs += Math.max(0, elapsedMs);
+    const wholeTicks = Math.floor(this.messageSystemRemainderMs * 60 / 1000);
+    if (wholeTicks <= 0) return;
+    this.messageSystemTick += wholeTicks;
+    this.messageSystemRemainderMs -= wholeTicks * (1000 / 60);
+  }
+
+  private normalizeEvaMessageSystemTicks(): void {
+    for (const msg of this.evaMessages) {
+      msg.systemTick ??= this.messageSystemTick;
+    }
+  }
+
+  private isEvaMessageActive(msg: { systemTick?: number }): boolean {
+    const startSystemTick = Math.floor(msg.systemTick ?? this.messageSystemTick);
+    return Math.floor(this.messageSystemTick) <= startSystemTick + RA_MESSAGE_DELAY_TICKS;
+  }
+
+  private queueEvaMessage(text: string): void {
+    this.evaMessages.push({ text, tick: this.tick, systemTick: this.messageSystemTick });
   }
 
   /** Disable fog of war (reveal entire map) */
@@ -2708,6 +2799,7 @@ export class Game {
     const now = performance.now();
     const dt = now - this.lastTime;
     this.lastTime = now;
+    this.advanceMessageSystemTimer(dt);
     this.accumulator += Math.min(dt * this.turboMultiplier, 200 * this.turboMultiplier);
 
     // Fixed timestep updates (cap ticks per frame to avoid blocking)
@@ -2788,9 +2880,11 @@ export class Game {
     // Periodically resume audio context if browser suspended it (e.g. tab blur)
     if (this.tick % 45 === 0) this.audio.resume();
 
-    // C++ MessageListClass keeps trigger messages for Rule.MessageDelay.
+    // C++ MessageListClass keeps trigger messages for Rule.MessageDelay,
+    // expiring them against TickCount/SystemTimerClass rather than logic Frame.
     if (this.tick % 75 === 0) {
-      this.evaMessages = this.evaMessages.filter(m => this.tick - m.tick < RA_MESSAGE_DELAY_TICKS);
+      this.normalizeEvaMessageSystemTicks();
+      this.evaMessages = this.evaMessages.filter(m => this.isEvaMessageActive(m));
     }
 
     // Cache available items once per tick (not every render frame)
@@ -3939,16 +4033,14 @@ export class Game {
     }
 
     // Calculate power balance
-    const powerGrid = _calculatePowerGrid(
-      this.structures,
-      this.playerHouse,
-      (a, b) => this.isAllied(a, b),
-    );
+    const powerGrid = this._housePowerGrid(this.playerHouse);
     this.powerProduced = powerGrid.produced;
     this.powerConsumed = powerGrid.consumed;
     this.renderer.sidebarPowerProduced = this.powerProduced;
     this.renderer.sidebarPowerConsumed = this.powerConsumed;
+    this.updateRadarFacilityJamming();
     this.updatePlayerRadarAvailability();
+    this.updatePlayerRadarJamming();
 
     // Low power warning (every 10 seconds when power demand exceeds supply)
     if (this.powerConsumed > this.powerProduced && this.powerProduced > 0 &&
@@ -4284,8 +4376,8 @@ export class Game {
       else targetStrip = mouseX < sidebarX + Game.SIDEBAR_W / 2 ? 'left' : 'right';
 
       if (targetStrip) {
-        const items = this.cachedAvailableItems ?? this.getAvailableItems();
-        const filteredItems = items.filter(it => getStripSide(it) === targetStrip);
+          const items = this.getSidebarItems();
+          const filteredItems = items.filter(it => getStripSide(it) === targetStrip);
         const rowH = Renderer.CAMEO_H + Renderer.CAMEO_GAP;
         const visibleH = this.renderer.getStripBounds(targetStrip).h;
         const maxScroll = Math.max(0, filteredItems.length * rowH - visibleH);
@@ -4851,10 +4943,8 @@ export class Game {
 
       // Cancel production from sidebar via right-click
       if (rightClick.x >= this.canvas.width - Game.SIDEBAR_W) {
-        const items = this.getAvailableItems();
-        const itemIdx = this.sidebarItemAt(rightClick.x, rightClick.y);
-        if (itemIdx >= 0 && itemIdx < items.length) {
-          const item = items[itemIdx];
+        const item = this.sidebarItemAt(rightClick.x, rightClick.y);
+        if (item && !isSidebarSpecialItem(item)) {
           const factoryKey = getFactoryType(item);
           this.cancelProduction(factoryKey);
         }
@@ -5114,10 +5204,60 @@ export class Game {
     }
   }
 
-  /** Hit-test a sidebar click against the dual production strips.
-   *  Returns the index in the full items array, or -1 if no hit. */
-  private sidebarItemAt(sx: number, sy: number): number {
-    const items = this.getAvailableItems();
+  private getSidebarItems(): SidebarItem[] {
+    const available = this.cachedAvailableItems ?? this.getAvailableItems();
+    const specials = getPlayerSidebarSpecialItems(
+      this.superweapons,
+      this.playerHouse,
+      (a, b) => this.isAllied(a, b),
+    );
+    if (this.tick === 0 && this.superweapons.size === 0) {
+      // C++ sidebar additions come from HouseClass::AI, not drawing. A pre-Logic
+      // render can preview current buildables, but it must not lock strip order
+      // before Super_Weapon_Handler gets the first chance to add airstrip specials.
+      return buildCppSidebarCandidates(available, specials);
+    }
+    this.sidebarItems = reconcileCppSidebarItems(this.sidebarItems, available, specials);
+    return this.sidebarItems;
+  }
+
+  private isNoYakMig(house: House): boolean {
+    const airfields = this.structures.filter(s =>
+      s.alive &&
+      s.house === house &&
+      s.type === 'AFLD' &&
+      s.sellProgress === undefined &&
+      (s.buildProgress === undefined || s.buildProgress >= 1)
+    ).length;
+    if (airfields <= 0) return false;
+
+    let quantity = this.entities.filter(e =>
+      e.alive &&
+      e.house === house &&
+      (e.type === 'MIG' || e.type === 'YAK')
+    ).length;
+
+    const aircraftFactory = this.productionQueue.get('aircraft');
+    if (aircraftFactory && (aircraftFactory.item.type === 'MIG' || aircraftFactory.item.type === 'YAK')) {
+      quantity -= 1;
+    }
+
+    return quantity >= airfields;
+  }
+
+  private isProductionHackPrevented(item: ProductionItem): boolean {
+    // C++ HouseClass::Is_Hack_Prevented only blocks MIG/YAK when all airfields
+    // are occupied by fixed-wing aircraft.
+    return (item.type === 'MIG' || item.type === 'YAK') && this.isNoYakMig(this.playerHouse);
+  }
+
+  private getSidebarHackPreventedTypes(): Set<string> {
+    return this.isNoYakMig(this.playerHouse) ? new Set(['MIG', 'YAK']) : new Set();
+  }
+
+  /** Hit-test a sidebar click against the dual production strips. */
+  private sidebarItemAt(sx: number, sy: number): SidebarItem | null {
+    const items = this.getSidebarItems();
 
     // Determine which strip was clicked
     let strip: StripType | null = null;
@@ -5125,7 +5265,7 @@ export class Game {
     const rightBounds = this.renderer.getStripBounds('right');
     if (sx >= leftBounds.x && sx < leftBounds.x + leftBounds.w) strip = 'left';
     else if (sx >= rightBounds.x && sx < rightBounds.x + rightBounds.w) strip = 'right';
-    if (!strip) return -1;
+    if (!strip) return null;
 
     const filteredItems = items.filter(it => getStripSide(it) === strip);
     const bounds = strip === 'left' ? leftBounds : rightBounds;
@@ -5133,11 +5273,10 @@ export class Game {
     const rowH = Renderer.CAMEO_H + Renderer.CAMEO_GAP;
 
     const relY = sy - bounds.y + scroll;
-    if (relY < 0) return -1;
+    if (relY < 0) return null;
     const idx = Math.floor(relY / rowH);
-    if (idx < 0 || idx >= filteredItems.length) return -1;
-    const targetItem = filteredItems[idx];
-    return items.indexOf(targetItem);
+    if (idx < 0 || idx >= filteredItems.length) return null;
+    return filteredItems[idx];
   }
 
   /** Handle clicks on the sidebar production panel */
@@ -5169,10 +5308,6 @@ export class Game {
       return;
     }
 
-    // Check superweapon button clicks (at bottom of sidebar)
-    const swClick = this.handleSuperweaponButtonClick(sy);
-    if (swClick) return;
-
     // Scroll arrow click detection — C++ layout: both buttons side-by-side below strip
     for (const strip of ['left', 'right'] as const) {
       const ab = this.renderer.getScrollArrowBounds(strip);
@@ -5184,7 +5319,7 @@ export class Game {
       }
       // Down button (right)
       if (sx >= ab.downX && sx < ab.downX + ab.downW && sy >= ab.downY && sy < ab.downY + ab.downH) {
-        const items = this.cachedAvailableItems ?? this.getAvailableItems();
+        const items = this.getSidebarItems();
         const filteredItems = items.filter(it => getStripSide(it) === strip);
         const visibleH = this.renderer.getStripBounds(strip).h;
         const maxScroll = Math.max(0, filteredItems.length * rowH - visibleH);
@@ -5193,11 +5328,19 @@ export class Game {
       }
     }
 
-    // Production item click (dual strips)
-    const items = this.getAvailableItems();
-    const itemIdx = this.sidebarItemAt(sx, sy);
-    if (itemIdx < 0 || itemIdx >= items.length) return;
-    const item = items[itemIdx];
+    // Production/special item click (dual strips)
+    const item = this.sidebarItemAt(sx, sy);
+    if (!item) return;
+    if (isSidebarSpecialItem(item)) {
+      const state = this.superweapons.get(`${item.specialHouse}:${item.specialType}`);
+      const def = SUPERWEAPON_DEFS[item.specialType];
+      if (state?.ready && def.needsTarget) {
+        this.superweaponCursorMode = item.specialType;
+        this.superweaponCursorHouse = item.specialHouse;
+      }
+      return;
+    }
+    if (this.isProductionHackPrevented(item)) return;
     this.startProduction(item);
   }
 
@@ -12732,6 +12875,7 @@ export class Game {
           // from its team while preserving NavCom/path.
           entity.cloakState = CloakState.CLOAKED;
           entity.cloakTimer = 0;
+          this.markCompleteRedrawForCloakChange(entity);
           this.detachEntityFromTargeting(entity, false);
         } else {
           // C++ techno.cpp:2488-2503 — while CLOAKING, low-health units
@@ -12789,6 +12933,7 @@ export class Game {
         // Cloak to CLOAKING. This clears team Target overrides and object
         // TarCom refs to the submarine while preserving live bullet TarCom.
         this.detachEntityFromTargeting(entity, false);
+        this.markCompleteRedrawForCloakChange(entity);
         entity.cloakState = CloakState.CLOAKING;
         entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
         break;
@@ -13194,16 +13339,19 @@ export class Game {
 
   /** Fire weapon at entity target — delegates to combat.ts */
   private fireWeaponAt(attacker: Entity, target: Entity, weapon: WeaponStats): void {
+    this.revealShooterFromFire(attacker);
     this._runCombat(ctx => _fireWeaponAt(ctx, attacker, target, weapon));
   }
 
   /** Fire weapon at coordinate target — delegates to combat.ts */
   private fireWeaponAtCoord(attacker: Entity, weapon: WeaponStats, impact: WorldPos): void {
+    this.revealShooterFromFire(attacker);
     this._runCombat(ctx => _fireWeaponAtCoord(ctx, attacker, weapon, impact));
   }
 
   /** Fire weapon at structure target — delegates to combat.ts */
   private fireWeaponAtStructure(attacker: Entity, s: MapStructure, weapon: WeaponStats): void {
+    this.revealShooterFromFire(attacker);
     this._runCombat(ctx => _fireWeaponAtStructure(ctx, attacker, s, weapon));
   }
 
@@ -14499,17 +14647,16 @@ export class Game {
       if (entity.house === this.playerHouse) continue;
       if (this.discoveredEntityIds.has(entity.id)) continue; // already discovered
 
-      // C++ parity: TechnoClass::Per_Cell_Process(PCP_END) uses the live
-      // Map[cell].IsVisible flag. In TS that is valid only when source fog is
-      // preserved; fogDisabled=true artificially paints vis=2 and must not
-      // trigger Revealed().
-      //
-      // Movement also reveals through CellClass::Occupy_Down / Overlap_Down
-      // when the object is marked into cells that PlayerPtr already mapped.
-      // SCU02EA's Greek E1 at (74,64) is discovered this way: its overlap
-      // rectangle touches visible cells before its center cell does.
-      if (!this.isCellCurrentlyVisibleForDiscovery(entity.cell.cx, entity.cell.cy) &&
-          !this.isMappedPlacementRevealCandidate(entity)) continue;
+      // C++ discovery is event-driven: TechnoClass::Per_Cell_Process(PCP_END)
+      // sees Map[cell].IsVisible for ordinary ground technos, and
+      // CellClass::Occupy_Down / Overlap_Down reveal objects as they are
+      // marked into already mapped cells. Airborne aircraft are not ground
+      // Cell_Techno() occupants, so SCG04 YAKs can be visible/mapped while
+      // remaining !IsDiscoveredByPlayer until another C++ reveal path applies.
+      const visibleGroundDiscovery =
+        !entity.isAirUnit &&
+        this.isCellCurrentlyVisibleForDiscovery(entity.cell.cx, entity.cell.cy);
+      if (!visibleGroundDiscovery && !this.isMappedPlacementRevealCandidate(entity)) continue;
 
       this.markEntityDiscoveredByPlayer(entity);
     }
@@ -15273,17 +15420,29 @@ export class Game {
     if (result.dropZone !== undefined) {
       const wp = this.waypoints.get(result.dropZone);
       if (wp) {
-        // C++ AnimClass::Unlimbo for ANIM_LZ_SMOKE: DropZoneRadius=4 cells.
-        this.revealSightFromPlayer(wp.cx, wp.cy, 4);
         const world = { x: wp.cx * CELL_SIZE + CELL_SIZE / 2, y: wp.cy * CELL_SIZE + CELL_SIZE / 2 };
-        this.effects.push({
-          type: 'marker', x: world.x, y: world.y,
-          frame: 0, maxFrames: 90, size: 6,
-          cppLogicSlot: true,
-          logicIndexHint: this.logicIndexHintForNewObject(),
-        });
-        this.minimapAlert(wp.cx, wp.cy);
-        this.audio.play('eva_reinforcements');
+        const spawned = spawnLogicAnim(
+          this.logicAnims,
+          this.effects,
+          'lz_smoke',
+          world.x,
+          world.y,
+          1,
+          true,
+          this.logicAnimsProcessedThisTick,
+          this.logicIndexHintForNewObject(),
+          () => this.logicIndexHintForNewObject(),
+          () => this.reserveCppAnimSlot(),
+          false,
+          undefined,
+          0,
+          undefined,
+          this.tick,
+        );
+        if (spawned) {
+          // C++ AnimClass constructor reveals from ANIM_LZ_SMOKE after Unlimbo.
+          this.revealSightFromPlayer(wp.cx, wp.cy, 4);
+        }
       }
     }
     if (result.creepShadow) {
@@ -15899,14 +16058,14 @@ export class Game {
   private showTutorialTextMessage(id: number): void {
     const text = getTutorialText(id);
     if (!text) return;
-    this.evaMessages.push({ text, tick: this.tick });
+    this.queueEvaMessage(text);
     this.audio.play('eva_acknowledged');
   }
 
   /** Display a non-trigger UI/EVA text message. Trigger text must use showTutorialTextMessage(). */
   private showEvaMessage(id: number, customText?: string): void {
     if (customText) {
-      this.evaMessages.push({ text: customText, tick: this.tick });
+      this.queueEvaMessage(customText);
       this.audio.play('eva_acknowledged');
       return;
     }
@@ -15995,7 +16154,7 @@ export class Game {
       100: 'Alert! Large ant force approaching.',
     };
     const text = messages[id] ?? `EVA: Message ${id}`;
-    this.evaMessages.push({ text, tick: this.tick });
+    this.queueEvaMessage(text);
     this.audio.play('eva_acknowledged');
   }
 
@@ -16014,7 +16173,7 @@ export class Game {
 
     const ownedByPlayer = entity.house === this.playerHouse;
     const discoveredByPlayer = this.discoveredEntityIds.has(entity.id);
-    const mapped = this.map.getVisibility(entity.cell.cx, entity.cell.cy) > 0;
+    const mapped = this.map.getDisplayVisibility(entity.cell.cx, entity.cell.cy) > 0;
     const shouldReveal =
       (!ownedByPlayer && !discoveredByPlayer) ||
       (!mapped && (!entity.isAirUnit || !ownedByPlayer));
@@ -16037,12 +16196,12 @@ export class Game {
   /** C++ mobile TechnoClass::Look() remapped to PlayerPtr for player-allied houses.
    *  DisplayClass::Map_Cell remaps allied sight to PlayerPtr in normal games, but
    *  only when that mobile object actually runs a PCP_END Look(), not every tick. */
-  private runMobileLookForPlayer(entity: Entity): void {
+  private runMobileLookForPlayer(entity: Entity, incrementalOverride?: boolean): void {
     if (!entity.alive || entity.inLimbo || entity.isAirUnit) return;
     if (entity.house !== this.playerHouse && !this.isAllied(entity.house, this.playerHouse)) return;
     const sight = entity.stats.sight;
     if (!sight || sight > 10) return;
-    const incremental = !entity.isPlanningToLook;
+    const incremental = incrementalOverride ?? !entity.isPlanningToLook;
     this.revealSightFromPlayer(entity.cell.cx, entity.cell.cy, sight, incremental);
     entity.isPlanningToLook = false;
     this.markEntityDiscoveredByPlayer(entity);
@@ -16087,6 +16246,7 @@ export class Game {
 
     const revealEntity = (e: Entity): void => {
       if (!e.alive || e.house === this.playerHouse) return;
+      if (e.isAirUnit) return;
       if (!inSight(e.cell.cx, e.cell.cy)) return;
       if (this.discoveredEntityIds.has(e.id)) return;
 
@@ -16376,6 +16536,47 @@ export class Game {
     });
   }
 
+  private updateRadarFacilityJamming(): void {
+    // C++ BuildingClass::AI checks radar/SAM jamming once per second:
+    // ((*this == STRUCT_RADAR || *this == STRUCT_SAM) && Frame % TICKS_PER_SECOND == 0).
+    if (this.tick % GAME_TICKS_PER_SEC !== 0) return;
+
+    for (const structure of this.structures) {
+      if (!structure.alive || (structure.type !== 'DOME' && structure.type !== 'SAM')) continue;
+      structure.isJammed = false;
+      const center = scenarioStructureCenterLeptons(structure);
+      for (const entity of this.entities) {
+        if (!entity.alive || entity.inLimbo || entity.type !== UnitType.V_MRJ) continue;
+        if (this.isAllied(entity.house, structure.house)) continue;
+        if (leptonDist(center.lx, center.ly, entity.leptonX, entity.leptonY) <= RADAR_JAM_RADIUS_LEPTONS) {
+          structure.isJammed = true;
+          break;
+        }
+      }
+    }
+  }
+
+  private updatePlayerRadarJamming(): void {
+    // C++ HouseClass::AI starts with Map.Is_Radar_Active(), then clears the
+    // jam if GPS is active or any player DOME is not BuildingClass::IsJammed.
+    if (this.gpsActive) {
+      this.radarJammed = false;
+      return;
+    }
+
+    let jammed = isRadarActive(this.radarVisual, false);
+    if (jammed) {
+      for (const structure of this.structures) {
+        if (!structure.alive || structure.house !== this.playerHouse || structure.type !== 'DOME') continue;
+        if (!structure.isJammed) {
+          jammed = false;
+          break;
+        }
+      }
+    }
+    this.radarJammed = jammed;
+  }
+
   /** Calculate total silo storage capacity from alive player structures.
    *  C++ parity: HouseClass::Adjust_Capacity() — rules.ini Storage= per building.
    *  (PROC=2000, SILO=1500 per rules.ini) */
@@ -16420,7 +16621,7 @@ export class Game {
         this.tick - this.lastSiloWarningTick >= 450) {
       this.lastSiloWarningTick = this.tick;
       this.playEva('eva_silos_needed');
-      this.evaMessages.push({ text: 'SILOS NEEDED', tick: this.tick });
+      this.queueEvaMessage('SILOS NEEDED');
     }
     return added;
   }
@@ -17331,7 +17532,7 @@ export class Game {
 
   /** Push an EVA message */
   private pushEva(text: string): void {
-    this.evaMessages.push({ text, tick: this.tick });
+    this.queueEvaMessage(text);
   }
 
   /** Render mission name overlay that fades in during first few seconds */
@@ -17372,14 +17573,19 @@ export class Game {
     this.renderer.sidebarSiloCapacity = this.siloCapacity;
     this.renderer.sidebarPowerProduced = this.powerProduced;
     this.renderer.sidebarPowerConsumed = this.powerConsumed;
-    this.renderer.sidebarItems = this.cachedAvailableItems ?? this.getAvailableItems();
+    this.renderer.sidebarItems = this.getSidebarItems();
     this.renderer.sidebarQueue = this.productionQueue;
+    this.renderer.sidebarHackPreventedTypes = this.getSidebarHackPreventedTypes();
     this.renderer.sidebarW = Game.SIDEBAR_W;
     this.renderer.leftStripScroll = this.stripScrollPositions.left;
     this.renderer.rightStripScroll = this.stripScrollPositions.right;
     this.renderer.doesRadarExist = isRadarExisting(this.radarVisual, this.gpsActive);
     this.renderer.hasRadar = isRadarActive(this.radarVisual, this.gpsActive);
-    this.renderer.radarCoverFrame = radarDisplayFrame(this.radarVisual);
+    const radarZoomable = isRadarZoomableForMap(this.map.boundsW, this.map.boundsH);
+    this.renderer.radarZoomEnabled = (this.radarVisual.isZoomEnabled || this.gpsActive) && radarZoomable;
+    this.renderer.radarZoomPressed = this.renderer.radarZoomEnabled;
+    this.renderer.isRadarJammed = this.radarJammed && !this.gpsActive;
+    this.renderer.radarCoverFrame = radarDisplayFrame(this.radarVisual, this.renderer.isRadarJammed);
     // U6: Pass fullscreen radar state to renderer
     this.renderer.isRadarFullscreen = this.isRadarFullscreen;
     this.renderer.crates = this.crates;
@@ -17400,6 +17606,7 @@ export class Game {
     } else {
       this.renderer.selectedStructure = null;
     }
+    this.normalizeEvaMessageSystemTicks();
     this.renderer.evaMessages = this.evaMessages;
     // Superweapon data for sidebar buttons
     this.renderer.superweapons = this.superweapons;
@@ -17476,7 +17683,7 @@ export class Game {
     this.renderer.gameSpeed = this.gameSpeed;
     // C++ parity: top status bar (OPTIONS | TIME | CREDITS) — TabClass::Draw_It
     this.renderer.renderTopBar(this.tick);
-    this.renderer.renderEvaMessages(this.tick);
+    this.renderer.renderEvaMessages(this.tick, this.messageSystemTick);
     this.renderer.renderGameSpeed();
     this.renderer.missionName = this.missionName;
 
@@ -17835,7 +18042,7 @@ export class Game {
     if (structure.triggerName) this.spiedBuildingTriggers.add(structure.triggerName);
 
     // Step 2: VOX_BUILDING_INFILTRATED (C++ infantry.cpp:653)
-    this.evaMessages.push({ text: 'BUILDING INFILTRATED', tick: this.tick });
+    this.queueEvaMessage('BUILDING INFILTRATED');
 
     // Step 3: Set SpiedBy on the building — ALL buildings unconditionally
     // C++ infantry.cpp:656: tech->SpiedBy |= housespy

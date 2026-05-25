@@ -4,13 +4,13 @@
  * explosions, health bars, selection circles, minimap, UI.
  */
 
-import { CELL_SIZE, GAME_TICKS_PER_SEC, RESFACTOR, LEPTON_SIZE, House, Stance, UnitType, BODY_SHAPE, type ProductionItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, leptonToPixel, type Faction, COS_TABLE_256, SIN_TABLE_256, CPP_CORPSE_FRAME_COUNT, CPP_CORPSE_FRAME_TICKS, cppCorpseAnimForInfantryDeath } from './types';
+import { CELL_SIZE, GAME_TICKS_PER_SEC, RESFACTOR, LEPTON_SIZE, House, Stance, UnitType, BODY_SHAPE, type ProductionItem, type SidebarItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, isSidebarSpecialItem, leptonToPixel, type Faction, COS_TABLE_256, SIN_TABLE_256, CPP_CORPSE_FRAME_COUNT, CPP_CORPSE_FRAME_TICKS, cppCorpseAnimForInfantryDeath, Mission } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type DrawFrameOptions, type SpriteSheet, type TilesetMeta, type TranslucentControl } from './assets';
 import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES, dir256ToFacing8 } from './entity';
-import { GameMap, Terrain, TREE_CENTER_OFFSET, type MapTerrainRadarObject } from './map';
+import { GameMap, Terrain, TREE_CENTER_OFFSET, TERRAIN_OBJECT_CENTER_OFFSET, type MapTerrainRadarObject } from './map';
 import { type InputState } from './input';
-import { type MapStructure, OWNER_REMAPPED_STRUCTURE_TYPES, STRUCTURE_SIZE, getBibCells, getStructureOccupyCells, structureCenterLeptons } from './scenario';
+import { type MapStructure, STRUCTURE_SIZE, getBibCells, getStructureOccupyCells, structureCenterLeptons, structureUsesHouseRemap } from './scenario';
 import { SHADOW_TABLE, cellShadowIndex, shadowTransFadeForRGBA, RA_COLOR_BLACK, RA_COLOR_DKGREY, RA_COLOR_LTGREY, RA_COLOR_WHITE, RA_COLOR_YELLOW, makeFadingTable, makeRemapFadingTable, nearestPaletteIndex } from './shadow';
 import { NonCriticalRandom } from './random';
 import { RA_MESSAGE_DELAY_TICKS } from './tutorialText';
@@ -28,6 +28,11 @@ function lerpFacing32(prev: number, curr: number, alpha: number): number {
 
 function dir256ToFacing16(dir: number): number {
   return (((dir + 8) & 0xff) >> 4) & 0x0f;
+}
+
+function rotation16(dir: number): number {
+  const raw = dir & 0x0f;
+  return raw <= 7 ? raw : raw - 16;
 }
 
 function vesselBodyFrame(entity: Entity, fallbackFacing32: number, frameCount: number): number {
@@ -73,6 +78,14 @@ function aircraftBodyFrame(entity: Entity, fallbackFacing32: number, frameCount:
     ? ((BODY_SHAPE[dir256ToFacing16(secondaryFacing256) * 2] ?? 0) >> 1)
     : (BODY_SHAPE[fallbackFacing32] ?? 0);
   return frameCount > 0 ? frame % frameCount : frame;
+}
+
+function aircraftShapeRotation(entity: Entity): number {
+  if (!entity.isFixedWing) return 0;
+  const secondaryFacing256 = entity.turretFacing256 >= 0
+    ? entity.turretFacing256 & 0xff
+    : (entity.turretFacing32 * 8) & 0xff;
+  return rotation16(secondaryFacing256);
 }
 
 function cppEntityRenderSortKey(entity: Entity): number {
@@ -465,19 +478,28 @@ export function applyWaterPaletteCycle(
   }
 }
 
+type BuildingFrameTableEntry = {
+  idleFrame: number;
+  damageFrame: number;
+  idleAnimCount: number;
+  idleAnimRate?: number;
+  activeAnimCount?: number;
+  activeAnimRate?: number;
+};
+
 // Building frame layout table — maps structure type to idle/damage frame info.
 // Prevents generic halfFrames cycling from treating construction/fill-level frames as animation.
-export const BUILDING_FRAME_TABLE: Record<string, { idleFrame: number; damageFrame: number; idleAnimCount: number; idleAnimRate?: number }> = {
+export const BUILDING_FRAME_TABLE: Record<string, BuildingFrameTableEntry> = {
   // Animated idle buildings (C++ bdata.cpp:3054-3096 _anims table)
-  fact: { idleFrame: 0, damageFrame: 26, idleAnimCount: 26 },  // 52 frames: pumping idle cycle (C++ BSTATE_ACTIVE 0,26,3)
+  fact: { idleFrame: 0, damageFrame: 26, idleAnimCount: 0, activeAnimCount: 26, activeAnimRate: 3 },  // C++ BSTATE_IDLE is static; BSTATE_ACTIVE is 0,26,3
   weap: { idleFrame: 0, damageFrame: 16, idleAnimCount: 32 },  // 32 frames: bay door (post-Cluster A extraction)
   barr: { idleFrame: 0, damageFrame: 10, idleAnimCount: 10 },  // 20 frames: door animation (C++ BSTATE_IDLE 0,10,3)
   tent: { idleFrame: 0, damageFrame: 10, idleAnimCount: 10 },  // 20 frames: door animation (C++ BSTATE_IDLE 0,10,3)
   silo: { idleFrame: 0, damageFrame: 5, idleAnimCount: 0 },    // 10 frames: fill level (static, NOT animation)
   proc: { idleFrame: 0, damageFrame: 16, idleAnimCount: 0 },   // 32 frames: conveyor states
   fix:  { idleFrame: 0, damageFrame: 12, idleAnimCount: 0 },   // 24 frames: repair bay states
-  dome: { idleFrame: 0, damageFrame: 8, idleAnimCount: 16 },   // 16 frames: radar sweep (post-Cluster A extraction)
-  powr: { idleFrame: 0, damageFrame: 4, idleAnimCount: 8 },    // 8 frames: blade rotation (post-Cluster A extraction)
+  dome: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // Static in C++: omitted from bdata.cpp _anims table
+  powr: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // Static in C++: omitted from bdata.cpp _anims table, so default Count=1
   hbox: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // 2 frames: pillbox
   bio:  { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // 3 frames: frame 2 = rubble
   miss: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // 3 frames: frame 2 = rubble
@@ -493,8 +515,8 @@ export const BUILDING_FRAME_TABLE: Record<string, { idleFrame: number; damageFra
   gap:  { idleFrame: 0, damageFrame: 32, idleAnimCount: 32 },  // 64 frames: shroud sweep
   iron: { idleFrame: 0, damageFrame: 11, idleAnimCount: 11 },  // 22 frames: power glow
   pdox: { idleFrame: 0, damageFrame: 29, idleAnimCount: 29 },  // 58 frames: energy effect
-  atek: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // 16 frames: tech center
-  stek: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // Soviet tech center
+  atek: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // Static in C++: omitted from bdata.cpp _anims table, so default Count=1
+  stek: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // Static in C++: omitted from bdata.cpp _anims table, so default Count=1
   mslo: { idleFrame: 0, damageFrame: 4, idleAnimCount: 4 },    // Missile silo
   // Ant structures
   quee: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // queen chamber pulses
@@ -506,8 +528,8 @@ export const BUILDING_FRAME_TABLE: Record<string, { idleFrame: number; damageFra
   // Civilian structures
   v19:  { idleFrame: 0, damageFrame: 14, idleAnimCount: 14, idleAnimRate: 4 },   // Oil pump (C++ BSTATE_IDLE 0,14,4)
   // Naval production structures
-  syrd: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // Allied Shipyard
-  spen: { idleFrame: 0, damageFrame: 8, idleAnimCount: 8 },    // Soviet sub pen
+  syrd: { idleFrame: 0, damageFrame: 8, idleAnimCount: 0 },    // C++ _anims omits STRUCT_SHIP_YARD: idle is static
+  spen: { idleFrame: 0, damageFrame: 8, idleAnimCount: 0 },    // C++ _anims omits STRUCT_SUB_PEN: idle is static
   minp: { idleFrame: 0, damageFrame: 4, idleAnimCount: 0 },    // Allied mine/ore processor
   minv: { idleFrame: 0, damageFrame: 4, idleAnimCount: 0 },    // Soviet mine/ore processor
   // Civilian buildings (most have 2 frames: normal + damaged)
@@ -524,19 +546,24 @@ export const BUILDING_FRAME_TABLE: Record<string, { idleFrame: number; damageFra
   v11: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },
 };
 
-// Building foundation bibs (C++ bib.cpp): [width, height] in cells.
-// Buildings have a concrete pad drawn under them to fill transparent floor areas.
-// BIB1=4x2 for large buildings, BIB2=3x2 for medium, BIB3=2x2 for small.
-const BIB_SIZES: Record<string, [number, number]> = {
-  // BIB1: 4-wide buildings (total footprint includes bib rows)
-  FACT: [4, 3], WEAP: [3, 3], AFLD: [3, 2], SYRD: [3, 3], SPEN: [3, 3],
-  // BIB2: 3-wide buildings
-  PROC: [3, 3], DOME: [2, 2], HPAD: [2, 2], FIX: [3, 3],
-  // BIB3: 2-wide buildings
-  POWR: [2, 2], APWR: [2, 2], BARR: [2, 2], TENT: [2, 2],
-  ATEK: [2, 2], STEK: [2, 2], IRON: [2, 2], PDOX: [2, 2],
-  KENN: [2, 2], BIO: [2, 2], MISS: [2, 2], FCOM: [2, 2], HOSP: [2, 2],
-};
+function usesActiveBuildingAnimation(s: MapStructure): boolean {
+  // C++ bdata.cpp registers FACT/FACF's 26-frame sequence only for
+  // BSTATE_ACTIVE. BuildingClass enters it from Mission_Repair after the yard
+  // receives RADIO_BUILDING, then returns to idle on RADIO_COMPLETE/OVER_OUT.
+  return (s.type === 'FACT' || s.type === 'FACF') && s.mission === Mission.REPAIR;
+}
+
+function buildingAnimationFrame(
+  baseFrame: number,
+  animCount: number,
+  rate: number,
+  totalFrames: number,
+  tick: number,
+): number {
+  const availFromBase = Math.max(1, totalFrames - baseFrame);
+  const safeAnimCount = Math.max(1, Math.min(animCount, availFromBase));
+  return baseFrame + (Math.floor(tick / Math.max(1, rate)) % safeAnimCount);
+}
 
 // Wall types that use auto-connection sprites
 const WALL_SPRITE_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK', 'CYCL', 'WOOD']);
@@ -548,6 +575,19 @@ const WALL_OVERLAY_SHEETS: Record<string, string> = {
   WOOD: 'wood',
   FENC: 'fenc',
 };
+
+const OVERLAY_WOOD_CRATE = 21;
+const OVERLAY_STEEL_CRATE = 22;
+const OVERLAY_WATER_CRATE = 24;
+
+function overlayCrateSheet(overlayId: number): string {
+  switch (overlayId) {
+    case OVERLAY_WOOD_CRATE: return 'wcrate';
+    case OVERLAY_STEEL_CRATE: return 'scrate';
+    case OVERLAY_WATER_CRATE: return 'wwcrate';
+    default: return '';
+  }
+}
 
 function overlayWallType(overlayId: number): string {
   switch (overlayId) {
@@ -684,20 +724,21 @@ export class Renderer {
   sidebarSiloCapacity = 0; // silo storage capacity for credits display
   sidebarPowerProduced = 0;
   sidebarPowerConsumed = 0;
-  sidebarItems: ProductionItem[] = [];
+  sidebarItems: SidebarItem[] = [];
   sidebarQueue: Map<string, { item: ProductionItem; progress: number; queueCount: number }> = new Map();
+  sidebarHackPreventedTypes: Set<string> = new Set();
   sidebarScroll = 0;
   sidebarW = 80 * RESFACTOR;
   leftStripScroll = 0;
   rightStripScroll = 0;
   hasRadar = false; // C++ IsRadarActive || PlayerPtr->IsGPSActive
   doesRadarExist = false; // C++ DoesRadarExist || PlayerPtr->IsGPSActive
+  radarZoomEnabled = false; // C++ SidebarClass::Zoom enabled state
+  radarZoomPressed = false; // C++ sticky Zoom button pressed state
   radarCoverFrame: number | null = null; // opening/closing natoradr/ussrradr frame override
   /** U6: Fullscreen radar toggle — enlarged minimap overlay */
   isRadarFullscreen = false;
-  isRadarJammed = false; // GAP generator radar jamming (C++ IsRadarJammed)
-  radarStaticData: Uint8Array | null = null; // cached static noise for radar jamming
-  radarStaticCounter = 0;
+  isRadarJammed = false; // C++ RadarClass::IsRadarJammed from enemy MRJ coverage.
   /** Raw SHADOW.SHP pixels for C++ SHAPE_GHOST shroud edge remapping. */
   private shadowSourcePixels: {
     source: CanvasImageSource;
@@ -707,7 +748,7 @@ export class Renderer {
   } | null = null;
   private shadowTransTableCache: { palette: number[][]; tables: Map<number, Uint8Array> } | null = null;
   crates: Array<{ x: number; y: number; type: string }> = [];
-  evaMessages: Array<{ text: string; tick: number }> = [];
+  evaMessages: Array<{ text: string; tick: number; systemTick?: number }> = [];
   selectedStructure: { type: string; hp: number; maxHp: number; name: string } | null = null;
   selectedStructureIdx = -1; // index into structures[] for selection highlight
   missionTimer = 0; // 0 = hidden
@@ -775,6 +816,12 @@ export class Renderer {
   private recordedPower = -1;       // C++ Init_Clear starts recorded values at -1
   private recordedDrain = -1;
   private powerFlashTimer = 0;      // ticks remaining for flash effect
+  private sidebarChromeSignature: string | null = null;
+  private powerChromeDirty = false;
+  private sidebarChromeDirty = true; // SidebarClass::Init_Clear starts IsToRedraw=true.
+  private sidebarChromeCompleteDirty = true; // First Draw_It runs under GScreen complete redraw.
+  private sidebarChromeFrame = 0; // SIDE2/SIDE3 frame cached by the last sidebar chrome redraw.
+  private powerChromeAboveSidebar = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
@@ -816,6 +863,9 @@ export class Renderer {
   updatePowerAnimation(): void {
     const produced = this.sidebarPowerProduced;
     const consumed = this.sidebarPowerConsumed;
+    const oldPower = this.powerHeight;
+    const oldDrain = this.drainHeight;
+    let powerDirty = false;
 
     // Detect power change
     if (produced !== this.recordedPower) {
@@ -840,6 +890,7 @@ export class Renderer {
     // Animate drain height
     if (this.drainBounce > 0 && this.drainHeight === this.desiredDrainHeight) {
       this.drainBounce--;
+      powerDirty = true;
     } else if (this.drainHeight !== this.desiredDrainHeight) {
       this.drainHeight += this.drainDir; // C++ increments by exactly 1 per tick (power.cpp:318-319)
       if ((this.drainDir > 0 && this.drainHeight > this.desiredDrainHeight) ||
@@ -851,6 +902,7 @@ export class Renderer {
     // Animate power height
     if (this.powerBounce > 0 && this.powerHeight === this.desiredPowerHeight) {
       this.powerBounce--;
+      powerDirty = true;
     } else if (this.powerHeight !== this.desiredPowerHeight) {
       this.powerHeight += this.powerDir; // C++ increments by exactly 1 per tick (power.cpp:330-331)
       if ((this.powerDir > 0 && this.powerHeight > this.desiredPowerHeight) ||
@@ -860,12 +912,56 @@ export class Renderer {
     }
 
     // Flash timer countdown
-    if (this.powerFlashTimer > 0) this.powerFlashTimer--;
+    if (this.powerFlashTimer > 0) {
+      this.powerFlashTimer--;
+      powerDirty = true;
+    }
 
     // Trigger flash when drain exceeds power
     if (consumed > produced && produced > 0 && this.powerFlashTimer === 0) {
       this.powerFlashTimer = 15; // C++ TICKS_PER_SECOND = 15 (defines.h:3031)
+      powerDirty = true;
     }
+
+    if (oldPower !== this.powerHeight || oldDrain !== this.drainHeight) {
+      powerDirty = true;
+    }
+    if (powerDirty) {
+      this.powerChromeDirty = true;
+    }
+  }
+
+  markSidebarChromeDirty(complete = false): void {
+    this.sidebarChromeDirty = true;
+    if (complete) this.sidebarChromeCompleteDirty = true;
+  }
+
+  syncSidebarChromeItems(items: readonly SidebarItem[] = this.sidebarItems): void {
+    const chromeSignature = [
+      this.playerFaction,
+      items.map(item => item.type).join(','),
+    ].join('|');
+    if (chromeSignature !== this.sidebarChromeSignature) {
+      this.sidebarChromeSignature = chromeSignature;
+      this.markSidebarChromeDirty();
+    }
+  }
+
+  /** Consume C++ sidebar/power chrome dirty flags for one Map.Render pass.
+   *
+   *  The TS renderer paints a fresh canvas for screenshots, while C++ keeps
+   *  this chrome in HidPage/SeenBuff across frames. Agent-step batches still
+   *  need to advance that cached layering on every simulated render tick. */
+  advanceSidebarChromeCache(): void {
+    if (this.sidebarChromeDirty) {
+      this.sidebarChromeFrame = this.sidebarChromeCompleteDirty ? 0 : 1;
+      this.powerChromeAboveSidebar = false;
+    } else if (this.powerChromeDirty) {
+      this.powerChromeAboveSidebar = true;
+    }
+    this.powerChromeDirty = false;
+    this.sidebarChromeDirty = false;
+    this.sidebarChromeCompleteDirty = false;
   }
 
   /** Is the player faction allied? (for house-specific sidebar art) */
@@ -1013,13 +1109,11 @@ export class Renderer {
     if (this.sellMode) this.renderModeLabel(input, 'SELL', 'rgba(255,200,60,0.9)');
     if (this.repairMode) this.renderModeLabel(input, 'REPAIR', 'rgba(80,255,80,0.9)');
     this.renderOffscreenIndicators(camera, entities, selectedIds);
+    this.syncSidebarChromeItems();
+    this.advanceSidebarChromeCache();
     this.renderSidebar(assets);
     this.renderMinimap(map, entities, structures, camera, assets);
     this.renderSidebarButtonRow(assets);
-    // C++ PowerClass redraws independently of SidebarClass button redraws when
-    // power state is active/dirty, so the full bar can land over sidebar chrome
-    // in the final back buffer. In a zero-power complete redraw, SidebarClass
-    // covers the initial PowerClass pass instead.
     if (this.shouldRedrawPowerBarAfterSidebar()) {
       this.renderVerticalPowerBar(
         assets,
@@ -1948,23 +2042,55 @@ export class Renderer {
     const useTileset = this.tilesetReady && this.tilesetTheatre === this.theatre;
     const tilesetSource = useTileset ? this.getPaletteCycledTilesetImage() : null;
 
-    // Deferred tree sprite draws — rendered after all ground tiles to prevent
+    // Deferred TerrainClass sprite draws — rendered after all ground tiles to prevent
     // clump sprites (TC01-TC05, 72-96px wide) from being overwritten by
     // neighboring _clump satellite cells' grass fill. Full-frame renders sort
     // these TerrainClass objects with ground AnimClass objects by C++ Sort_Y.
-    const deferredTrees: TerrainObjectSprite[] = [];
+    const deferredTerrainObjects: TerrainObjectSprite[] = [];
 
+    const queuedTreeOrigins = new Set<number>();
     const queueTreeSprite = (treeType: string, cx: number, cy: number, x: number, y: number): void => {
       const sheetName = this.theatreSheetName(assets, treeType);
       if (!assets.hasSheet(sheetName)) return;
       const [sortPx, sortPy] = TREE_CENTER_OFFSET[treeType] ?? [CELL_SIZE / 2, CELL_SIZE];
-      deferredTrees.push({
+      queuedTreeOrigins.add(cy * 128 + cx);
+      deferredTerrainObjects.push({
         name: sheetName,
         x,
         y,
         sortX: pixelToNearestLepton(cx * CELL_SIZE + sortPx),
         sortY: pixelToNearestLepton(cy * CELL_SIZE + sortPy),
         logicIndexHint: map.getTreeAtOrigin(cx, cy)?.logicIndexHint,
+      });
+    };
+
+    const queueTreeObjectSprite = (tree: { type: string; cx: number; cy: number }): void => {
+      const idx = tree.cy * 128 + tree.cx;
+      if (queuedTreeOrigins.has(idx)) return;
+      const drawX = tree.cx * CELL_SIZE;
+      const drawY = tree.cy * CELL_SIZE;
+      const screen = camera.worldToScreen(drawX, drawY);
+      if (screen.x < -CELL_SIZE * 4 || screen.x > this.width + CELL_SIZE * 4 ||
+          screen.y < -CELL_SIZE * 4 || screen.y > this.height + CELL_SIZE * 4) return;
+      queueTreeSprite(tree.type, tree.cx, tree.cy, Math.round(screen.x), Math.round(screen.y));
+    };
+
+    const queueTerrainObjectSprite = (terrainObject: { type: string; cx: number; cy: number; logicIndexHint?: number }): void => {
+      const sheetName = this.theatreSheetName(assets, terrainObject.type);
+      if (!assets.hasSheet(sheetName)) return;
+      const [sortPx, sortPy] = TERRAIN_OBJECT_CENTER_OFFSET[terrainObject.type] ?? [CELL_SIZE / 2, CELL_SIZE];
+      const drawX = terrainObject.cx * CELL_SIZE;
+      const drawY = terrainObject.cy * CELL_SIZE;
+      const screen = camera.worldToScreen(drawX, drawY);
+      if (screen.x < -CELL_SIZE * 4 || screen.x > this.width + CELL_SIZE * 4 ||
+          screen.y < -CELL_SIZE * 4 || screen.y > this.height + CELL_SIZE * 4) return;
+      deferredTerrainObjects.push({
+        name: sheetName,
+        x: Math.round(screen.x),
+        y: Math.round(screen.y),
+        sortX: pixelToNearestLepton(terrainObject.cx * CELL_SIZE + sortPx),
+        sortY: pixelToNearestLepton(terrainObject.cy * CELL_SIZE + sortPy),
+        logicIndexHint: terrainObject.logicIndexHint,
       });
     };
 
@@ -2250,9 +2376,21 @@ export class Renderer {
     }
 
     if (drawTerrainObjects) {
-      this.renderTerrainObjectSprites(assets, deferredTrees);
+      for (const tree of map.trees.values()) {
+        queueTreeObjectSprite(tree);
+      }
+      for (const terrainObject of map.terrainObjects.values()) {
+        queueTerrainObjectSprite(terrainObject);
+      }
+      this.renderTerrainObjectSprites(assets, deferredTerrainObjects);
     } else {
-      this.pendingTerrainObjectSprites.push(...deferredTrees);
+      for (const tree of map.trees.values()) {
+        queueTreeObjectSprite(tree);
+      }
+      for (const terrainObject of map.terrainObjects.values()) {
+        queueTerrainObjectSprite(terrainObject);
+      }
+      this.pendingTerrainObjectSprites.push(...deferredTerrainObjects);
     }
   }
 
@@ -2356,6 +2494,14 @@ export class Renderer {
     selectedIds: Set<number>,
     tick: number,
   ): void {
+    const dockedGroundEntities = new Map<number, Entity>();
+    for (const s of structures) {
+      if (s.dockedAircraft === undefined) continue;
+      const docked = entities.find(entity => entity.id === s.dockedAircraft);
+      if (!docked || cppEntityRenderLayer(docked) !== 'ground') continue;
+      dockedGroundEntities.set(docked.id, docked);
+    }
+
     for (const entry of this.collectGroundLayerEntries(entities, structures)) {
       switch (entry.kind) {
         case 'terrain':
@@ -2365,9 +2511,10 @@ export class Renderer {
           this.renderLogicAnim(camera, assets, entry.anim);
           break;
         case 'structure':
-          this.renderStructures(camera, map, [entry.structure], assets, tick, [entry.structureIndex]);
+          this.renderStructures(camera, map, [entry.structure], assets, tick, [entry.structureIndex], dockedGroundEntities);
           break;
         case 'entity':
+          if (dockedGroundEntities.has(entry.entity.id)) break;
           this.renderEntities(camera, map, [entry.entity], assets, selectedIds, tick);
           break;
       }
@@ -2439,6 +2586,14 @@ export class Renderer {
           const sheetName = this.theatreSheetName(assets, `gem0${variant}`);
           assets.drawFrame(ctx, sheetName, frame, drawX, drawY, overlayOptions);
         } else {
+          const crateSheet = overlayCrateSheet(ovl);
+          if (crateSheet) {
+            const sheetName = assets.hasSheet(crateSheet) ? crateSheet : 'wcrate';
+            if (assets.hasSheet(sheetName)) {
+              assets.drawFrame(ctx, sheetName, 0, drawX, drawY, overlayOptions);
+            }
+            continue;
+          }
           const wallType = map.getWallType(cx, cy) || overlayWallType(ovl);
           const wallSheet = WALL_OVERLAY_SHEETS[wallType];
           if (wallSheet) {
@@ -2515,6 +2670,7 @@ export class Renderer {
     assets: AssetManager,
     tick: number,
     structureIndices?: number[],
+    dockedGroundEntities?: Map<number, Entity>,
   ): void {
     const ctx = this.ctx;
     for (let structIdx = 0; structIdx < structures.length; structIdx++) {
@@ -2583,29 +2739,26 @@ export class Renderer {
           // Table-driven building frame selection
           const tableEntry = BUILDING_FRAME_TABLE[s.image];
           if (tableEntry) {
-            if (tableEntry.idleAnimCount > 0) {
+            const activeAnimCount = usesActiveBuildingAnimation(s) ? (tableEntry.activeAnimCount ?? 0) : 0;
+            if (activeAnimCount > 0) {
+              const baseFrame = damaged ? tableEntry.damageFrame : tableEntry.idleFrame;
+              frame = buildingAnimationFrame(
+                baseFrame,
+                activeAnimCount,
+                tableEntry.activeAnimRate ?? tableEntry.idleAnimRate ?? 8,
+                totalFrames,
+                tick,
+              );
+            } else if (tableEntry.idleAnimCount > 0) {
               // Animated building — cycle through animation frames.
               // E6: clamp animCount to what the sheet actually contains — the idleAnimCount
               // we declare may outrun totalFrames when a sheet hasn't been re-extracted yet.
               const baseFrame = damaged ? tableEntry.damageFrame : tableEntry.idleFrame;
-              const availFromBase = Math.max(1, totalFrames - baseFrame);
-              const safeAnimCount = Math.max(1, Math.min(tableEntry.idleAnimCount, availFromBase));
               const rate = Math.max(1, tableEntry.idleAnimRate ?? 8);
-              frame = baseFrame + (Math.floor(tick / rate) % safeAnimCount);
-            } else if (damaged && tableEntry.damageFrame > 1) {
-              // R13: Static building damage — cycle through damage frame sequence (C++ parity).
-              // Damage frames run from damageFrame to (damageFrame * 2 - 1), same count as idle range.
-              // E6: guard against negative/zero damageAnimCount when damageFrame >= totalFrames.
-              const rawDamageAnimCount = Math.min(tableEntry.damageFrame, totalFrames - tableEntry.damageFrame);
-              if (rawDamageAnimCount <= 0) {
-                // Sheet is too small for the declared damageFrame — fall back to last frame.
-                frame = Math.max(0, totalFrames - 1);
-              } else {
-                frame = tableEntry.damageFrame + (rawDamageAnimCount > 1 ? Math.floor(tick / 8) % rawDamageAnimCount : 0);
-              }
+              frame = buildingAnimationFrame(baseFrame, tableEntry.idleAnimCount, rate, totalFrames, tick);
             } else {
               // Static building — single frame, no cycling
-              frame = damaged ? tableEntry.damageFrame : tableEntry.idleFrame;
+              frame = damaged ? Math.min(tableEntry.damageFrame, Math.max(0, totalFrames - 1)) : tableEntry.idleFrame;
             }
           } else if (totalFrames === 2) {
             frame = damaged ? 1 : 0;
@@ -2668,7 +2821,7 @@ export class Renderer {
           else if (bw === 3) bibName = 'bib2';
           else if (bw === 2) bibName = 'bib3';
           // Theatre-specific bib sprites
-          if (bibName && BIB_SIZES[s.type]) {
+          if (bibName && getBibCells(s.type, s.cx, s.cy).length > 0) {
             const theatreBib = this.theatre === 'SNOW' ? bibName + '_snow' : bibName;
             const bibSheetName = assets.getSheet(theatreBib) ? theatreBib : bibName;
             if (assets.getSheet(bibSheetName)) {
@@ -2711,10 +2864,10 @@ export class Renderer {
           ctx.clip();
           ctx.globalAlpha = Math.max(0.15, 1 - prog);
         }
-        // House color remap: C++ techno.cpp:4471-4478 + house.cpp:2308-2313.
-        // Only IsRemappable types with a non-REMAP_NONE remap draw through the
-        // owning house table. Civilian Vxx buildings use the source/gold art.
-        const bldgRemapped = OWNER_REMAPPED_STRUCTURE_TYPES.has(s.type)
+        // House color remap: BuildingClass::Draw_It is const, so C++ resolves
+        // Techno_Draw_Object's Remap_Table() call to TechnoClass::Remap_Table()
+        // const. Only bdata IsRemappable=true building bodies use owner remap.
+        const bldgRemapped = structureUsesHouseRemap(s.type)
           ? assets.getRemappedSheet(useSheet, s.house)
           : null;
         const drawCenter = structureDrawCenter(s, screenX, screenY);
@@ -2724,6 +2877,14 @@ export class Renderer {
             drawCenter.x, drawCenter.y, buildingDrawOptions);
         } else {
           assets.drawFrame(ctx, useSheet, useFrame % useTotalFrames, drawCenter.x, drawCenter.y, buildingDrawOptions);
+        }
+        if (!isConstructing && !isSelling && s.dockedAircraft !== undefined) {
+          const docked = dockedGroundEntities?.get(s.dockedAircraft);
+          if (docked && docked.occupiesCppLogic() && !docked.inLimbo) {
+            // C++ building.cpp:484-492 redraws a tethered radio contact after
+            // the building body and clears the contact's standalone display.
+            this.renderEntities(camera, map, [docked], assets, this._selectedIds, tick);
+          }
         }
         // WEAP2 door overlay — C++ building.cpp:500-503 Techno_Draw_Object(WarFactoryOverlay, Door_Stage())
         // WEAP2.SHP = 8 frames (0=closed..7=open), drawn on top of WEAP base sprite.
@@ -2950,6 +3111,12 @@ export class Renderer {
     for (const entity of sorted) {
       // C++ bullet.cpp:96-175 — dog in limbo rides bullet, not rendered on map
       if (entity.inLimbo) continue;
+      // C++ only queues active Cell_Occupier/Overlapper objects for Draw_It.
+      // Destroyed vehicles run UnitClass::Take_Damage -> Mark(MARK_UP) ->
+      // delete this, but TS can retain them for bookkeeping after their C++
+      // Logic slot is gone. Dying infantry and sunk vessels still occupy the
+      // original active paths through Entity.occupiesCppLogic().
+      if (!entity.occupiesCppLogic()) continue;
 
       const ecx = Math.floor(entity.pos.x / CELL_SIZE);
       const ecy = Math.floor(entity.pos.y / CELL_SIZE);
@@ -2983,12 +3150,14 @@ export class Renderer {
       // C++ draws death Doing sequences at full palette strength until the
       // InfantryClass object is deleted or creates its follow-up corpse AnimClass.
 
-      // Submarine cloak rendering
+      // Submarine/phase cloak rendering
+      let drawPlayerCloakShadowy = false;
       if (entity.alive && entity.stats.isCloakable) {
         if (entity.cloakState === CloakState.CLOAKED) {
           if (entity.isPlayerUnit) {
-            // Own cloaked subs: barely visible shimmer
-            ctx.globalAlpha = 0.15;
+            // C++ techno.cpp:4316 + 4444 — player-owned fully cloaked
+            // objects draw as VISUAL_SHADOWY via SHAPE_PREDATOR|SHAPE_FADING.
+            drawPlayerCloakShadowy = true;
           } else {
             // Enemy cloaked subs: invisible unless detected by sonar
             if (entity.sonarPulseTimer > 0) {
@@ -3127,7 +3296,12 @@ export class Renderer {
         }
         // Use house-remapped sheet if available (ants use native brown/olive sprites, no remap)
         const remapped = entity.isAnt ? null : assets.getRemappedSheet(entity.stats.image, entity.house);
-        const bodyDrawOptions = this.unitShadowOptions({ centerX: true, centerY: true });
+        const aircraftRotation = entity.stats.isAircraft ? aircraftShapeRotation(entity) : 0;
+        const bodyDrawOptions = this.unitShadowOptions({
+          centerX: true,
+          centerY: true,
+          ...(aircraftRotation !== 0 ? { rotation256: aircraftRotation } : {}),
+        });
         const specialGhost = (assets as AssetManager & {
           drawFrameSpecialGhost?: (
             ctx: CanvasRenderingContext2D,
@@ -3145,7 +3319,10 @@ export class Renderer {
           specialGhost.call(assets, ctx, entity.stats.image, frame,
             screen.x + 1, screen.y + altY + 2, this.pal, { centerX: true, centerY: true });
         }
-        if (remapped) {
+        if (drawPlayerCloakShadowy && this.pal && typeof specialGhost === 'function') {
+          specialGhost.call(assets, ctx, entity.stats.image, frame,
+            screen.x, screen.y, this.pal, bodyDrawOptions);
+        } else if (remapped) {
           assets.drawFrameFrom(ctx, remapped, entity.stats.image, frame,
             screen.x, screen.y, bodyDrawOptions);
         } else {
@@ -4157,26 +4334,10 @@ export class Renderer {
     // and the sidebar background (side1na/side1us) provides the metallic frame border.
     // IsRadarJammed is checked BEFORE IsRadarActive — jamming takes priority (radar.cpp:469).
 
-    // Radar jammed (GAP generator): show static/snow noise over the cover plate
+    // Radar jammed: C++ RadarClass::Draw_It calls Radar_Anim(), so the
+    // natoradr/ussrradr animation frame replaces the minimap.
     if (this.isRadarJammed) {
-      // Draw cover plate background first (C++ Radar_Anim draws RadarAnim frame)
       this.drawRadarCoverPlate(ctx, cover.x, cover.y, cover.size, assets);
-      this.radarStaticCounter = (this.radarStaticCounter ?? 0) + 1;
-      if (!this.radarStaticData || this.radarStaticCounter % 10 === 0) {
-        const cells = Math.ceil(cover.size / 3);
-        this.radarStaticData = new Uint8Array(cells * cells);
-        for (let i = 0; i < this.radarStaticData.length; i++) {
-          this.radarStaticData[i] = NonCriticalRandom.nextInRange(0, 39);
-        }
-      }
-      const cells = Math.ceil(cover.size / 3);
-      for (let i = 0; i < this.radarStaticData!.length; i++) {
-        const px = cover.x + (i % cells) * 3;
-        const py = cover.y + Math.floor(i / cells) * 3;
-        const v = this.radarStaticData![i];
-        ctx.fillStyle = `rgb(${v},${v + 5},${v})`;
-        ctx.fillRect(px, py, 3, 3);
-      }
       return;
     }
 
@@ -4711,19 +4872,19 @@ export class Renderer {
 
   // ─── EVA Messages & Mission Timer ──────────────────────
 
-  renderEvaMessages(tick: number): void {
+  renderEvaMessages(tick: number, systemTick = tick): void {
     const ctx = this.ctx;
+    const currentSystemTick = Math.floor(systemTick);
     const active = this.evaMessages
-      .filter(m => tick > m.tick && tick - m.tick < RA_MESSAGE_DELAY_TICKS)
+      .filter((m) => {
+        const startSystemTick = Math.floor(m.systemTick ?? currentSystemTick);
+        return tick > m.tick && currentSystemTick <= startSystemTick + RA_MESSAGE_DELAY_TICKS;
+      })
       .slice(-6);
     if (active.length === 0) return;
 
     // C++ Session.Messages.Init(Map.TacPixelX, Map.TacPixelY, 6, ..., 7*RF, ...)
     active.forEach((msg, i) => {
-      const age = tick - msg.tick;
-      const fadeStart = RA_MESSAGE_DELAY_TICKS - 15;
-      const alpha = age < fadeStart ? 1.0 : 1.0 - (age - fadeStart) / 15;
-      ctx.globalAlpha = alpha;
       this.drawBitmapText(this._cachedAssets, msg.text,
         0, (8 + i * 7) * RESFACTOR, PCOLOR_GREEN_FONT_RAMP[2], 'grad6',
         { align: 'left', indexedPalette: PCOLOR_GREEN_FULLSHADOW_FONT_PALETTE, letterSpacing: -1 });
@@ -5158,9 +5319,11 @@ export class Renderer {
       const prevSmoothing = ctx.imageSmoothingEnabled;
       ctx.imageSmoothingEnabled = false;
       const scale = w / bgTop.meta.frameWidth;
+      const midFrame = Math.min(this.sidebarChromeFrame, bgMid.meta.frameCount - 1);
+      const botFrame = Math.min(this.sidebarChromeFrame, bgBot.meta.frameCount - 1);
       assets.drawFrame(ctx, isAllied ? 'side1na' : 'side1us', 0, x, Renderer.SIDEBAR_BG_TOP_Y, { scale });
-      assets.drawFrame(ctx, isAllied ? 'side2na' : 'side2us', 0, x, Renderer.SIDEBAR_BG_MID_Y, { scale });
-      assets.drawFrame(ctx, isAllied ? 'side3na' : 'side3us', 0, x, Renderer.SIDEBAR_BG_BOT_Y, { scale });
+      assets.drawFrame(ctx, isAllied ? 'side2na' : 'side2us', midFrame, x, Renderer.SIDEBAR_BG_MID_Y, { scale });
+      assets.drawFrame(ctx, isAllied ? 'side3na' : 'side3us', botFrame, x, Renderer.SIDEBAR_BG_BOT_Y, { scale });
       ctx.imageSmoothingEnabled = prevSmoothing;
     } else {
       // Fallback: tile sidebar.png or dark fill
@@ -5219,13 +5382,9 @@ export class Renderer {
       this.powerFlashTimer !== 0;
   }
 
-  /** Whether PowerClass can repaint over sidebar chrome after SidebarClass. */
+  /** Whether the C++ back buffer has PowerClass chrome above SIDE*.SHP chrome. */
   private shouldRedrawPowerBarAfterSidebar(): boolean {
-    return this.sidebarPowerProduced !== 0 ||
-      this.powerHeight !== 0 ||
-      this.desiredPowerHeight !== 0 ||
-      this.powerBounce !== 0 ||
-      this.powerFlashTimer !== 0;
+    return this.powerChromeAboveSidebar;
   }
 
   /** Render vertical power bar (C++ PowerClass::Draw_It — bounce animation, palette colors) */
@@ -5326,7 +5485,7 @@ export class Renderer {
   private renderStrip(
     ctx: CanvasRenderingContext2D, assets: AssetManager,
     stripX: number, startY: number,
-    items: ProductionItem[], scroll: number, lowPower: boolean,
+    items: SidebarItem[], scroll: number, lowPower: boolean,
     strip: StripType,
   ): void {
     const camW = Renderer.CAMEO_W;
@@ -5354,7 +5513,7 @@ export class Renderer {
       if (iy < startY - rowH || iy > this.height) continue;
 
       // Draw cameo icon (HIRES 64x48 — all icons should be HIRES)
-      const iconName = item.type.toLowerCase() + 'icon';
+      const iconName = isSidebarSpecialItem(item) ? item.iconName : item.type.toLowerCase() + 'icon';
       const iconSheet = assets.getSheet(iconName);
       if (iconSheet) {
         ctx.drawImage(iconSheet.image, 0, 0, iconSheet.meta.frameWidth, iconSheet.meta.frameHeight,
@@ -5365,6 +5524,29 @@ export class Renderer {
         ctx.strokeStyle = 'rgba(80,80,80,0.5)';
         ctx.lineWidth = 0.5;
         ctx.strokeRect(cameoX, iy, camW, camH);
+      }
+
+      if (isSidebarSpecialItem(item)) {
+        const swState = this.superweapons.get(`${item.specialHouse}:${item.specialType}`);
+        if (!swState) continue;
+        const def = SUPERWEAPON_DEFS[item.specialType];
+        if (swState.ready) {
+          const pipsSheet = assets.getSheet('pips');
+          if (pipsSheet) {
+            const pipScale = camW / pipsSheet.meta.frameWidth;
+            assets.drawFrame(ctx, 'pips', 3, cameoX, iy + (camH - pipsSheet.meta.frameHeight * pipScale) / 2, { scale: pipScale });
+          } else {
+            this.drawBitmapText(assets, 'READY', cameoX + camW / 2, iy + camH / 2 - 4, '#0f0', '6pt', { align: 'center' });
+          }
+        } else {
+          const progress = def.rechargeTicks > 0 ? swState.chargeTick / def.rechargeTicks : 0;
+          const clockSheet = assets.getSheet('clock');
+          if (clockSheet) {
+            const clockFrame = Math.min(Math.floor(progress * (clockSheet.meta.frameCount - 1)) + 1, clockSheet.meta.frameCount - 1);
+            this.drawSidebarClockOverlay(assets, clockFrame, cameoX, iy);
+          }
+        }
+        continue;
       }
 
       // Check production state — use factory type key (5-factory system)
@@ -5390,15 +5572,8 @@ export class Renderer {
           // Clock overlay (C++ ClockShapes with SHAPE_GHOST)
           const clockSheet = assets.getSheet('clock');
           if (clockSheet) {
-            const clockFrame = Math.min(Math.floor(progress * (clockSheet.meta.frameCount - 1)), clockSheet.meta.frameCount - 1);
-            // Draw clock shape as dark overlay (extracted sprites are green;
-            // brightness(0) turns them black, matching C++ SHAPE_GHOST translucent table)
-            ctx.save();
-            ctx.globalAlpha = lowPower ? 0.55 : 0.5;
-            ctx.filter = 'brightness(0)';
-            const clockScale = camW / clockSheet.meta.frameWidth;
-            assets.drawFrame(ctx, 'clock', clockFrame, cameoX, iy, { scale: clockScale });
-            ctx.restore();
+            const clockFrame = Math.min(Math.floor(progress * (clockSheet.meta.frameCount - 1)) + 1, clockSheet.meta.frameCount - 1);
+            this.drawSidebarClockOverlay(assets, clockFrame, cameoX, iy);
           } else {
             const uncoverH = camH * (1 - progress);
             ctx.fillStyle = lowPower ? 'rgba(180,40,40,0.5)' : 'rgba(0,0,0,0.55)';
@@ -5424,16 +5599,10 @@ export class Renderer {
       } else {
         // Not building: C++ darkens other items in the same factory strip while
         // that factory is busy. It does not darken merely because cash is low.
-        if (qEntry) {
+        if (qEntry || this.sidebarHackPreventedTypes.has(item.type)) {
           const clockSheet = assets.getSheet('clock');
           if (clockSheet) {
-            // Full clock (frame 0) as dark overlay — same brightness(0) fix
-            ctx.save();
-            ctx.globalAlpha = 0.5;
-            ctx.filter = 'brightness(0)';
-            const clockScale = camW / clockSheet.meta.frameWidth;
-            assets.drawFrame(ctx, 'clock', 0, cameoX, iy, { scale: clockScale });
-            ctx.restore();
+            this.drawSidebarClockOverlay(assets, 0, cameoX, iy);
           } else {
             ctx.fillStyle = 'rgba(0,0,0,0.4)';
             ctx.fillRect(cameoX, iy, camW, camH);
@@ -5443,10 +5612,36 @@ export class Renderer {
     }
   }
 
+  private drawSidebarClockOverlay(assets: AssetManager, frame: number, x: number, y: number): void {
+    const clockSheet = assets.getSheet('clock');
+    if (!clockSheet) return;
+
+    if (this.pal) {
+      const greenIndex = nearestPaletteIndex(this.pal, 0, 168, 0);
+      assets.drawFrameTranslucent(
+        this.ctx,
+        'clock',
+        Math.max(0, Math.min(frame, clockSheet.meta.frameCount - 1)),
+        x,
+        y,
+        this.pal,
+        [{ sourceColorIndex: greenIndex, destColorIndex: RA_COLOR_BLACK, frac: 100 }],
+        { conquerFading: true },
+      );
+      return;
+    }
+
+    this.ctx.save();
+    this.ctx.globalAlpha = 0.5;
+    this.ctx.filter = 'brightness(0)';
+    assets.drawFrame(this.ctx, 'clock', Math.max(0, Math.min(frame, clockSheet.meta.frameCount - 1)), x, y);
+    this.ctx.restore();
+  }
+
   /** Render scroll buttons below strip (C++ sprite-based, side-by-side) */
   private renderStripScrollArrows(
     ctx: CanvasRenderingContext2D, assets: AssetManager,
-    stripX: number, _items: ProductionItem[], _scroll: number,
+    stripX: number, _items: SidebarItem[], _scroll: number,
   ): void {
     const btnY = Renderer.STRIP_START_Y + Renderer.SCROLL_BTN_Y_OFFSET;
 
@@ -5484,7 +5679,7 @@ export class Renderer {
     const buttons: Array<{ sprite: string; active: boolean; label: string; x: number; w: number }> = [
       { sprite: 'repair', active: this.repairMode, label: 'FIX', x: Renderer.BUTTON_ONE_X, w: Renderer.BUTTON_ONE_W },
       { sprite: 'sell', active: this.sellMode, label: 'SELL', x: Renderer.BUTTON_TWO_X, w: Renderer.BUTTON_TWO_W },
-      { sprite: 'map_btn', active: this.isRadarFullscreen, label: 'MAP', x: Renderer.BUTTON_THREE_X, w: Renderer.BUTTON_THREE_W },
+      { sprite: 'map_btn', active: this.radarZoomPressed, label: 'MAP', x: Renderer.BUTTON_THREE_X, w: Renderer.BUTTON_THREE_W },
     ];
 
     for (const btn of buttons) {
@@ -5493,9 +5688,10 @@ export class Renderer {
       // Sprite icon (C++ ShapeButtonClass::Draw_Me — frame 0=unpressed, 1=pressed, 2=disabled)
       const spriteSheet = assets.getSheet(btn.sprite);
       if (spriteSheet) {
-        // C++ SidebarClass::Init_IO/Radar_Activate disables the zoom/map
-        // ShapeButton in normal games until radar is active.
-        const disabled = btn.sprite === 'map_btn' && !this.hasRadar;
+        // C++ only disables Zoom in Init_IO/Radar_Activate(2). Low-power
+        // Radar_Activate(0) closes the radar cover but leaves the button's
+        // enabled state intact after a prior Radar_Activate(3).
+        const disabled = btn.sprite === 'map_btn' && !this.radarZoomEnabled;
         const frame = disabled ? 2 : (btn.active ? 1 : 0);
         assets.drawFrame(ctx, btn.sprite, frame, bx, btnY);
       } else {

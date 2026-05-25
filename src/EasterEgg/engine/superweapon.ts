@@ -34,10 +34,11 @@ const CHRONO_VORTEX_CHANCE = 0.2;
 /** C++ rules.cpp:204 QuakeChance=0.2 → 20% chance per chronoshift */
 const CHRONO_QUAKE_CHANCE = 0.2;
 
-function applySonarPulseReveal(entity: Entity, duration: number): void {
+function applySonarPulseReveal(entity: Entity, duration: number, markCloakRedraw?: (entity: Entity) => void): void {
   entity.sonarPulseTimer = duration;
   // C++ house.cpp:2645-2646: PulseCountDown is set, then Do_Uncloak().
   if (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) {
+    if (entity.cloakState === CloakState.CLOAKED) markCloakRedraw?.(entity);
     entity.cloakState = CloakState.UNCLOAKING;
     entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
   }
@@ -57,6 +58,13 @@ export interface SuperweaponContext {
   playerHouse: House;
   powerProduced: number;
   powerConsumed: number;
+  houseTechLevel?: (house: House) => number;
+  airstripSpecialTechLevels?: {
+    spyPlane: number;
+    paraBomb: number;
+    paraInfantry: number;
+  };
+  isNoSpyPlane?: boolean;
   killCount: number;
   lossCount: number;
   map: {
@@ -92,6 +100,8 @@ export interface SuperweaponContext {
   addEntity(e: Entity): void;
   aiIQ(house: House): number;
   getWarheadMult(warhead: string, armor: string): number;
+  /** C++ TechnoClass::Do_Uncloak flags a complete radar redraw from CLOAKED. */
+  markCloakRedraw?(entity: Entity): void;
 
   // Camera info for GPS sweep effect
   cameraX: number;
@@ -111,6 +121,27 @@ export interface SuperweaponContext {
   timeQuake?: boolean;
 }
 
+const DEFAULT_AIRSTRIP_SPECIAL_TECH = {
+  spyPlane: 5,
+  paraBomb: 8,
+  paraInfantry: 5,
+};
+
+function isAirstripSpecialAvailable(ctx: SuperweaponContext, type: SuperweaponType, house: House): boolean {
+  const techLevel = ctx.houseTechLevel?.(house) ?? Number.POSITIVE_INFINITY;
+  const specialTech = ctx.airstripSpecialTechLevels ?? DEFAULT_AIRSTRIP_SPECIAL_TECH;
+  switch (type) {
+    case SuperweaponType.SPY_PLANE:
+      return !ctx.isNoSpyPlane && techLevel >= specialTech.spyPlane;
+    case SuperweaponType.PARABOMB:
+      return techLevel >= specialTech.paraBomb;
+    case SuperweaponType.PARAINFANTRY:
+      return techLevel >= specialTech.paraInfantry;
+    default:
+      return true;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 1. updateSuperweapons — scan structures, charge timers, auto-fire, AI usage
 // ---------------------------------------------------------------------------
@@ -118,6 +149,7 @@ export interface SuperweaponContext {
 export function updateSuperweapons(ctx: SuperweaponContext): void {
   const isLowPower = ctx.powerConsumed > ctx.powerProduced && ctx.powerProduced > 0;
   const activeBuildings = new Set<string>(); // track which sw keys have active buildings
+  const activeProviders = new Map<string, { def: typeof SUPERWEAPON_DEFS[SuperweaponType]; house: House; structureIndex: number }>();
 
   // Scan structures for superweapon buildings
   for (let i = 0; i < ctx.structures.length; i++) {
@@ -127,75 +159,83 @@ export function updateSuperweapons(ctx: SuperweaponContext): void {
     // Check each superweapon def to see if this structure provides it
     for (const def of Object.values(SUPERWEAPON_DEFS)) {
       if (s.type !== def.building) continue;
+      if (s.type === 'AFLD' && !isAirstripSpecialAvailable(ctx, def.type, s.house)) continue;
 
       const key = `${s.house}:${def.type}`;
       activeBuildings.add(key);
-
-      let state = ctx.superweapons.get(key);
-      if (!state) {
-        state = {
-          type: def.type,
-          house: s.house,
-          chargeTick: 0,
-          ready: false,
-          structureIndex: i,
-          fired: false,
-        };
-        ctx.superweapons.set(key, state);
+      if (!activeProviders.has(key)) {
+        activeProviders.set(key, { def, house: s.house, structureIndex: i });
       }
-      state.structureIndex = i;
+    }
+  }
 
-      // Charge: increment if building is alive and powered
-      // C++ house.cpp:1410-1411: powered superweapons are fully suspended
-      // when Power_Fraction() < 1 — binary on/off, no fractional charging
-      if (!state.ready && !state.fired) {
-        const suspended = def.requiresPower && isLowPower;
-        if (!suspended) {
-          state.chargeTick = Math.min(state.chargeTick + 1, def.rechargeTicks);
-        }
-        if (state.chargeTick >= def.rechargeTicks) {
-          state.ready = true;
-          // EVA announcement for player
-          if (ctx.isAllied(s.house, ctx.playerHouse)) {
-            ctx.pushEva(`${def.name} ready`);
-          }
-        }
+  // C++ stores one SuperClass per house/special and runs SuperClass::AI once per
+  // HouseClass::Super_Weapon_Handler call. Multiple provider buildings keep the
+  // special present, but they do not multiply recharge speed.
+  for (const [key, provider] of activeProviders) {
+    const { def, house, structureIndex } = provider;
+    let state = ctx.superweapons.get(key);
+    if (!state) {
+      state = {
+        type: def.type,
+        house,
+        chargeTick: 0,
+        ready: false,
+        structureIndex,
+        fired: false,
+      };
+      ctx.superweapons.set(key, state);
+    }
+    state.structureIndex = structureIndex;
+
+    // Charge: increment if building is alive and powered
+    // C++ house.cpp:1410-1411: powered superweapons are fully suspended
+    // when Power_Fraction() < 1 — binary on/off, no fractional charging
+    if (!state.ready && !state.fired) {
+      const suspended = def.requiresPower && isLowPower;
+      if (!suspended) {
+        state.chargeTick = Math.min(state.chargeTick + 1, def.rechargeTicks);
       }
-
-      // Auto-fire GPS Satellite (one-shot)
-      // C++ bullet.cpp:413,1067 — sets IsGPSActive=true, IsVisionary=true, Map_Cell for all cells
-      if (def.type === SuperweaponType.GPS_SATELLITE && state.ready && !state.fired) {
-        state.fired = true;
-        state.ready = false;
-        // C++ bullet.cpp:404 — only reveals map for the house that owns the GPS
-        if (ctx.isAllied(s.house, ctx.playerHouse)) {
-          ctx.map.revealAll();
-          ctx.gpsActive = true;
-          ctx.pushEva('GPS satellite launched');
-          // GPS sweep visual
-          ctx.effects.push({
-            type: 'marker', x: ctx.cameraX + ctx.cameraViewWidth / 2,
-            y: ctx.cameraY, frame: 0, maxFrames: 60, size: 2,
-            markerColor: 'rgba(80,200,255,0.3)',
-          });
-        }
+      if (state.chargeTick >= def.rechargeTicks) {
+        state.ready = true;
+        // C++ SuperClass::AI announces readiness with Speak(VoxRecharge)
+        // only. It does not add a top-left Session.Messages line.
       }
+    }
 
-      // Auto-fire Sonar Pulse
-      if (def.type === SuperweaponType.SONAR_PULSE && state.ready) {
-        // Reveal all enemy submarines for 450 ticks
-        for (const e of ctx.entities) {
-          if (!e.alive || !e.stats.isCloakable) continue;
-          if (ctx.isAllied(e.house, s.house)) continue;
-          applySonarPulseReveal(e, SONAR_REVEAL_TICKS);
-        }
-        state.ready = false;
-        state.chargeTick = 0;
-        // AU5: Sonar SFX — play sonar ping sound
-        ctx.playSound('cannon'); // sonar ping approximation
-        if (ctx.isAllied(s.house, ctx.playerHouse)) {
-          ctx.pushEva('Sonar pulse activated');
-        }
+    // Auto-fire GPS Satellite (one-shot)
+    // C++ bullet.cpp:413,1067 — sets IsGPSActive=true, IsVisionary=true, Map_Cell for all cells
+    if (def.type === SuperweaponType.GPS_SATELLITE && state.ready && !state.fired) {
+      state.fired = true;
+      state.ready = false;
+      // C++ bullet.cpp:404 — only reveals map for the house that owns the GPS
+      if (ctx.isAllied(house, ctx.playerHouse)) {
+        ctx.map.revealAll();
+        ctx.gpsActive = true;
+        ctx.pushEva('GPS satellite launched');
+        // GPS sweep visual
+        ctx.effects.push({
+          type: 'marker', x: ctx.cameraX + ctx.cameraViewWidth / 2,
+          y: ctx.cameraY, frame: 0, maxFrames: 60, size: 2,
+          markerColor: 'rgba(80,200,255,0.3)',
+        });
+      }
+    }
+
+    // Auto-fire Sonar Pulse
+    if (def.type === SuperweaponType.SONAR_PULSE && state.ready) {
+      // Reveal all enemy submarines for 450 ticks
+      for (const e of ctx.entities) {
+        if (!e.alive || !e.stats.isCloakable) continue;
+        if (ctx.isAllied(e.house, house)) continue;
+        applySonarPulseReveal(e, SONAR_REVEAL_TICKS, ctx.markCloakRedraw);
+      }
+      state.ready = false;
+      state.chargeTick = 0;
+      // AU5: Sonar SFX — play sonar ping sound
+      ctx.playSound('cannon'); // sonar ping approximation
+      if (ctx.isAllied(house, ctx.playerHouse)) {
+        ctx.pushEva('Sonar pulse activated');
       }
     }
   }
@@ -228,16 +268,14 @@ export function updateSuperweapons(ctx: SuperweaponContext): void {
       }
       if (state.chargeTick >= SUPERWEAPON_DEFS[SuperweaponType.SONAR_PULSE].rechargeTicks) {
         state.ready = true;
-        if (ctx.isAllied(state.house as House, ctx.playerHouse)) {
-          ctx.pushEva('Sonar pulse ready');
-        }
+        // C++ SuperClass::AI uses voice only for recharge announcements.
       }
     }
     if (state.ready) {
       for (const e of ctx.entities) {
         if (!e.alive || !e.stats.isCloakable) continue;
         if (ctx.isAllied(e.house, state.house as House)) continue;
-        applySonarPulseReveal(e, SONAR_REVEAL_TICKS);
+        applySonarPulseReveal(e, SONAR_REVEAL_TICKS, ctx.markCloakRedraw);
       }
       state.ready = false;
       state.chargeTick = 0;

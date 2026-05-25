@@ -1154,6 +1154,21 @@ export interface ProductionItem {
   points?: number;      // rules.ini Points= — kill score value (C++ techno.cpp:6290, separate from Cost=)
 }
 
+export interface SidebarSpecialItem {
+  type: `SPECIAL:${SuperweaponType}`;
+  name: string;
+  specialType: SuperweaponType;
+  specialHouse: House;
+  iconName: string;
+  isStructure?: false;
+}
+
+export type SidebarItem = ProductionItem | SidebarSpecialItem;
+
+export function isSidebarSpecialItem(item: SidebarItem): item is SidebarSpecialItem {
+  return 'specialType' in item;
+}
+
 export const PRODUCTION_ITEMS: ProductionItem[] = [
   // Infantry (from TENT/BARR) — faction + techLevel from rules.ini
   { type: 'E1', name: 'Rifle', cost: 100, buildTime: 45, prerequisite: 'TENT', faction: 'both', techLevel: 1, points: 5 },
@@ -1268,7 +1283,8 @@ export type StripType = 'left' | 'right';
 
 /** UI strip side — left strip shows structures, right strip shows all units.
  *  This is for DISPLAY only. Production routing uses getFactoryType(). */
-export function getStripSide(item: ProductionItem): StripType {
+export function getStripSide(item: SidebarItem): StripType {
+  if (isSidebarSpecialItem(item)) return 'right';
   return item.isStructure ? 'left' : 'right';
 }
 

@@ -66,6 +66,30 @@ describe('C++ agent-step render phase', () => {
     expect((game as any).tick).toBe(3);
   });
 
+  it('keeps the pre-loss frame current when a manual batch stops early on game over', () => {
+    const game = new Game(createCanvas());
+    const observedRenderTicks: number[] = [];
+
+    (game as any).state = 'playing';
+    (game as any).tick = 0;
+    (game as any).isToLose = true;
+    (game as any).render = function renderProbe(this: Game) {
+      observedRenderTicks.push((this as any).tick);
+    };
+    (game as any).update = function updateProbe(this: Game) {
+      if ((this as any).tick === 5) {
+        (this as any).state = 'lost';
+        return;
+      }
+      (this as any).tick += 1;
+    };
+
+    game.step(10);
+
+    expect(observedRenderTicks).toEqual([0, 1, 2, 3, 4, 5]);
+    expect((game as any).state).toBe('lost');
+  });
+
   it('advances power-bar AI in the pre-render input phase, matching SidebarClass::AI', () => {
     const game = new Game(createCanvas());
     const powerAiSpy = vi

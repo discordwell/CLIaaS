@@ -569,7 +569,7 @@ describe('BUILDING_FRAME_TABLE completeness and sanity', () => {
 
   it('animated buildings have idleAnimCount > 0', () => {
     // C++ buildings with genuine idle animation loops
-    const animatedBuildings = ['hosp', 'tsla', 'gap', 'iron', 'pdox', 'atek', 'stek', 'mslo'];
+    const animatedBuildings = ['hosp', 'tsla', 'gap', 'iron', 'pdox', 'mslo', 'barr', 'tent', 'v19'];
     for (const bldg of animatedBuildings) {
       const entry = BUILDING_FRAME_TABLE[bldg];
       expect(entry?.idleAnimCount, `${bldg} should have animation frames`).toBeGreaterThan(0);
@@ -577,20 +577,21 @@ describe('BUILDING_FRAME_TABLE completeness and sanity', () => {
   });
 
   it('static buildings have idleAnimCount === 0', () => {
-    // Buildings that have genuine idle animation loops (fact, weap, barr, tent, dome, powr)
-    // are now correctly marked as animated per C++ bdata.cpp _anims table.
-    // Only truly static buildings remain here.
-    const staticBuildings = ['silo', 'proc', 'fix', 'hbox', 'pbox'];
+    // FACT has a BSTATE_ACTIVE sequence, but its BSTATE_IDLE control keeps the
+    // constructor default Count=1. Simple-damage tech/power buildings omitted
+    // from _anims are static as well.
+    const staticBuildings = ['fact', 'syrd', 'spen', 'silo', 'proc', 'fix', 'dome', 'powr', 'atek', 'stek', 'hbox', 'pbox'];
     for (const bldg of staticBuildings) {
       const entry = BUILDING_FRAME_TABLE[bldg];
       expect(entry?.idleAnimCount, `${bldg} should NOT have animation frames`).toBe(0);
     }
   });
 
-  it('animated production buildings have idleAnimCount > 0', () => {
-    // C++ bdata.cpp: FACT=26 frames (pump), WEAP=32 (bay door), BARR/TENT=10 (door),
-    // DOME=16 (radar sweep), POWR=8 (blade rotation)
-    const animatedProduction = ['fact', 'weap', 'barr', 'tent', 'dome', 'powr'];
+  it('production building animation state matches C++ bdata.cpp', () => {
+    // FACT/FACF pump only in BSTATE_ACTIVE. BARR/TENT have BSTATE_IDLE loops.
+    expect(BUILDING_FRAME_TABLE.fact.idleAnimCount).toBe(0);
+    expect(BUILDING_FRAME_TABLE.fact.activeAnimCount).toBe(26);
+    const animatedProduction = ['weap', 'barr', 'tent'];
     for (const bldg of animatedProduction) {
       const entry = BUILDING_FRAME_TABLE[bldg];
       expect(entry?.idleAnimCount, `${bldg} should have animation frames`).toBeGreaterThan(0);

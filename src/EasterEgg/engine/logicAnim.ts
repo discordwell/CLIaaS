@@ -18,6 +18,7 @@ export type LogicAnimType =
   | 'on_fire_med'
   | 'on_fire_big'
   | 'oilfield_burn'
+  | 'lz_smoke'
   | 'smoke_m'
   | 'smokey'
   | 'fball_fade'
@@ -28,7 +29,11 @@ export type LogicAnimType =
   | 'frag1'
   | 'veh-hit1'
   | 'veh-hit2'
+  | 'veh-hit3'
   | 'art-exp1'
+  | 'water-exp1'
+  | 'water-exp2'
+  | 'water-exp3'
   | 'atomsfx';
 
 export interface LogicAnim {
@@ -81,7 +86,11 @@ const GROUND_LAYER_LOGIC_ANIMS = new Set<LogicAnimType>([
   'on_fire_med',
   'on_fire_big',
   'oilfield_burn',
+  'lz_smoke',
   'smoke_m',
+  'water-exp1',
+  'water-exp2',
+  'water-exp3',
 ]);
 
 const LOGIC_ANIM_DEFS: Record<LogicAnimType, LogicAnimDef> = {
@@ -111,6 +120,9 @@ const LOGIC_ANIM_DEFS: Record<LogicAnimType, LogicAnimDef> = {
   // C++ adata.cpp: ANIM_OILFIELD_BURN (FLMSPT) uses an unsigned-char loop
   // counter, so Class->Loops=65535 is observed as 255 in the heap dump.
   oilfield_burn: { sprite: 'flmspt', biggest: 58, stages: 66, loops: 255, rate: 1, scorcher: false, loopStart: 33, loopEnd: 99 },
+  // C++ adata.cpp ANIM_LZ_SMOKE: SMOKLAND, Biggest=72, Delay=2,
+  // LoopStart=72, LoopEnd=91, Stages=-1, Loops=255, IsGroundLayer=true.
+  lz_smoke: { sprite: 'smokland', biggest: 72, stages: 92, loops: 255, rate: 2, scorcher: false, loopStart: 72, loopEnd: 91 },
   smoke_m: { sprite: 'smoke_m', biggest: 30, stages: 91, loops: 6, rate: 1, scorcher: false, loopStart: 67, loopEnd: 91 },
   // C++ bullet.cpp:381-385 projectile trail AnimClass objects. They are real
   // Logic/Anim heap entries even though they have no gameplay Middle side
@@ -128,7 +140,14 @@ const LOGIC_ANIM_DEFS: Record<LogicAnimType, LogicAnimDef> = {
   frag1: { sprite: 'frag1', biggest: 3, stages: 14, loops: 1, rate: 1, scorcher: false, crater: true },
   'veh-hit1': { sprite: 'veh-hit1', biggest: 4, stages: 17, loops: 1, rate: 1, scorcher: false, crater: true },
   'veh-hit2': { sprite: 'veh-hit2', biggest: 1, stages: 22, loops: 1, rate: 1, scorcher: false, crater: true },
+  // C++ adata.cpp: VEH-HIT3 sticks to units but does not form a crater.
+  'veh-hit3': { sprite: 'veh-hit3', biggest: 3, stages: 14, loops: 1, rate: 1, scorcher: false },
   'art-exp1': { sprite: 'art-exp1', biggest: 1, stages: 22, loops: 1, rate: 1, scorcher: false, crater: true },
+  // C++ ANIM_WATER_EXP1/2/3 are ground-level AnimClass objects with splash
+  // sound only; no crater/scorch gameplay side effects.
+  'water-exp1': { sprite: 'water-exp1', biggest: 3, stages: 10, loops: 1, rate: 1, scorcher: false },
+  'water-exp2': { sprite: 'water-exp2', biggest: 3, stages: 10, loops: 1, rate: 1, scorcher: false },
+  'water-exp3': { sprite: 'water-exp3', biggest: 3, stages: 10, loops: 1, rate: 1, scorcher: false },
   atomsfx: { sprite: 'atomsfx', biggest: 19, stages: 27, loops: 0, rate: 1, scorcher: true, crater: true },
 };
 
@@ -144,6 +163,7 @@ export function logicAnimTypeForSprite(sprite: string | undefined): LogicAnimTyp
     case 'burn-m': return 'on_fire_med';
     case 'burn-l': return 'on_fire_big';
     case 'flmspt': return 'oilfield_burn';
+    case 'smokland': return 'lz_smoke';
     case 'smoke_m': return 'smoke_m';
     case 'smokey': return 'smokey';
     case 'fball1': return 'fball1';
@@ -153,7 +173,14 @@ export function logicAnimTypeForSprite(sprite: string | undefined): LogicAnimTyp
     case 'frag1': return 'frag1';
     case 'veh-hit1': return 'veh-hit1';
     case 'veh-hit2': return 'veh-hit2';
+    case 'veh-hit3': return 'veh-hit3';
     case 'art-exp1': return 'art-exp1';
+    case 'water-exp1': return 'water-exp1';
+    case 'water-exp2': return 'water-exp2';
+    case 'water-exp3': return 'water-exp3';
+    case 'h2o_exp1': return 'water-exp1';
+    case 'h2o_exp2': return 'water-exp2';
+    case 'h2o_exp3': return 'water-exp3';
     case 'atomsfx': return 'atomsfx';
     default: return null;
   }

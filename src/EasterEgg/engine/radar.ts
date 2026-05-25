@@ -8,12 +8,15 @@
 
 export const RADAR_ACTIVATED_FRAME = 22;
 export const MAX_RADAR_FRAMES = 41;
+export const CPP_RADAR_INNER_W = 146;
+export const CPP_RADAR_INNER_H = 130;
 
 export interface RadarVisualState {
   doesRadarExist: boolean;
   isRadarActive: boolean;
   isRadarActivating: boolean;
   isRadarDeactivating: boolean;
+  isZoomEnabled: boolean;
   radarAnimFrame: number;
 }
 
@@ -29,6 +32,7 @@ export function createRadarVisualState(): RadarVisualState {
     isRadarActive: false,
     isRadarActivating: false,
     isRadarDeactivating: false,
+    isZoomEnabled: false,
     radarAnimFrame: 0,
   };
 }
@@ -41,8 +45,15 @@ export function isRadarExisting(state: RadarVisualState, isGpsActive = false): b
   return state.doesRadarExist || isGpsActive;
 }
 
-export function radarDisplayFrame(state: RadarVisualState): number | null {
-  if (state.isRadarActivating || state.isRadarDeactivating) return state.radarAnimFrame;
+export function isRadarZoomableForMap(boundsW: number, boundsH: number): boolean {
+  const xfactor = Math.trunc(CPP_RADAR_INNER_W / boundsW);
+  const yfactor = Math.trunc(CPP_RADAR_INNER_H / boundsH);
+  const factor = Math.max(Math.min(xfactor, yfactor), 1);
+  return factor !== 3;
+}
+
+export function radarDisplayFrame(state: RadarVisualState, isRadarJammed = false): number | null {
+  if (state.isRadarActivating || state.isRadarDeactivating || isRadarJammed) return state.radarAnimFrame;
   if (!state.isRadarActive) return state.doesRadarExist ? MAX_RADAR_FRAMES : 0;
   return null;
 }
@@ -74,12 +85,14 @@ export function radarActivate(state: RadarVisualState, control: 0 | 1 | 3 | 4): 
       state.isRadarActive = true;
       state.isRadarActivating = false;
       state.isRadarDeactivating = false;
+      state.isZoomEnabled = true;
       break;
     case 4:
       state.isRadarActive = false;
       state.isRadarActivating = false;
       state.isRadarDeactivating = false;
       state.doesRadarExist = false;
+      state.isZoomEnabled = false;
       state.radarAnimFrame = 0;
       break;
   }
@@ -105,7 +118,7 @@ export function updateRadarAvailability(state: RadarVisualState, availability: R
   if (isRadarExisting(state, isGpsActive)) radarActivate(state, 4);
 }
 
-export function advanceRadarAnimation(state: RadarVisualState): void {
+export function advanceRadarAnimation(state: RadarVisualState, isRadarJammed = false): void {
   if (state.isRadarActivating) {
     if (!state.doesRadarExist) {
       state.radarAnimFrame++;
@@ -126,5 +139,12 @@ export function advanceRadarAnimation(state: RadarVisualState): void {
     if (state.radarAnimFrame === MAX_RADAR_FRAMES) {
       state.isRadarDeactivating = false;
     }
+    return;
+  }
+
+  if (isRadarJammed) {
+    state.radarAnimFrame++;
+    if (state.radarAnimFrame < RADAR_ACTIVATED_FRAME) state.radarAnimFrame = RADAR_ACTIVATED_FRAME;
+    if (state.radarAnimFrame > RADAR_ACTIVATED_FRAME + 3) state.radarAnimFrame = RADAR_ACTIVATED_FRAME;
   }
 }

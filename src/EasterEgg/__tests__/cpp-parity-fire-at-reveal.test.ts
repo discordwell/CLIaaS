@@ -101,4 +101,55 @@ describe('TechnoClass::Fire_At hidden-shooter reveal', () => {
     const discoveredStructures = (game as unknown as { discoveredStructureIds: Set<number> }).discoveredStructureIds;
     expect(discoveredStructures.has(0)).toBe(true);
   });
+
+  it('aircraft Fire_At reveals a hidden fixed-wing shooter before launching its projectile', () => {
+    const game = new Game(createCanvas());
+    game.playerHouse = House.Greece;
+    game.map.setBounds(0, 0, 128, 128);
+
+    const yak = atCell(UnitType.V_YAK, House.BadGuy, 70, 60);
+    game.entities.push(yak);
+
+    (game as unknown as {
+      fireWeaponAtCoord(attacker: Entity, weapon: NonNullable<Entity['weapon']>, impact: { x: number; y: number }): void;
+    }).fireWeaponAtCoord(yak, yak.weapon!, { x: 73 * CELL_SIZE + CELL_SIZE / 2, y: 60 * CELL_SIZE + CELL_SIZE / 2 });
+
+    const discovered = (game as unknown as { discoveredEntityIds: Set<number> }).discoveredEntityIds;
+    // C++ DisplayClass::Map_Cell reveals Cell_Techno() ground occupiers; an
+    // airborne YAK is not the cell occupier, so Fire_At maps the cells without
+    // setting IsDiscoveredByPlayer on the aircraft itself.
+    expect(discovered.has(yak.id)).toBe(false);
+    expect(game.map.getVisibility(70, 60)).toBe(2);
+    expect(game.map.getDisplayVisibility(70, 60)).toBe(2);
+  });
+
+  it('does not discover airborne aircraft from the global visible-cell scan', () => {
+    const game = new Game(createCanvas());
+    game.playerHouse = House.Greece;
+    game.map.setBounds(0, 0, 128, 128);
+
+    const yak = atCell(UnitType.V_YAK, House.BadGuy, 70, 60);
+    game.entities.push(yak);
+    game.map.setVisibility(70, 60, 2);
+
+    (game as unknown as { checkDiscoveryTriggers(): void }).checkDiscoveryTriggers();
+
+    const discovered = (game as unknown as { discoveredEntityIds: Set<number> }).discoveredEntityIds;
+    expect(discovered.has(yak.id)).toBe(false);
+  });
+
+  it('still discovers ground technos from true visible cells during PCP_END discovery', () => {
+    const game = new Game(createCanvas());
+    game.playerHouse = House.Greece;
+    game.map.setBounds(0, 0, 128, 128);
+
+    const rifleman = atCell(UnitType.I_E1, House.BadGuy, 70, 60);
+    game.entities.push(rifleman);
+    game.map.setVisibility(70, 60, 2);
+
+    (game as unknown as { checkDiscoveryTriggers(): void }).checkDiscoveryTriggers();
+
+    const discovered = (game as unknown as { discoveredEntityIds: Set<number> }).discoveredEntityIds;
+    expect(discovered.has(rifleman.id)).toBe(true);
+  });
 });

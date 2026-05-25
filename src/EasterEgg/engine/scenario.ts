@@ -621,6 +621,14 @@ interface ScenarioData {
   /** C++ Scen.IsTanyaEvac — scenario.cpp:2262: CivEvac=yes in [Basic]. When true,
    *  Tanya (E7) counts as civilian for evacuation (aircraft.cpp:143). */
   isTanyaEvac: boolean;
+  /** C++ Scen.IsNoSpyPlane — [Basic] NoSpyPlane=yes suppresses free airstrip recon. */
+  isNoSpyPlane: boolean;
+  /** Scenario [General] airstrip special tech overrides. */
+  airstripSpecialTechLevels: {
+    spyPlane: number;
+    paraBomb: number;
+    paraInfantry: number;
+  };
 }
 
 /** Resolve mission name — RA scenarios often use Name=<none> in the INI.
@@ -647,6 +655,17 @@ function parseIniBool(raw: string, fallback: boolean): boolean {
 }
 
 const DEFAULT_INCOMING_PROJECTILE_SPEED = 10;
+
+function parseGeneralInt(
+  sections: Map<string, Map<string, string>>,
+  key: string,
+  fallback: number,
+): number {
+  const raw = sections.get('General')?.get(key);
+  if (raw === undefined) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
 
 function parseIncomingProjectileSpeed(sections: Map<string, Map<string, string>>): number {
   const general = sections.get('General');
@@ -1036,6 +1055,12 @@ export function parseScenarioINI(text: string, scenarioId = ''): ScenarioData {
     toCarryOver: get('Basic', 'ToCarryOver', 'no').toLowerCase() === 'yes',
     toInherit: get('Basic', 'ToInherit', 'no').toLowerCase() === 'yes',
     isTanyaEvac: get('Basic', 'CivEvac', 'no').toLowerCase() === 'yes',
+    isNoSpyPlane: get('Basic', 'NoSpyPlane', 'no').toLowerCase() === 'yes',
+    airstripSpecialTechLevels: {
+      spyPlane: parseGeneralInt(sections, 'SpyPlaneTech', 5),
+      paraBomb: parseGeneralInt(sections, 'ParabombTech', 8),
+      paraInfantry: parseGeneralInt(sections, 'ParaTech', 5),
+    },
     baseStructures,
     smudges,
     theatre,
@@ -1535,6 +1560,8 @@ export interface MapStructure {
   firingFlash?: number;      // ticks remaining for muzzle flash frame
   /** C++ FlasherClass FlashCount from Clicked_As_Target/electric zap, not ordinary damage. */
   flashCount?: number;
+  /** C++ BuildingClass::IsJammed for DOME/SAM proximity to enemy MRJ. */
+  isJammed?: boolean;
   ironCurtainTicks?: number; // ticks remaining for Iron Curtain invulnerability (C++ house.cpp:2751)
   spiedBy?: number;           // C++ infantry.cpp:656 — bitmask of houses that have spied this building (1 << houseIndex), default 0
   originalHouse?: House;       // C++ building.cpp:3509 — original house before capture (for survivor halving on sell)
@@ -1731,10 +1758,11 @@ export const STRUCTURE_IMAGES: Record<string, string> = {
 };
 
 // Structures whose body SHP is drawn through the owning house color remap.
-// C++ techno.cpp:4471-4478 calls House->Remap_Table only when the type has
-// IsRemappable=true; house.cpp:2310 then returns null for REMAP_NONE. Civilian
-// buildings such as V19 have REMAP_ALTERNATE but IsRemappable=false, so they
-// keep the source/gold art instead of taking the owner's color.
+// BuildingClass::Draw_It is const, so its Techno_Draw_Object call resolves to
+// TechnoClass::Remap_Table(void) const, not BuildingClass::Remap_Table(void).
+// That C++ path owner-remaps only when bdata.cpp marks IsRemappable=true.
+// Non-remappable buildings still get PCOLOR_GOLD's identity table; in TS that
+// is visually equivalent to drawing the source sheet.
 export const OWNER_REMAPPED_STRUCTURE_TYPES = new Set([
   'IRON', 'FCOM', 'ATEK', 'PDOX', 'WEAP', 'SYRD', 'SPEN',
   'PBOX', 'HBOX', 'TSLA', 'GUN', 'AGUN', 'FTUR',
@@ -1742,6 +1770,10 @@ export const OWNER_REMAPPED_STRUCTURE_TYPES = new Set([
   'MSLO', 'AFLD', 'POWR', 'APWR', 'STEK', 'HOSP', 'BIO',
   'BARR', 'TENT', 'KENN', 'SYRF', 'SPEF', 'DOMF', 'FIX', 'MISS', 'QUEE',
 ]);
+
+export function structureUsesHouseRemap(type: string): boolean {
+  return OWNER_REMAPPED_STRUCTURE_TYPES.has(type);
+}
 
 // C++ BuildingTypeClass::IsLegalTarget. Most structures are legal targets;
 // mines are BuildingClass technos but bdata.cpp marks them false, so
@@ -2202,6 +2234,14 @@ export interface ScenarioResult {
   playerHouse: House;
   /** Player tech level from scenario INI [Basic] TechLevel= (gates production items) */
   playerTechLevel: number;
+  /** C++ Scen.IsNoSpyPlane — [Basic] NoSpyPlane=yes suppresses free airstrip recon. */
+  isNoSpyPlane: boolean;
+  /** Scenario [General] airstrip special tech overrides. */
+  airstripSpecialTechLevels: {
+    spyPlane: number;
+    paraBomb: number;
+    paraInfantry: number;
+  };
   /** Per-house alliance data from scenario INI (used for campaign missions) */
   houseAllies: Map<House, House[]>;
   /** Per-house PlayerControl= flag from scenario INI. */
@@ -2721,6 +2761,8 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     baseBlueprint: data.baseStructures.map(bs => ({ type: bs.type, cell: bs.cell, house: toHouse(bs.house) })),
     playerHouse: toHouse(data.playerHouse ?? 'Spain'),
     playerTechLevel: data.playerTechLevel,
+    isNoSpyPlane: data.isNoSpyPlane,
+    airstripSpecialTechLevels: data.airstripSpecialTechLevels,
     houseAllies: new Map(
       Array.from(data.houseAllies.entries()).map(([k, v]) => [toHouse(k), v.flatMap(expandAllyToken)])
     ),

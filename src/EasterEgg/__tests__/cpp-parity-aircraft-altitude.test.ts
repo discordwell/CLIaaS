@@ -451,6 +451,39 @@ describe('FIXED: helicopter takeoff speed staging (aircraft.cpp:2899-2928)', () 
    * aircraftSpeedFraction ramps from 0.125 → 0.25 → 1.0 at altitude thresholds.
    */
 
+  it('helicopter takeoff height 0 copies SecondaryFacing into PrimaryFacing', () => {
+    // C++ aircraft.cpp:2918-2922:
+    //   case 0: Close_Door(...); PrimaryFacing = SecondaryFacing;
+    //
+    // SCG01EA's loaner TRAN lands with SecondaryFacing=DIR_N for Pose_Dir(),
+    // then retreats. If PrimaryFacing keeps the stale unlimbo direction, it
+    // leaves the LZ on the wrong vector while RNG remains synced.
+    const tran = makeEntity(UnitType.V_TRAN, House.Greece, 63 * CELL_SIZE + 12, 47 * CELL_SIZE + 12);
+    tran.aircraftState = 'takeoff';
+    tran.mission = Mission.RETREAT;
+    tran.flightAltitude = 0;
+    tran.aircraftHeightLeptons = 0;
+
+    tran.facing256 = 83;
+    tran.desiredFacing256 = 83;
+    tran.facing = dir256ToFacing8(83);
+    tran.desiredFacing = tran.facing;
+    tran.bodyFacing32 = dir256ToFacing32(83);
+
+    tran.turretFacing256 = 0;
+    tran.desiredTurretFacing256 = 0;
+    tran.turretFacing = dir256ToFacing8(0);
+    tran.desiredTurretFacing = tran.turretFacing;
+    tran.turretFacing32 = dir256ToFacing32(0);
+
+    updateAircraft(makeAircraftCtx(), tran);
+
+    expect(tran.facing256).toBe(0);
+    expect(tran.desiredFacing256).toBe(0);
+    expect(tran.facing).toBe(0);
+    expect(tran.bodyFacing32).toBe(0);
+  });
+
   it('FIXED: helicopter speed ramps through 5 stages during takeoff', () => {
     // C++ 5-stage speed ramp (lepton heights mapped to pixel equivalents):
     //   0: speed=0 (close door)

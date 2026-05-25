@@ -204,6 +204,21 @@ export const TERRAIN_OBJECT_OCCUPY: Record<string, [number, number][]> = {
   'boxes09': [[0, 0]],   // TERRAIN_BOXES09, _List10
 };
 
+/** C++ RA tdata.cpp XYP_COORD for non-tree TerrainClass objects.
+ *  Render_Coord is the object's Coord; Sort_Y/Center_Coord add CenterBase. */
+export const TERRAIN_OBJECT_CENTER_OFFSET: Record<string, [number, number]> = {
+  'mine': [12, 24],
+  'boxes01': [12, 24],
+  'boxes02': [12, 24],
+  'boxes03': [12, 24],
+  'boxes04': [12, 24],
+  'boxes05': [12, 24],
+  'boxes06': [12, 24],
+  'boxes07': [12, 24],
+  'boxes08': [12, 24],
+  'boxes09': [12, 24],
+};
+
 /** C++ RA tdata.cpp XYP_COORD — pixel offset from origin cell top-left to tree center.
  *  Used by C++ Center_Coord() for damage distance calculation (terrain.cpp).
  *  Values are [px, py] in game pixels (CELL_SIZE = 24). */

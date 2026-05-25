@@ -14,12 +14,12 @@ import { getTutorialText, RA_MESSAGE_DELAY_TICKS } from '../engine/tutorialText'
 import { RESFACTOR } from '../engine/types';
 
 const PCOLOR_GREEN_FONT_RAMP = [
-  '#c7e786',
-  '#b2d37d',
-  '#9ebe75',
-  '#8aae6d',
-  '#799a65',
-  '#698a5d',
+  '#c4e484',
+  '#b0d07c',
+  '#9cbc74',
+  '#88ac6c',
+  '#789864',
+  '#68885c',
 ] as const;
 
 function mockCanvas(): HTMLCanvasElement {
@@ -65,15 +65,19 @@ describe('TACTION_TEXT_TRIGGER tutorial messages', () => {
   it('queues trigger text through the Game path with no fallback for unknown IDs', () => {
     const play = vi.fn();
     const gameLike = {
-      evaMessages: [] as Array<{ text: string; tick: number }>,
+      evaMessages: [] as Array<{ text: string; tick: number; systemTick?: number }>,
       tick: 42,
+      messageSystemTick: 7,
+      queueEvaMessage(text: string) {
+        this.evaMessages.push({ text, tick: this.tick, systemTick: this.messageSystemTick });
+      },
       audio: { play },
     };
 
     (Game.prototype as any).showTutorialTextMessage.call(gameLike, 27);
     (Game.prototype as any).showTutorialTextMessage.call(gameLike, 999);
 
-    expect(gameLike.evaMessages).toEqual([{ text: 'Capture all Tech centers', tick: 42 }]);
+    expect(gameLike.evaMessages).toEqual([{ text: 'Capture all Tech centers', tick: 42, systemTick: 7 }]);
     expect(play).toHaveBeenCalledTimes(1);
     expect(play).toHaveBeenCalledWith('eva_acknowledged');
   });
@@ -106,17 +110,21 @@ describe('MessageListClass visual placement', () => {
     expect(drawBitmapText.mock.calls[2][3]).toBe(22 * RESFACTOR);
   });
 
-  it('keeps messages visible past the previous 60-tick cutoff and expires them at C++ delay', () => {
+  it('expires messages against the C++ TickCount system timer, not logic Frame', () => {
     const renderer = new Renderer(mockCanvas());
     const drawBitmapText = vi.fn();
     (renderer as any).drawBitmapText = drawBitmapText;
-    renderer.evaMessages = [{ text: 'Find Einstein.', tick: 0 }];
+    renderer.evaMessages = [{ text: 'Find Einstein.', tick: 0, systemTick: 0 }];
 
-    renderer.renderEvaMessages(RA_MESSAGE_DELAY_TICKS - 1);
+    renderer.renderEvaMessages(600, 0);
     expect(drawBitmapText).toHaveBeenCalledTimes(1);
 
     drawBitmapText.mockClear();
-    renderer.renderEvaMessages(RA_MESSAGE_DELAY_TICKS);
+    renderer.renderEvaMessages(600, RA_MESSAGE_DELAY_TICKS);
+    expect(drawBitmapText).toHaveBeenCalledTimes(1);
+
+    drawBitmapText.mockClear();
+    renderer.renderEvaMessages(600, RA_MESSAGE_DELAY_TICKS + 1);
     expect(drawBitmapText).not.toHaveBeenCalled();
   });
 

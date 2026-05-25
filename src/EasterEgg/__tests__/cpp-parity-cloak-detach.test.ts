@@ -107,14 +107,46 @@ describe('TechnoClass::Do_Cloak detach parity', () => {
     });
     team.add(sub);
     addEntity(game, sub);
+    const redraw = vi.spyOn(game.renderer, 'markSidebarChromeDirty');
 
     updateSubCloak(game, sub);
 
     expect(sub.cloakState).toBe(CloakState.CLOAKED);
+    expect(redraw).toHaveBeenCalledWith(true);
     expect(sub.teamRef).toBeNull();
     expect(team.total).toBe(0);
     expect(sub.mission).toBe(Mission.MOVE);
     expect(sub.moveTarget).toEqual(dest);
+  });
+
+  it('TechnoClass::Do_Cloak from UNCLOAKED flags a complete radar redraw', () => {
+    const game = createGame();
+    const sub = new Entity(UnitType.V_SS, House.USSR, 98 * CELL_SIZE + 12, 48 * CELL_SIZE + 12);
+    sub.mission = Mission.GUARD;
+    sub.cloakState = CloakState.UNCLOAKED;
+    sub.cloakDelay = 0;
+    addEntity(game, sub);
+    const redraw = vi.spyOn(game.renderer, 'markSidebarChromeDirty');
+
+    updateSubCloak(game, sub);
+
+    expect(sub.cloakState).toBe(CloakState.CLOAKING);
+    expect(redraw).toHaveBeenCalledWith(true);
+  });
+
+  it('TechnoClass::Do_Uncloak from damage flags a complete radar redraw from CLOAKED', () => {
+    const game = createGame();
+    const sub = new Entity(UnitType.V_SS, House.USSR, 98 * CELL_SIZE + 12, 48 * CELL_SIZE + 12);
+    sub.cloakState = CloakState.CLOAKED;
+    addEntity(game, sub);
+    const redraw = vi.spyOn(game.renderer, 'markSidebarChromeDirty');
+
+    (game as unknown as {
+      damageEntity(target: Entity, amount: number, warhead: 'HE'): boolean;
+    }).damageEntity(sub, 1, 'HE');
+
+    expect(sub.cloakState).toBe(CloakState.UNCLOAKING);
+    expect(redraw).toHaveBeenCalledWith(true);
   });
 
   it('InfantryClass death-animation delete clears team MissionTarget before removing Logic object', () => {

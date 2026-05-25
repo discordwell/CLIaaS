@@ -35,6 +35,9 @@ async function wasmFireballState(adapter: unknown) {
     const fireball = (state.bullets ?? []).find((bullet: any) =>
       bullet.type === 'Fireball' && bullet.lx === 7252 && bullet.ly === 15090);
     if (!fireball) throw new Error('C++ SCG07EA tick-169 Fireball missing');
+    const firstTrail = (state.anims ?? []).find((anim: any) =>
+      anim.name === 'FB2' && anim.lx === 7402 && anim.ly === 15115);
+    if (!firstTrail) throw new Error('C++ SCG07EA tick-169 first FB2 trail missing');
 
     return {
       tick: state.tick,
@@ -44,6 +47,7 @@ async function wasmFireballState(adapter: unknown) {
         ly: fireball.ly,
         timer: fireball.timer,
         pb: fireball.pb,
+        logicIndex: firstTrail.logicIndex - 1,
       },
     };
   });
@@ -58,6 +62,8 @@ async function tsFlamerState(adapter: unknown) {
       projectile.headToLX === 7040 &&
       projectile.headToLY === 14976);
     if (!flamer) throw new Error('TS SCG07EA tick-169 Flamer missing');
+    const sameHintTrail = (game.logicAnims ?? []).find((anim: any) =>
+      anim.type === 'fball_fade' && anim.logicIndexHint === flamer.logicIndexHint);
 
     return {
       tick: state.tick,
@@ -68,6 +74,7 @@ async function tsFlamerState(adapter: unknown) {
         currentFrame: flamer.currentFrame,
         fuelTimer: flamer.fuelTimer,
         logicIndexHint: flamer.logicIndexHint,
+        hasSameHintTrail: Boolean(sameHintTrail),
       },
     };
   });
@@ -97,7 +104,8 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCG07 duplicate projectile 
       expect(ts.flamer.fuelTimer).toBe(cpp.fireball.timer);
       expect(ts.flamer.logicalLX).toBe(cpp.fireball.lx);
       expect(ts.flamer.logicalLY).toBe(cpp.fireball.ly);
-      expect(ts.flamer.logicIndexHint).toBe(188);
+      expect(ts.flamer.logicIndexHint).toBe(cpp.fireball.logicIndex);
+      expect(ts.flamer.hasSameHintTrail).toBe(true);
     }, { wasmSeed: 0 });
   }, 300_000);
 });

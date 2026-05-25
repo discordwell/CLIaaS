@@ -91,7 +91,15 @@ async function tsCrushState(adapter: unknown) {
   return adapterPage(adapter).evaluate(() => {
     const game = (window as any).__agentGame;
     const state = (window as any).__agentState();
-    const victim = game.entities.find((entity: any) => entity.id === 228);
+    const victim = game.entities.find((entity: any) =>
+      entity.alive &&
+      !entity.inLimbo &&
+      entity.type === 'E1' &&
+      entity.house === 'Greece' &&
+      entity.cell?.cx === 12 &&
+      entity.cell?.cy === 55 &&
+      entity.leptonX === 3264 &&
+      entity.leptonY === 14144);
     const liveAtCell = game.entities.find((entity: any) =>
       entity.alive &&
       !entity.inLimbo &&
@@ -101,7 +109,12 @@ async function tsCrushState(adapter: unknown) {
       entity.cell?.cy === 55 &&
       entity.leptonX === 3264 &&
       entity.leptonY === 14144);
-    const mrj = game.entities.find((entity: any) => entity.id === 158);
+    const mrj = game.entities.find((entity: any) =>
+      entity.alive &&
+      !entity.inLimbo &&
+      entity.type === 'MRJ' &&
+      entity.house === 'USSR' &&
+      entity.teamRef?.typeName === 'mrj1');
     return {
       tick: state.tick,
       rngState: state.rngState,
@@ -175,7 +188,6 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCG13 MRJ crushes prone inf
       });
       expect(tsBefore.victim).toMatchObject({
         logicIndex: 123,
-        id: 228,
         type: 'E1',
         house: 'Greece',
         cx: 12,
@@ -194,15 +206,6 @@ describe.skipIf(!serverUp)('Dual runtime C++ parity: SCG13 MRJ crushes prone inf
       expect(tsAfter.tick).toBe(1032);
       expect(cppAfter.victim).toBeNull();
       expect(tsAfter.liveAtCell).toBeNull();
-      if (tsAfter.victim) {
-        expect(tsAfter.victim).toMatchObject({
-          id: 228,
-          alive: false,
-          inLimbo: true,
-          occupiesCppLogic: false,
-          hp: 0,
-        });
-      }
       expect(tsAfter.mrj).toMatchObject({
         cx: cppAfter.mrj?.cx,
         cy: cppAfter.mrj?.cy,

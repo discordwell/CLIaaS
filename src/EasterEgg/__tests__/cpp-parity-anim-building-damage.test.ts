@@ -72,8 +72,9 @@ describe('building SHP frame: damage state (building.cpp:632-688)', () => {
     const entry = BUILDING_FRAME_TABLE['powr'];
     expect(entry).toBeDefined();
     expect(entry.damageFrame).toBeGreaterThan(0);
-    // powr has 8 frames: 0-3 normal, 4-7 damaged
-    expect(entry.damageFrame).toBe(4);
+    // POWR is IsSimpleDamage=true and is omitted from bdata.cpp _anims:
+    // frame 0 normal, frame 1 damaged.
+    expect(entry.damageFrame).toBe(1);
   });
 
   // Test all buildings in BUILDING_FRAME_TABLE have valid damage frame offsets
@@ -310,28 +311,27 @@ describe('building sprite frame changes (building.cpp:679-687)', () => {
 
   // Test specific buildings against known C++ frame layouts.
   // idleAnimCount values are derived from C++ bdata.cpp:3054-3096 _anims table.
-  // For FACT, BARR, TENT: C++ registers a 10/26-frame cycle via Init_Anim
-  // (STRUCT_CONST BSTATE_ACTIVE 0,26,3; STRUCT_BARRACKS/TENT BSTATE_IDLE 0,10,3).
-  // The TS renderer plays these as idle loops for visual fidelity.
-  // powr/dome/weap idleAnimCount values are anticipated for post-Cluster A
-  // re-extraction of the full animation frames (pumping/sweep/bay door).
+  // BARR/TENT have real BSTATE_IDLE loops. FACT's 26-frame sequence is
+  // BSTATE_ACTIVE only; idle construction yards stay on frame 0.
+  // Simple-damage buildings omitted from _anims are static: frame 0 normal,
+  // frame 1 damaged. They must not cycle into damaged art while healthy.
   const EXPECTED_FRAME_DATA: [string, number, number][] = [
     // [type, damageFrame, idleAnimCount]
-    ['powr', 4, 8],       // blade rotation (post-Cluster A re-extraction)
+    ['powr', 1, 0],       // static simple damage (omitted from _anims)
     ['apwr', 1, 0],       // 2 frames: 0 normal, 1 damaged
-    ['fact', 26, 26],     // 52 frames: 26 pumping idle cycle (C++ BSTATE_ACTIVE 0,26,3)
+    ['fact', 26, 0],      // idle static; active sequence is BSTATE_ACTIVE 0,26,3
     ['weap', 16, 32],     // 32 frames: bay door (post-Cluster A re-extraction)
     ['barr', 10, 10],     // 20 frames: 10 door cycle (C++ BSTATE_IDLE 0,10,3)
     ['tent', 10, 10],     // 20 frames: 10 door cycle (C++ BSTATE_IDLE 0,10,3)
     ['proc', 16, 0],      // 32 frames: conveyor states + damaged mirror
-    ['dome', 8, 16],      // 16 frames: radar sweep (post-Cluster A re-extraction)
+    ['dome', 1, 0],       // static: STRUCT_RADAR is omitted from _anims
     ['silo', 5, 0],       // 10 frames: 0-4 fill levels, 5-9 damaged
     ['hbox', 1, 0],       // 2 frames: 0 normal, 1 damaged
     ['pbox', 1, 0],       // 2 frames: 0 normal, 1 damaged
     ['tsla', 10, 10],     // 20 frames: 0-9 sparking anim, 10-19 damaged sparking
     ['gap', 32, 32],      // 64 frames: 0-31 shroud sweep, 32-63 damaged
-    ['atek', 8, 8],       // 16 frames: 0-7 tech anim, 8-15 damaged
-    ['stek', 8, 8],       // 16 frames: 0-7 tech anim, 8-15 damaged
+    ['atek', 1, 0],       // static simple damage (omitted from _anims)
+    ['stek', 1, 0],       // static simple damage (omitted from _anims)
     ['hosp', 4, 4],       // 9 frames: red cross blink + damaged
     ['iron', 11, 11],     // 22 frames: power glow + damaged
     ['pdox', 29, 29],     // 58 frames: energy effect + damaged
@@ -346,6 +346,13 @@ describe('building sprite frame changes (building.cpp:679-687)', () => {
       expect(entry.idleAnimCount).toBe(expectedAnim);
     });
   }
+
+  it('FACT records its C++ active animation separately from idle', () => {
+    const fact = BUILDING_FRAME_TABLE['fact'];
+    expect(fact.idleAnimCount).toBe(0);
+    expect(fact.activeAnimCount).toBe(26);
+    expect(fact.activeAnimRate).toBe(3);
+  });
 
   it('animated buildings use damage-offset animation cycle', () => {
     // For animated buildings (idleAnimCount > 0), damaged state should use:
@@ -418,20 +425,16 @@ describe('tech center flicker bug: no damage state oscillation', () => {
     const atek = BUILDING_FRAME_TABLE['atek'];
     const maxHp = 256;
 
-    // Simulate 100 frames at exactly 50% HP
+    // Simulate 100 frames above 50% HP. ATEK is a static simple-damage
+    // building in C++; it should not cycle through old placeholder anim frames.
     const frames: number[] = [];
     for (let tick = 0; tick < 100; tick++) {
-      const hp = 128;
-      const damaged = hp < maxHp * 0.5; // false consistently
-      const baseFrame = damaged ? atek.damageFrame : atek.idleFrame;
-      const frame = baseFrame + (Math.floor(tick / 8) % atek.idleAnimCount);
-      frames.push(frame);
+      const hp = 129;
+      const damaged = hp <= maxHp * 0.5; // false consistently
+      frames.push(damaged ? atek.damageFrame : atek.idleFrame);
     }
 
-    // All frames should be in the healthy range [0, 7] since hp=128 is NOT < 128
-    for (const f of frames) {
-      expect(f, `frame ${f} should be in healthy range [0, 7]`).toBeLessThan(8);
-    }
+    expect(new Set(frames)).toEqual(new Set([0]));
   });
 
   it('stek (Soviet Tech) no flicker at damage boundary', () => {
@@ -442,13 +445,13 @@ describe('tech center flicker bug: no damage state oscillation', () => {
     const hp = 100;
     const results: boolean[] = [];
     for (let tick = 0; tick < 50; tick++) {
-      const damaged = hp < maxHp * 0.5; // 100 < 100.0 → false
+      const damaged = hp <= maxHp * 0.5; // 100 <= 100.0 -> true
       results.push(damaged);
     }
 
-    // Must be consistently false (no oscillation)
+    // Must be consistently damaged at the C++ yellow threshold.
     expect(new Set(results).size).toBe(1);
-    expect(results[0]).toBe(false);
+    expect(results[0]).toBe(true);
   });
 
   it('no flicker at 1 HP below threshold', () => {
@@ -458,17 +461,11 @@ describe('tech center flicker bug: no damage state oscillation', () => {
 
     const frames: number[] = [];
     for (let tick = 0; tick < 50; tick++) {
-      const damaged = hp < maxHp * 0.5; // 127 < 128.0 → true
-      const baseFrame = damaged ? atek.damageFrame : atek.idleFrame;
-      const frame = baseFrame + (Math.floor(tick / 8) % atek.idleAnimCount);
-      frames.push(frame);
+      const damaged = hp <= maxHp * 0.5; // 127 <= 128.0 -> true
+      frames.push(damaged ? atek.damageFrame : atek.idleFrame);
     }
 
-    // All frames should be in the damaged range [8, 15]
-    for (const f of frames) {
-      expect(f, `frame ${f} should be in damaged range [8, 15]`).toBeGreaterThanOrEqual(8);
-      expect(f).toBeLessThan(16);
-    }
+    expect(new Set(frames)).toEqual(new Set([1]));
   });
 });
 
@@ -491,14 +488,8 @@ describe('frame overflow guards (E6)', () => {
   }
 
   /** Mirror of renderer.ts static-damaged frame calc with E6 guards. */
-  function damagedStaticFrame(damageFrame: number, totalFrames: number, tick: number): number {
-    const rawDamageAnimCount = Math.min(damageFrame, totalFrames - damageFrame);
-    let frame: number;
-    if (rawDamageAnimCount <= 0) {
-      frame = Math.max(0, totalFrames - 1);
-    } else {
-      frame = damageFrame + (rawDamageAnimCount > 1 ? Math.floor(tick / 8) % rawDamageAnimCount : 0);
-    }
+  function damagedStaticFrame(damageFrame: number, totalFrames: number, _tick: number): number {
+    let frame = Math.min(damageFrame, Math.max(0, totalFrames - 1));
     if (frame >= totalFrames || frame < 0) {
       frame = totalFrames > 0 ? ((frame % totalFrames) + totalFrames) % totalFrames : 0;
     }
@@ -506,8 +497,8 @@ describe('frame overflow guards (E6)', () => {
   }
 
   it('animated building with idleAnimCount exceeding sheet stays in bounds', () => {
-    // powr declares idleAnimCount=8 for post-Cluster A extraction, but pre-extraction
-    // sheet only has 2 frames. Renderer must clamp to avoid reading frame 7 from a 2-frame sheet.
+    // Renderer must clamp animation counts when a table entry outruns a
+    // partially extracted sheet.
     const totalFrames = 2;
     for (let tick = 0; tick < 160; tick++) {
       const f = animatedFrame(0, 8, totalFrames, tick);
@@ -516,8 +507,9 @@ describe('frame overflow guards (E6)', () => {
     }
   });
 
-  it('animated building with full-size sheet still cycles full animation', () => {
-    // fact has 52 frames, idleAnimCount=26 — must cycle through all 26 frames.
+  it('FACT active animation with full-size sheet cycles the BSTATE_ACTIVE span', () => {
+    // fact has 52 frames and BSTATE_ACTIVE Count=26 — when the construction
+    // yard is in MISSION_REPAIR, it cycles through frames 0..25.
     const seen = new Set<number>();
     for (let tick = 0; tick < 26 * 8; tick++) {
       seen.add(animatedFrame(0, 26, 52, tick));
@@ -529,8 +521,8 @@ describe('frame overflow guards (E6)', () => {
     }
   });
 
-  it('damaged animated building clamps to available frames past damageFrame', () => {
-    // fact damaged: baseFrame=26, idleAnimCount=26, totalFrames=52.
+  it('damaged active building clamps to available frames past damageFrame', () => {
+    // fact damaged while BSTATE_ACTIVE: baseFrame=26, Count=26, totalFrames=52.
     // Must stay within [26, 51].
     for (let tick = 0; tick < 26 * 8; tick++) {
       const f = animatedFrame(26, 26, 52, tick);
@@ -547,15 +539,13 @@ describe('frame overflow guards (E6)', () => {
   });
 
   it('static damaged building with sheet exactly matching damageFrame uses single frame', () => {
-    // e.g. 20-frame sheet with damageFrame=10: rawDamageAnimCount = 10
+    // Static damaged buildings do not walk the damage span; C++ adds the
+    // largest animation offset to the current stage, which remains 0.
     const seen = new Set<number>();
     for (let tick = 0; tick < 80; tick++) {
       seen.add(damagedStaticFrame(10, 20, tick));
     }
-    for (const f of seen) {
-      expect(f).toBeGreaterThanOrEqual(10);
-      expect(f).toBeLessThan(20);
-    }
+    expect(seen).toEqual(new Set([10]));
   });
 
   it('never produces negative frames even with pathological inputs', () => {

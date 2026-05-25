@@ -575,6 +575,15 @@
     "sheetWidth": 133,
     "sheetHeight": 17
   },
+  "smokland": {
+    "frameWidth": 42,
+    "frameHeight": 31,
+    "frameCount": 92,
+    "columns": 16,
+    "rows": 6,
+    "sheetWidth": 672,
+    "sheetHeight": 186
+  },
   "litning": {
     "frameWidth": 24,
     "frameHeight": 24,
@@ -2150,6 +2159,87 @@
     "sheetWidth": 960,
     "sheetHeight": 72
   },
+  "boxes01": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 24,
+    "sheetHeight": 24
+  },
+  "boxes02": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 24,
+    "sheetHeight": 24
+  },
+  "boxes03": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 24,
+    "sheetHeight": 24
+  },
+  "boxes04": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 24,
+    "sheetHeight": 24
+  },
+  "boxes05": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 24,
+    "sheetHeight": 24
+  },
+  "boxes06": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 24,
+    "sheetHeight": 24
+  },
+  "boxes07": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 24,
+    "sheetHeight": 24
+  },
+  "boxes08": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 24,
+    "sheetHeight": 24
+  },
+  "boxes09": {
+    "frameWidth": 24,
+    "frameHeight": 24,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 24,
+    "sheetHeight": 24
+  },
   "factmake": {
     "frameWidth": 72,
     "frameHeight": 72,
@@ -3051,6 +3141,78 @@
     "sheetHeight": 48
   },
   "speficon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "sonricon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "atomicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "warpicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "pbmbicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "pinficon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "camicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "infxicon": {
+    "frameWidth": 64,
+    "frameHeight": 48,
+    "frameCount": 1,
+    "columns": 1,
+    "rows": 1,
+    "sheetWidth": 64,
+    "sheetHeight": 48
+  },
+  "gpssicon": {
     "frameWidth": 64,
     "frameHeight": 48,
     "frameCount": 1,

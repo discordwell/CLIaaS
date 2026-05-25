@@ -33,7 +33,10 @@ export interface DrawFrameOptions {
   centerY?: boolean;
   scale?: number;
   flip?: boolean;
+  /** C++ CC_Draw_Shape rotation parameter, in 0..255 DirType units. */
+  rotation256?: number;
   ghostShadow?: GhostShadowOptions;
+  conquerFading?: boolean;
 }
 
 export interface TranslucentControl {
@@ -306,10 +309,21 @@ export class AssetManager {
     const dh = meta.frameHeight * scale;
     if (options?.centerX) dx -= Math.floor(dw / 2);
     if (options?.centerY) dy -= Math.floor(dh / 2);
-    if (options?.ghostShadow && this.drawFrameWithGhostShadow(ctx, source, meta, frameIndex, dx, dy, options)) {
+    const rotation256 = options?.rotation256 ?? 0;
+    if (rotation256 === 0 &&
+        options?.ghostShadow &&
+        this.drawFrameWithGhostShadow(ctx, source, meta, frameIndex, dx, dy, options)) {
       return;
     }
-    if (options?.flip) {
+    if (rotation256 !== 0 && !options?.flip) {
+      const originX = options?.centerX ? Math.floor(dw / 2) : 0;
+      const originY = options?.centerY ? Math.floor(dh / 2) : 0;
+      ctx.save();
+      ctx.translate(dx + originX, dy + originY);
+      ctx.rotate((rotation256 * Math.PI * 2) / 256);
+      ctx.drawImage(source, sx, sy, meta.frameWidth, meta.frameHeight, -originX, -originY, dw, dh);
+      ctx.restore();
+    } else if (options?.flip) {
       ctx.save();
       ctx.scale(-1, 1);
       ctx.drawImage(source, sx, sy, meta.frameWidth, meta.frameHeight, -dx - dw, dy, dw, dh);
@@ -629,7 +643,9 @@ export class AssetManager {
             dest.data[destOff + 1],
             dest.data[destOff + 2],
           );
-          const table = this.getBuildFadingTable(palette, control.destColorIndex, control.frac);
+          const table = options?.conquerFading
+            ? this.getFadingTable(palette, control.destColorIndex, control.frac)
+            : this.getBuildFadingTable(palette, control.destColorIndex, control.frac);
           const remapped = palette[table[dstIndex]];
           if (!remapped) continue;
           dest.data[destOff] = remapped[0];

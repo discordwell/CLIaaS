@@ -13,8 +13,9 @@
  * 2. ACTIVE: Live minimap showing terrain, units, structures
  *    C++ source: radar.cpp:480 (IsRadarActive branch draws cell-by-cell minimap)
  *
- * 3. JAMMED (GAP generator): Static/snow noise cycling
- *    C++ source: radar.cpp:469-477 (IsRadarJammed → Radar_Anim with snow frames),
+ * 3. JAMMED (enemy MRJ): natoradr/ussrradr static animation frames
+ *    C++ source: house.cpp:1269-1298 (DOME IsJammed → IsRadarJammed),
+ *    radar.cpp:469-477 (IsRadarJammed → Radar_Anim with static frames),
  *    radar.cpp:1676-1681 (jammed cycles frames near RADAR_ACTIVATED_FRAME)
  *
  * Key C++ mapping (radar.cpp:370-381):
@@ -44,6 +45,7 @@ import {
   advanceRadarAnimation,
   createRadarVisualState,
   isRadarActive,
+  isRadarZoomableForMap,
   radarDisplayFrame,
   updateRadarAvailability,
 } from '../engine/radar';
@@ -223,6 +225,15 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
       expect(r.doesRadarExist).toBe(true);
       expect(r.hasRadar).toBe(false);
     });
+
+    it('disables Zoom when C++ Is_Zoomable would be false', () => {
+      // radar.cpp:976-984 computes floor(RadIWidth / MapCellWidth) and
+      // floor(RadIHeight / MapCellHeight); if the resulting factor is 3,
+      // toggling zoom has no visual effect, so SidebarClass::Zoom stays disabled.
+      expect(isRadarZoomableForMap(32, 38)).toBe(false); // SCU01EA
+      expect(isRadarZoomableForMap(64, 64)).toBe(true);
+      expect(isRadarZoomableForMap(128, 128)).toBe(true);
+    });
   });
 
   describe('display state priority (radar.cpp Draw_It:469-480)', () => {
@@ -330,6 +341,23 @@ describe('C++ parity: Radar display states (radar.cpp)', () => {
       expect(state.isRadarDeactivating).toBe(false);
       expect(state.doesRadarExist).toBe(true);
       expect(radarDisplayFrame(state)).toBe(MAX_RADAR_FRAMES);
+    });
+
+    it('active jammed radar cycles the C++ static cover frames instead of exposing the minimap', () => {
+      const state = createRadarVisualState();
+      state.doesRadarExist = true;
+      state.isRadarActive = true;
+      state.radarAnimFrame = RADAR_ACTIVATED_FRAME;
+
+      expect(radarDisplayFrame(state, true)).toBe(RADAR_ACTIVATED_FRAME);
+      advanceRadarAnimation(state, true);
+      expect(radarDisplayFrame(state, true)).toBe(RADAR_ACTIVATED_FRAME + 1);
+      advanceRadarAnimation(state, true);
+      expect(radarDisplayFrame(state, true)).toBe(RADAR_ACTIVATED_FRAME + 2);
+      advanceRadarAnimation(state, true);
+      expect(radarDisplayFrame(state, true)).toBe(RADAR_ACTIVATED_FRAME + 3);
+      advanceRadarAnimation(state, true);
+      expect(radarDisplayFrame(state, true)).toBe(RADAR_ACTIVATED_FRAME);
     });
   });
 

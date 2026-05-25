@@ -38,7 +38,16 @@ import {
   getFactoryType,
   type FactoryType,
   PRODUCTION_ITEMS,
+  SuperweaponType,
+  type SuperweaponState,
 } from '../engine/types';
+import {
+  buildCppSidebarCandidates,
+  makeSidebarSpecialItem,
+  reconcileCppSidebarItems,
+  sortProductionItemsForCppSidebar,
+  SPECIAL_WEAPON_ICON,
+} from '../engine/sidebar';
 import {
   startProduction,
   cancelProduction,
@@ -72,6 +81,12 @@ const makeStructure = (type: string, house: House = 'Greece'): MapStructure => (
   hp: 400,
   maxHp: 400,
 } as MapStructure);
+
+const prod = (type: string): ProductionItem => {
+  const item = PRODUCTION_ITEMS.find(i => i.type === type);
+  if (!item) throw new Error(`Missing production item ${type}`);
+  return item;
+};
 
 const makeContext = (overrides: Partial<ProductionContext> = {}): ProductionContext => {
   const structures: MapStructure[] = [
@@ -279,6 +294,64 @@ describe('C++ parity: independent strip queues (sidebar.cpp:669)', () => {
     // Unit should still be building
     expect(ctx.productionQueue.has('unit')).toBe(true);
     expect(ctx.productionQueue.get('unit')?.progress).toBe(30);
+  });
+});
+
+describe('C++ parity: sidebar append/order lifecycle (building.cpp:2183, sidebar.cpp:1373)', () => {
+  it('initial structure candidates follow C++ StructType enum order, not PRODUCTION_ITEMS order', () => {
+    // defines.h: STRUCT_REFINERY precedes STRUCT_POWER/STRUCT_ADVANCED_POWER/BARRACKS.
+    // SCU08EA shows this exact left-strip order at t2000.
+    const items = buildCppSidebarCandidates(
+      [prod('POWR'), prod('APWR'), prod('BARR'), prod('PROC')],
+      [],
+    );
+    expect(items.map(i => i.type)).toEqual(['PROC', 'POWR', 'APWR', 'BARR']);
+  });
+
+  it('vessel candidates follow C++ VesselType enum order', () => {
+    // defines.h: VESSEL_SS precedes VESSEL_TRANSPORT. SCU08EA right strip is
+    // SUBMARINE then TRANSPORT even though PRODUCTION_ITEMS lists LST earlier.
+    const items = sortProductionItemsForCppSidebar([prod('LST'), prod('SS')]);
+    expect(items.map(i => i.type)).toEqual(['SS', 'LST']);
+  });
+
+  it('initial right strip includes RTTI_SPECIAL entries before aircraft buildables', () => {
+    // C++ house.cpp adds SPC_SPY_MISSION to Map.Column[1], and sidebar.cpp
+    // draws RTTI_SPECIAL from SpecialWeaponFile[] just like a production cameo.
+    const spyState: SuperweaponState = {
+      type: SuperweaponType.SPY_PLANE,
+      house: 'USSR' as House,
+      chargeTick: 0,
+      ready: false,
+      structureIndex: 0,
+      fired: false,
+    };
+    const items = buildCppSidebarCandidates(
+      [prod('MIG'), prod('YAK')],
+      [makeSidebarSpecialItem(spyState)],
+    );
+    expect(items.map(i => i.type)).toEqual(['SPECIAL:SPY_PLANE', 'MIG', 'YAK']);
+  });
+
+  it('keeps existing strip entries in place and appends newly available items', () => {
+    // SidebarClass::StripClass::Add appends and Recalc removes invalid entries;
+    // it does not sort existing Buildables[] when prerequisites change later.
+    const initial = reconcileCppSidebarItems([], [prod('POWR')], []);
+    const afterPower = reconcileCppSidebarItems(initial, [prod('POWR'), prod('PROC')], []);
+    expect(afterPower.map(i => i.type)).toEqual(['POWR', 'PROC']);
+  });
+
+  it('uses const.cpp SpecialWeaponFile names for special weapon icon assets', () => {
+    expect(SPECIAL_WEAPON_ICON).toMatchObject({
+      [SuperweaponType.SONAR_PULSE]: 'sonricon',
+      [SuperweaponType.NUKE]: 'atomicon',
+      [SuperweaponType.CHRONOSPHERE]: 'warpicon',
+      [SuperweaponType.PARABOMB]: 'pbmbicon',
+      [SuperweaponType.PARAINFANTRY]: 'pinficon',
+      [SuperweaponType.SPY_PLANE]: 'camicon',
+      [SuperweaponType.IRON_CURTAIN]: 'infxicon',
+      [SuperweaponType.GPS_SATELLITE]: 'gpssicon',
+    });
   });
 });
 

@@ -35,6 +35,8 @@ import { isScg01Jeep27DebugEnabled } from './perCellProcess';
 import { type LogicAnim, spawnLogicAnimForSprite } from './logicAnim';
 import { assignMission } from './missionLifecycle';
 
+const ELECTRIC_WEAPON_NAMES = new Set(['TeslaZap', 'TeslaCannon', 'PortaTesla', 'TTankZap']);
+
 function clearFootPath(entity: Entity): void {
   entity.path = [];
   entity.pathIndex = 0;
@@ -164,6 +166,17 @@ export interface MissionAIContext {
   isDiscoveredStructureByPlayer?(structure: MapStructure): boolean;
   // Per-house fog-of-war — retained for older mission-specific approximations.
   isRevealedToHouse(cx: number, cy: number, houseIdx: number): boolean;
+  /** C++ TechnoClass::Electric_Zap calls Map.Flag_To_Redraw(true) when the bolt touches TacMap. */
+  markCompleteRedrawForTacticalLine?(source: WorldPos, dest: WorldPos): void;
+  /** C++ TechnoClass::Do_Uncloak flags a complete radar redraw from CLOAKED. */
+  markCloakRedraw?(entity: Entity): void;
+}
+
+function beginUncloakForFireGate(ctx: MissionAIContext, entity: Entity): void {
+  if (entity.cloakState !== CloakState.CLOAKED && entity.cloakState !== CloakState.CLOAKING) return;
+  if (entity.cloakState === CloakState.CLOAKED) ctx.markCloakRedraw?.(entity);
+  entity.cloakState = CloakState.UNCLOAKING;
+  entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
 }
 
 /** C++ TechnoClass::Fire_At ammo decrement + InfantryClass::Fire_At fraidy-cat
@@ -1300,8 +1313,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
           entity.stats.isCloakable &&
           entity.cloakState !== CloakState.UNCLOAKED) {
         if (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) {
-          entity.cloakState = CloakState.UNCLOAKING;
-          entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
+          beginUncloakForFireGate(ctx, entity);
         }
         return;
       }
@@ -1390,8 +1402,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
           entity.stats.isCloakable &&
           entity.cloakState !== CloakState.UNCLOAKED) {
         if (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) {
-          entity.cloakState = CloakState.UNCLOAKING;
-          entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
+          beginUncloakForFireGate(ctx, entity);
         }
         return;
       }
@@ -1646,8 +1657,13 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       const ty = entity.target.pos.y;
       const sx = entity.pos.x;
       const sy = entity.pos.y;
+      const isElectricWeapon = ELECTRIC_WEAPON_NAMES.has(activeWeapon.name);
 
-      if (entity.isAnt && (activeWeapon.name === 'TeslaZap' || activeWeapon.name === 'TeslaCannon')) {
+      if (isElectricWeapon) {
+        ctx.markCompleteRedrawForTacticalLine?.({ x: sx, y: sy }, { x: tx, y: ty });
+      }
+
+      if (entity.isAnt && isElectricWeapon) {
         ctx.effects.push({ type: 'tesla', x: tx, y: ty, frame: 0, maxFrames: 8, size: 12,
           sprite: 'piffpiff', spriteStart: 0, startX: sx, startY: sy, endX: tx, endY: ty, blendMode: 'screen' } as Effect);
       } else if (entity.isAnt && activeWeapon.name === 'Napalm') {
@@ -1657,7 +1673,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
       } else if (entity.isAnt) {
         ctx.effects.push({ type: 'blood', x: tx, y: ty, frame: 0, maxFrames: 8, size: 6,
           sprite: 'piffpiff', spriteStart: 0 } as Effect);
-      } else if (activeWeapon.name === 'TeslaCannon' || activeWeapon.name === 'TeslaZap') {
+      } else if (isElectricWeapon) {
         // Tesla weapons: lightning bolt arc from source to target
         ctx.effects.push({ type: 'muzzle', x: sx, y: sy, frame: 0, maxFrames: 4, size: 5,
           sprite: 'piff', spriteStart: 0, muzzleColor: '120,180,255' } as Effect);
@@ -3885,8 +3901,7 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
 
   if (entity.stats.isCloakable && entity.cloakState !== CloakState.UNCLOAKED) {
     if (entity.cloakState === CloakState.CLOAKED || entity.cloakState === CloakState.CLOAKING) {
-      entity.cloakState = CloakState.UNCLOAKING;
-      entity.cloakTimer = CLOAK_TRANSITION_FRAMES;
+      beginUncloakForFireGate(ctx, entity);
     }
     return;
   }

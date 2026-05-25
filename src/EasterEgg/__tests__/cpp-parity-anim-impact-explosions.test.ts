@@ -22,7 +22,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import { EXPLOSION_FRAMES, WARHEAD_PROPS, type WarheadType } from '../engine/types';
-import { combatAnim } from '../engine/combat';
+import { combatAnim, vesselWaterImpactAnim } from '../engine/combat';
+import { logicAnimTypeForSprite } from '../engine/logicAnim';
 
 // ========== C++ REFERENCE DATA ==========
 
@@ -71,6 +72,14 @@ describe('C++ Parity: Impact Explosion Animations', () => {
       const frames = EXPLOSION_FRAMES[sprite];
       expect(frames, `${sprite} must exist in EXPLOSION_FRAMES`).toBeDefined();
       expect(frames, `${sprite} frame count must be positive`).toBeGreaterThan(0);
+    });
+  });
+
+  describe('LogicAnim mapping for Combat_Anim AnimClass results', () => {
+    it('maps every ground impact sprite to a TS LogicAnim type', () => {
+      for (const sprite of [...CPP_AP_LIST, ...CPP_HE_LIST]) {
+        expect(logicAnimTypeForSprite(sprite), sprite).not.toBeNull();
+      }
     });
   });
 
@@ -177,6 +186,22 @@ describe('C++ Parity: Impact Explosion Animations', () => {
     it('over water → water explosion variants scaled by damage', () => {
       expect(combatAnim(1, SET, 'water')).toBe('water-exp3');
       expect(combatAnim(90, SET, 'water')).toBe('water-exp1');
+    });
+  });
+
+  describe('BulletClass water impact conversion for vessel center cells', () => {
+    it('converts water explosions to the corresponding vehicle hit only on the target vessel center cell', () => {
+      const impactCell = { cx: 20, cy: 53 };
+      const otherCell = { cx: 20, cy: 54 };
+
+      expect(vesselWaterImpactAnim('water-exp1', true, impactCell, impactCell)).toBe('veh-hit1');
+      expect(vesselWaterImpactAnim('water-exp2', true, impactCell, impactCell)).toBe('veh-hit2');
+      expect(vesselWaterImpactAnim('water-exp3', true, impactCell, impactCell)).toBe('veh-hit3');
+
+      expect(vesselWaterImpactAnim('water-exp1', false, impactCell, impactCell)).toBe('water-exp1');
+      expect(vesselWaterImpactAnim('water-exp1', true, impactCell, otherCell)).toBe('water-exp1');
+      expect(vesselWaterImpactAnim('fball1', true, impactCell, impactCell)).toBe('fball1');
+      expect(vesselWaterImpactAnim(null, true, impactCell, impactCell)).toBeNull();
     });
   });
 

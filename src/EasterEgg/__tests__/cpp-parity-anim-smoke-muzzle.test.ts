@@ -24,6 +24,8 @@ import {
   WEAPON_STATS,
 } from '../engine/types';
 import type { WeaponStats, WarheadType } from '../engine/types';
+import { logicAnimRenderSpec, processLogicAnim, spawnLogicAnim, type LogicAnim } from '../engine/logicAnim';
+import type { Effect } from '../engine/renderer';
 
 // ── C++ Animation Data (adata.cpp) ──────────────────────────────────────────
 // Each entry: { name, sprite, maxDim, bigStage, normalized, delay, startFrame,
@@ -323,6 +325,49 @@ describe('C++ animation data definitions (adata.cpp)', () => {
     // C++ ON_FIRE_MED has followUp = ANIM_ON_FIRE_SMALL
     const ON_FIRE_MED_FOLLOW_UP = 'ANIM_ON_FIRE_SMALL';
     expect(ON_FIRE_MED_FOLLOW_UP).toBe('ANIM_ON_FIRE_SMALL');
+  });
+});
+
+describe('TS LogicAnim parity for C++ smoke/misc AnimClass entries', () => {
+  it('models ANIM_LZ_SMOKE as a persistent ground-layer SMOKLAND AnimClass', () => {
+    const logicAnims: LogicAnim[] = [];
+    const effects: Effect[] = [];
+    const reserved: boolean[] = [];
+
+    const spawned = spawnLogicAnim(
+      logicAnims,
+      effects,
+      'lz_smoke',
+      25 * 24 + 12,
+      58 * 24 + 12,
+      1,
+      true,
+      false,
+      184,
+      () => 185,
+      () => {
+        reserved.push(true);
+        return true;
+      },
+    );
+
+    expect(spawned).toBe(true);
+    expect(reserved).toHaveLength(1);
+    expect(logicAnims).toHaveLength(1);
+    expect(logicAnimRenderSpec(logicAnims[0].type)).toEqual({
+      sprite: 'smokland',
+      groundLayer: true,
+    });
+    expect(logicAnims[0].loops).toBe(255);
+
+    for (let i = 0; i < 210; i++) {
+      expect(processLogicAnim(logicAnims[0], logicAnims, effects)).toBe(true);
+    }
+
+    // C++ anim.cpp skips brand-new anims on the first logic pass, advances
+    // SMOKLAND every two ticks, then loops frames 72..90 with Loops decremented.
+    expect(logicAnims[0].stage).toBe(85);
+    expect(logicAnims[0].loops).toBe(254);
   });
 });
 

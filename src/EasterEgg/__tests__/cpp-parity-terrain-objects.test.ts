@@ -45,5 +45,12 @@ describe('TerrainClass object occupancy (tdata.cpp Occupy_List)', () => {
 
     expect(scenario.map.getTerrainObjectAtCell(82, 75)?.type).toBe('boxes02');
     expect(scenario.map.canEnterCell(82, 75, false, undefined, true)).toBe(MoveResult.IMPASSABLE);
+    // Same visible cluster that C++ agent_dump_layer exposes near the SCG13
+    // t1000 visual mismatch. The INI key stores TerrainClass Render_Coord
+    // origin; C++ Center_Coord/Sort_Y adds CenterBase=(12,24), so these draw
+    // one cell below their occupancy origin next to the BARL/BRL3 structures.
+    expect(scenario.map.getTerrainObjectAtCell(19, 54)?.type).toBe('boxes03');
+    expect(scenario.map.getTerrainObjectAtCell(21, 54)?.type).toBe('boxes06');
+    expect(scenario.map.getTerrainObjectAtCell(25, 55)?.type).toBe('boxes05');
   });
 });

@@ -1164,6 +1164,52 @@ describe('Sonar Pulse — submarine detection mechanics', () => {
 // ═══════════════════════════════════════════════════════════
 describe('Superweapon cooldown and charging system', () => {
 
+  it('airstrip free specials obey scenario [General] tech gates', () => {
+    // C++ house.cpp:1713/1734/1755 gates SpyPlane, ParaBomb, and
+    // ParaInfantry independently using Rule.*TechLevel. SCU10EA sets
+    // ParaTech=16 and ParabombTech=16 at player TechLevel=10, so only
+    // SPC_SPY_MISSION should enter the sidebar.
+    const ctx = makeMockSuperweaponContext({
+      playerHouse: House.USSR,
+      houseTechLevel: () => 10,
+      airstripSpecialTechLevels: {
+        spyPlane: 5,
+        paraBomb: 16,
+        paraInfantry: 16,
+      },
+    });
+    ctx.structures.push(makeStructure('AFLD', House.USSR, 5, 5));
+
+    updateSuperweapons(ctx);
+
+    const present = [...ctx.superweapons.values()].map(sw => sw.type).sort();
+    expect(present).toEqual([SuperweaponType.SPY_PLANE]);
+  });
+
+  it('multiple provider buildings do not multiply one house superweapon recharge', () => {
+    // C++ HouseClass owns one SuperWeapon[spc] slot per house; duplicate AFLDs
+    // keep SPC_SPY_MISSION present but SuperClass::AI still runs once per tick.
+    const ctx = makeMockSuperweaponContext({
+      playerHouse: House.USSR,
+      houseTechLevel: () => 10,
+      airstripSpecialTechLevels: {
+        spyPlane: 5,
+        paraBomb: 16,
+        paraInfantry: 16,
+      },
+    });
+    ctx.structures.push(
+      makeStructure('AFLD', House.USSR, 5, 5),
+      makeStructure('AFLD', House.USSR, 8, 5),
+    );
+
+    updateSuperweapons(ctx);
+
+    const spyPlane = ctx.superweapons.get(`${House.USSR}:${SuperweaponType.SPY_PLANE}`);
+    expect(spyPlane?.chargeTick).toBe(1);
+    expect(spyPlane?.ready).toBe(false);
+  });
+
   it('charging increments chargeTick up to rechargeTicks', () => {
     const ctx = makeMockSuperweaponContext();
     const def = SUPERWEAPON_DEFS[SuperweaponType.IRON_CURTAIN];
@@ -1276,7 +1322,7 @@ describe('Superweapon cooldown and charging system', () => {
     expect(ctx.superweapons.has(`${House.Spain}:${SuperweaponType.IRON_CURTAIN}`)).toBe(false);
   });
 
-  it('EVA announces when superweapon becomes ready', () => {
+  it('does not add top-left text when a superweapon becomes ready', () => {
     const ctx = makeMockSuperweaponContext();
     const def = SUPERWEAPON_DEFS[SuperweaponType.IRON_CURTAIN];
     const struct = makeStructure(def.building, House.Spain, 5, 5);
@@ -1286,7 +1332,9 @@ describe('Superweapon cooldown and charging system', () => {
     });
     ctx.superweapons.set(`${House.Spain}:${SuperweaponType.IRON_CURTAIN}`, state);
     updateSuperweapons(ctx);
-    expect((ctx as any)._evaMessages).toContain(`${def.name} ready`);
+    // C++ super.cpp SuperClass::AI calls Speak(VoxRecharge), not
+    // Session.Messages.Add_Message, so readiness must not draw text.
+    expect((ctx as any)._evaMessages).not.toContain(`${def.name} ready`);
   });
 
   it('powered superweapons require power, unpowered do not (C++ house.cpp:653-660)', () => {

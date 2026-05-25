@@ -71,6 +71,7 @@ const BARREL_FIRE_WEAPON: WeaponStats = {
   warhead: 'Fire',
   isInvisible: true,
 };
+const ELECTRIC_WEAPON_NAMES = new Set(['TeslaZap', 'TeslaCannon', 'PortaTesla', 'TTankZap']);
 
 function clearFootPath(entity: Entity): void {
   entity.path = [];
@@ -1358,6 +1359,10 @@ export interface CombatContext {
   /** C++ TechnoClass::Evaluate_Object visibility gate: PlayerPtr-owned or discovered by PlayerPtr. */
   isDiscoveredByPlayer?(entity: Entity): boolean;
   isRevealedToHouse?(cx: number, cy: number, houseIdx: number): boolean;
+  /** C++ TechnoClass::Electric_Zap calls Map.Flag_To_Redraw(true) when the bolt touches TacMap. */
+  markCompleteRedrawForTacticalLine?(source: WorldPos, dest: WorldPos): void;
+  /** C++ TechnoClass cloak state changes call RadarClass::Flag_To_Redraw(true). */
+  markCloakRedraw?(entity: Entity): void;
   /** C++ InfantryClass::Stop_Driver, used by InfantryClass::Assign_Destination. */
   stopInfantryDriver?(entity: Entity): void;
   /** C++ InfantryClass::Can_Enter_Cell, used by survivor Scatter(0,true). */
@@ -1546,6 +1551,28 @@ export function combatAnim(damage: number, explosionSet: number, land: 'ground' 
     case 1: return 'piff';  // HollowPoint — always piff
 
     default: return null;  // Set 0 (Super/Organic/Mechanical) — no explosion
+  }
+}
+
+type CellCoord = { cx: number; cy: number };
+
+/**
+ * C++ bullet.cpp:1037-1046 — water impacts on the target vessel's center cell
+ * use the corresponding vehicle-hit animation instead of a water splash.
+ */
+export function vesselWaterImpactAnim(
+  sprite: string | null,
+  targetIsVessel: boolean,
+  impactCell: CellCoord,
+  targetCenterCell?: CellCoord,
+): string | null {
+  if (!sprite || !targetIsVessel || !targetCenterCell) return sprite;
+  if (impactCell.cx !== targetCenterCell.cx || impactCell.cy !== targetCenterCell.cy) return sprite;
+  switch (sprite) {
+    case 'water-exp1': return 'veh-hit1';
+    case 'water-exp2': return 'veh-hit2';
+    case 'water-exp3': return 'veh-hit3';
+    default: return sprite;
   }
 }
 
@@ -1800,6 +1827,7 @@ export function damageEntity(
   }
   const occupiedLogicBefore = target.occupiesCppLogic();
   const hpBefore = target.hp;
+  const cloakStateBefore = target.cloakState;
   const whProps = getWarheadProps(warhead, ctx.scenarioWarheadProps);
   const passengerHouses = (!target.stats.isInfantry && !target.isAirUnit && !target.stats.isVessel)
     ? []
@@ -1809,6 +1837,9 @@ export function damageEntity(
     skipArmorBias: options.skipEntityArmorBias,
     hasDamageSource: attacker !== undefined || options.sourceStructure !== undefined,
   });
+  if (cloakStateBefore === CloakState.CLOAKED && target.cloakState === CloakState.UNCLOAKING) {
+    ctx.markCloakRedraw?.(target);
+  }
   if (killed) {
     updateInfantryDeathOccupancy(ctx, target);
     ctx.recordUnitLost?.(target.house);
@@ -3212,6 +3243,7 @@ export function checkVehicleCrush(ctx: CombatContext, vehicle: Entity): void {
   }
   // C++ unit.cpp:4447 — Do_Uncloak() after crushing at least one unit
   if (crushed && vehicle.stats.isCloakable) {
+    if (vehicle.cloakState === CloakState.CLOAKED) ctx.markCloakRedraw?.(vehicle);
     vehicle.cloakState = CloakState.UNCLOAKING;
     vehicle.cloakTimer = CLOAK_TRANSITION_FRAMES;
   }
@@ -4219,7 +4251,15 @@ function detonateProjectile(ctx: CombatContext, proj: InflightProjectile): void 
     const projLand: 'ground' | 'water' | 'air' =
       (projTarget && projTarget.isAirUnit && entityInTopLayer(projTarget)) ? 'air' :
       (ctx.map.getTerrain(projImpactCell.cx, projImpactCell.cy) === Terrain.WATER) ? 'water' : 'ground';
-    const projImpactSprite = combatAnim(proj.strength, projExpSet, projLand);
+    const projTargetCenterCell = projTarget?.stats.isVessel
+      ? worldToCell(entityTargetPixels(projTarget).x, entityTargetPixels(projTarget).y)
+      : undefined;
+    const projImpactSprite = vesselWaterImpactAnim(
+      combatAnim(proj.strength, projExpSet, projLand),
+      projTarget?.stats.isVessel === true,
+      projImpactCell,
+      projTargetCenterCell,
+    );
     // V2RL SCUD: large explosion + screen shake on impact (C++ IsGigundo=true)
     const isScud = proj.weapon.name === 'SCUD';
     if (projImpactSprite) {
@@ -5558,6 +5598,12 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
           startX: sx, startY: sy, endX: bestTargetPixels.x, endY: bestTargetPixels.y,
           blendMode: 'screen',
         } as Effect);
+        if (ELECTRIC_WEAPON_NAMES.has(s.weapon.weaponName ?? '')) {
+          ctx.markCompleteRedrawForTacticalLine?.(
+            { x: sx, y: sy },
+            { x: bestTargetPixels.x, y: bestTargetPixels.y },
+          );
+        }
         ctx.playSoundAt('teslazap', sx, sy);
         if (s.type === 'TSLA') {
           // C++ TechnoClass::Fire_At electric branch: firing a building
