@@ -13,7 +13,7 @@ import { Game } from '../engine/index';
 import { Entity } from '../engine/entity';
 import { GameMap } from '../engine/map';
 import { CELL_SIZE, House, RESFACTOR, UnitType } from '../engine/types';
-import { revealAroundCell } from '../engine/fog';
+import { revealAroundCell, updateFogOfWar } from '../engine/fog';
 
 class FakeAudio {
   src = ''; preload = ''; volume = 1; currentTime = 0; muted = false; loop = false;
@@ -177,6 +177,38 @@ describe('DisplayClass::Map_Cell shroud state', () => {
     expect(map.getDisplayVisibility(64, 64)).toBe(2);
     expect(map.getVisibility(64, 61)).toBe(1);
     expect(map.getDisplayVisibility(64, 61)).toBe(1);
+  });
+
+  it('does not permanently map display shroud during per-tick current-sight rebuilds', () => {
+    // C++ display shroud advances through Map.Sight_From/Map_Cell from Look()
+    // calls. The per-tick visibility rebuild can mark current sight for logic,
+    // but it must not synthesize extra IsMapped display cells.
+    const map = new GameMap();
+    const entity = {
+      alive: true,
+      inLimbo: false,
+      house: House.Greece,
+      pos: { x: 64 * CELL_SIZE + CELL_SIZE / 2, y: 64 * CELL_SIZE + CELL_SIZE / 2 },
+      stats: { sight: 3 },
+    } as Entity;
+
+    updateFogOfWar({
+      entities: [entity],
+      structures: [],
+      map,
+      tick: 1,
+      playerHouse: House.Greece,
+      fogDisabled: false,
+      gpsActive: false,
+      powerProduced: 0,
+      powerConsumed: 0,
+      gapGeneratorCells: new Map(),
+      isAllied: (a, b) => a === b,
+      entitiesAllied: (a, b) => a.house === b.house,
+    });
+
+    expect(map.getVisibility(64, 64)).toBe(2);
+    expect(map.getDisplayVisibility(64, 64)).toBe(0);
   });
 
   it('fully shrouds both gameplay and display state when the map is reshrouded', () => {

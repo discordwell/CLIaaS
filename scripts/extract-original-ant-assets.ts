@@ -135,7 +135,10 @@ function main(): void {
     const shp = parseShp(shpData);
     const { png, meta } = createSpriteSheet(shp, palette);
 
-    copyFileSync(shpPath, join(ORIGINAL_ASSETS_DIR, asset.shp));
+    const originalShpPath = join(ORIGINAL_ASSETS_DIR, asset.shp);
+    if (shpPath !== originalShpPath) {
+      copyFileSync(shpPath, originalShpPath);
+    }
     writeFileSync(join(ORIGINAL_ASSETS_DIR, `${asset.name}.png`), png);
     originalManifest[asset.name] = meta;
 

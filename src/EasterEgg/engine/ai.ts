@@ -94,6 +94,8 @@ export interface AIHouseState {
   repairDelay: number;
   /** C++ HouseClass::DamageTime — low-power building damage countdown. */
   damageTimer: number;
+  /** C++ HouseClass::SpeakPowerDelay — low-power EVA/message countdown. */
+  speakPowerTimer?: number;
 }
 
 export type Difficulty = 'easy' | 'normal' | 'hard';
@@ -196,6 +198,8 @@ function cppFixedMulInt(raw: number, value: number): number {
 export const CPP_TEAM_DELAY_TICKS = cppFixedMulInt(cppFixedRaw(0, 6, 10), TICKS_PER_MINUTE);
 const CPP_INITIAL_TEAM_DELAY_TICKS = CPP_TEAM_DELAY_TICKS + 1;
 export const CPP_DAMAGE_DELAY_TICKS = TICKS_PER_MINUTE;
+export const CPP_INITIAL_SPEAK_POWER_DELAY_TICKS = 1;
+export const CPP_SPEAK_DELAY_TICKS = Math.floor((TICKS_PER_MINUTE * 2 * 8) / (3 + 1));
 
 /** C++ rules.ini RepairStep=7, RepairPercent=20% (rules.cpp defaults overridden by rules.ini) */
 const REPAIR_STEP = 7;
@@ -548,6 +552,9 @@ export function createAIHouseState(ctx: AIContext, house: House): AIHouseState {
     // Store in fixed-point-matching form: the lo/hi range the Random_Pick spans.
     repairDelay: 0.02,
     damageTimer: CPP_DAMAGE_DELAY_TICKS,
+    // C++ house.cpp:647 — SpeakPowerDelay(1), so the first low-power warning is
+    // available after the initial CDTimer countdown instead of waiting minutes.
+    speakPowerTimer: CPP_INITIAL_SPEAK_POWER_DELAY_TICKS,
   };
 }
 

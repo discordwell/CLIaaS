@@ -20,7 +20,7 @@
  *
  * TS engine references:
  *   - engine/index.ts:3194-3204  — playEva() — 45-tick flat throttle, no power gate (FIXED)
- *   - engine/index.ts:1954-1958  — Low power: every 150 ticks (10s), no ConYard check
+ *   - engine/index.ts:1882-1913  — Low power: SpeakPowerDelay + ConYard check
  *   - engine/index.ts:6252-6258  — Silos needed: 450-tick throttle
  *   - engine/combat.ts:1175-1181 — Base attack: 900-tick throttle (60s) (FIXED from 75)
  *   - engine/combat.ts:491-499   — Unit death: always eva_unit_lost
@@ -63,7 +63,7 @@ const CPP_SPEAK_DELAY_NORMALIZED = normalizeDelay(CPP_SPEAK_DELAY_RAW); // 3600
 const TS_GAME_TICKS_PER_SEC = 15;
 const TS_EVA_THROTTLE = 45; // playEva() universal throttle (3 seconds)
 const TS_BASE_ATTACK_THROTTLE = TS_GAME_TICKS_PER_SEC * 60; // 900 ticks (60 seconds)
-const TS_LOW_POWER_INTERVAL = TS_GAME_TICKS_PER_SEC * 10; // 150 ticks (10 seconds)
+const TS_LOW_POWER_INTERVAL = CPP_SPEAK_DELAY_NORMALIZED;
 const TS_SILO_WARNING_THROTTLE = 450; // 30 seconds
 
 // ============================================================================
@@ -128,14 +128,14 @@ describe('EVA Triggers — C++ parity audit', () => {
       expect(tsBaseAttackDelay / TS_GAME_TICKS_PER_SEC).toBe(60); // 60 seconds
     });
 
-    it('MISMATCH: TS low-power interval is 10s vs C++ 4 minutes', () => {
+    it('FIXED: TS low-power interval matches C++ SpeakPowerDelay', () => {
       // C++ house.cpp:1123 — SpeakPowerDelay = Normalize_Delay(1800) = 3600 ticks
-      // TS index.ts:1956 — tick % (GAME_TICKS_PER_SEC * 10) === 0
+      // TS engine/index.ts — state.speakPowerTimer = CPP_SPEAK_DELAY_TICKS
       const cppLowPowerDelay = CPP_SPEAK_DELAY_NORMALIZED; // 3600 ticks
-      const tsLowPowerInterval = TS_LOW_POWER_INTERVAL; // 150 ticks
+      const tsLowPowerInterval = TS_LOW_POWER_INTERVAL; // 3600 ticks
 
       expect(cppLowPowerDelay / TICKS_PER_SECOND).toBe(240);
-      expect(tsLowPowerInterval / TS_GAME_TICKS_PER_SEC).toBe(10);
+      expect(tsLowPowerInterval).toBe(cppLowPowerDelay);
     });
 
     it('MISMATCH: TS universal EVA throttle is 45 ticks (3s); C++ has no universal throttle', () => {
@@ -276,14 +276,11 @@ describe('EVA Triggers — C++ parity audit', () => {
       expect(cppRequiresConYard).toBe(true);
     });
 
-    it('MISMATCH: TS does not require ConYard for low power EVA', () => {
-      // index.ts:1955-1957:
-      //   if (this.powerConsumed > this.powerProduced && this.powerProduced > 0 &&
-      //       this.tick % (GAME_TICKS_PER_SEC * 10) === 0)
-      //     this.audio.play('eva_low_power');
-      // No ConYard check.
-      const tsRequiresConYard = false;
-      expect(tsRequiresConYard).toBe(false);
+    it('FIXED: TS requires ConYard for low power EVA', () => {
+      // engine/index.ts tickPlayerLowPowerWarning mirrors STRUCTF_CONST with an
+      // active FACT check before queuing VOX_LOW_POWER and the map message.
+      const tsRequiresConYard = true;
+      expect(tsRequiresConYard).toBe(true);
     });
 
     it('C++ condition is Power_Fraction() < 1; TS uses powerConsumed > powerProduced', () => {
@@ -295,25 +292,20 @@ describe('EVA Triggers — C++ parity audit', () => {
       expect(equivalent).toBe(true);
     });
 
-    it('MISMATCH: TS uses modulo interval (10s); C++ uses countdown timer (4 min)', () => {
+    it('FIXED: TS uses the C++ countdown timer instead of a modulo interval', () => {
       // C++ house.cpp:1123 — SpeakPowerDelay = Normalize_Delay(1800)
       //   At GameSpeed=3: 3600 ticks = 240 seconds = 4 minutes
-      // TS index.ts:1956 — tick % 150 === 0
-      //   Every 150 ticks = 10 seconds
-      // TS fires 24x more frequently than C++.
+      // TS state.speakPowerTimer is initialized to 1 and reset to the same delay.
       const cppIntervalSec = CPP_SPEAK_DELAY_NORMALIZED / TICKS_PER_SECOND; // 240
-      const tsIntervalSec = TS_LOW_POWER_INTERVAL / TS_GAME_TICKS_PER_SEC; // 10
+      const tsIntervalSec = TS_LOW_POWER_INTERVAL / TS_GAME_TICKS_PER_SEC; // 240
       expect(cppIntervalSec).toBe(240);
-      expect(tsIntervalSec).toBe(10);
+      expect(tsIntervalSec).toBe(240);
     });
 
-    it('MISMATCH: TS bypasses playEva() throttle — calls audio.play() directly', () => {
-      // index.ts:1957 — this.audio.play('eva_low_power')
-      // This does NOT go through playEva(), so the 45-tick universal throttle
-      // and the power gate (< 0.25) are both bypassed.
-      // C++ uses the standard Speak() path which goes through the 1-deep queue.
-      const tsUsesPlayEva = false; // uses audio.play() directly
-      expect(tsUsesPlayEva).toBe(false);
+    it('FIXED: TS low power uses the standard playEva path', () => {
+      // C++ uses Speak(VOX_LOW_POWER), not a side-channel audio call.
+      const tsUsesPlayEva = true;
+      expect(tsUsesPlayEva).toBe(true);
     });
   });
 
@@ -640,22 +632,22 @@ describe('EVA Triggers — C++ parity audit', () => {
           id: 2,
           area: 'Low power interval',
           cpp: 'SpeakPowerDelay countdown = 3600 ticks (240s)',
-          ts: 'tick % 150 === 0 (10s interval)',
-          severity: 'minor',
+          ts: 'SpeakPowerDelay countdown = 3600 ticks (240s)',
+          severity: 'fixed',
         },
         {
           id: 3,
           area: 'Low power ConYard check',
           cpp: 'Requires ActiveBScan & STRUCTF_CONST',
-          ts: 'No ConYard requirement',
-          severity: 'minor',
+          ts: 'Requires active FACT',
+          severity: 'fixed',
         },
         {
           id: 4,
           area: 'Low power bypass playEva()',
           cpp: 'Uses standard Speak() path',
-          ts: 'Calls audio.play() directly, bypassing throttle and power gate',
-          severity: 'medium',
+          ts: 'Uses playEva() path',
+          severity: 'fixed',
         },
         {
           id: 5,
@@ -722,12 +714,12 @@ describe('EVA Triggers — C++ parity audit', () => {
         },
       ];
 
-      // All 13 items documented (12 remaining mismatches + 1 fixed)
+      // All 13 items documented (9 remaining mismatches + 4 fixed)
       expect(mismatches).toHaveLength(13);
-      expect(mismatches.filter(m => m.severity === 'fixed')).toHaveLength(1);
+      expect(mismatches.filter(m => m.severity === 'fixed')).toHaveLength(4);
       expect(mismatches.filter(m => m.severity === 'high')).toHaveLength(0);
-      expect(mismatches.filter(m => m.severity === 'medium')).toHaveLength(6);
-      expect(mismatches.filter(m => m.severity === 'minor')).toHaveLength(3);
+      expect(mismatches.filter(m => m.severity === 'medium')).toHaveLength(5);
+      expect(mismatches.filter(m => m.severity === 'minor')).toHaveLength(1);
       expect(mismatches.filter(m => m.severity === 'low')).toHaveLength(3);
     });
   });

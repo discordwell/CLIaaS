@@ -1057,10 +1057,9 @@ describe('Overlapping gap generators use jam count tracking', () => {
 // =============================================================================
 
 describe('Structure sight fallback behavior', () => {
-  it('unknown structure types default to sight=5 in fog.ts:101', () => {
-    // TS fog.ts:101: const sight = STRUCTURE_SIGHT[s.type] ?? 5;
-    // In C++, every structure has an explicit Sight= in INI
-    const unknownSight = STRUCTURE_SIGHT['NONEXISTENT_TYPE'] ?? 5;
-    expect(unknownSight).toBe(5);
+  it('unknown structure types default to sight=0 like C++ TechnoTypeClass', () => {
+    // C++ TechnoTypeClass::TechnoTypeClass initializes SightRange to 0.
+    const unknownSight = STRUCTURE_SIGHT['NONEXISTENT_TYPE'] ?? 0;
+    expect(unknownSight).toBe(0);
   });
 });

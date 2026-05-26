@@ -22,6 +22,9 @@ export type LogicAnimType =
   | 'smoke_m'
   | 'smokey'
   | 'fball_fade'
+  | 'gunfire'
+  | 'minigun'
+  | 'samfire'
   | 'piff'
   | 'piffpiff'
   | 'flak'
@@ -47,8 +50,13 @@ export interface LogicAnim {
   isBrandNew: boolean;
   logicIndexHint?: number;
   attachedEntityId?: number;
+  attachedEntityOffsetLX?: number;
+  attachedEntityOffsetLY?: number;
   attachedStructureIndex?: number;
+  attachedStructureOffsetLX?: number;
+  attachedStructureOffsetLY?: number;
   attachedTreeKey?: number;
+  startFrame?: number;
   damageAccumRaw?: number;
   createdLogicTick?: number;
   deleteOnNextProcess?: boolean;
@@ -88,6 +96,10 @@ const GROUND_LAYER_LOGIC_ANIMS = new Set<LogicAnimType>([
   'oilfield_burn',
   'lz_smoke',
   'smoke_m',
+  'gunfire',
+  // C++ adata.cpp ANIM_FRAG1 has AnimTypeClass::IsGroundLayer=true; the paired
+  // VEH-HIT* impact anims remain upper-layer objects.
+  'frag1',
   'water-exp1',
   'water-exp2',
   'water-exp3',
@@ -129,6 +141,12 @@ const LOGIC_ANIM_DEFS: Record<LogicAnimType, LogicAnimDef> = {
   // effects; their lifetime affects later AnimClass allocation failure.
   smokey: { sprite: 'smokey', biggest: 2, stages: 7, loops: 1, rate: 1, scorcher: false },
   fball_fade: { sprite: 'napalm1', biggest: 1, stages: 4, loops: 1, rate: 1, scorcher: false },
+  // C++ TechnoClass::Fire_At weapon->Anim firing animations. GUNFIRE is
+  // explicitly ground-level; MINIGUN/SAMFIRE become ground-layer when attached
+  // to a ground object, which the renderer resolves dynamically.
+  gunfire: { sprite: 'gunfire', biggest: 0, stages: 1, loops: 0, rate: 1, scorcher: false },
+  minigun: { sprite: 'minigun', biggest: 0, stages: 6, loops: 0, rate: 1, scorcher: false },
+  samfire: { sprite: 'samfire', biggest: 4, stages: 18, loops: 0, rate: 1, scorcher: false },
   // C++ combat impact animations for small-arms and anti-air bursts. They are
   // real AnimClass/Logic entries even though they have no crater/scorch side effects.
   piff: { sprite: 'piff', biggest: 1, stages: 4, loops: 1, rate: 1, scorcher: false },
@@ -167,6 +185,9 @@ export function logicAnimTypeForSprite(sprite: string | undefined): LogicAnimTyp
     case 'smoke_m': return 'smoke_m';
     case 'smokey': return 'smokey';
     case 'fball1': return 'fball1';
+    case 'gunfire': return 'gunfire';
+    case 'minigun': return 'minigun';
+    case 'samfire': return 'samfire';
     case 'piff': return 'piff';
     case 'piffpiff': return 'piffpiff';
     case 'flak': return 'flak';
@@ -231,6 +252,12 @@ export function spawnLogicAnim(
   attachedTreeKey?: number,
   createdLogicTick?: number,
   startMap?: GameMap,
+  startFrame = 0,
+  attachedEntityId?: number,
+  attachedEntityOffsetLX?: number,
+  attachedEntityOffsetLY?: number,
+  attachedStructureOffsetLX?: number,
+  attachedStructureOffsetLY?: number,
 ): boolean {
   if (!animSlotReserved && reserveAnimSlot && !reserveAnimSlot()) return false;
 
@@ -247,6 +274,12 @@ export function spawnLogicAnim(
     logicIndexHint,
     attachedStructureIndex,
     attachedTreeKey,
+    startFrame: startFrame > 0 ? startFrame : undefined,
+    attachedEntityId,
+    attachedEntityOffsetLX,
+    attachedEntityOffsetLY,
+    attachedStructureOffsetLX,
+    attachedStructureOffsetLY,
     createdLogicTick,
   };
   logicAnims.push(anim);

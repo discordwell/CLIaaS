@@ -7,6 +7,25 @@
 import { BitmapFont, type BitmapFontMeta } from './bitmapFont';
 import { RA_COLOR_BLACK, conquerBuildFadingTable, makeFadingTable, nearestPaletteIndex } from './shadow';
 
+const ROTATE_SCALE_FIXED = 0x100;
+const CPP_ROTATE_SIN_57_TO_72 = [
+  252, 253, 254, 254, 255, 255, 255, 255,
+  255, 255, 255, 254, 254, 253, 252, 251,
+] as const;
+const CPP_ROTATE_COS_57_TO_72 = [
+  43, 37, 31, 25, 19, 12, 6, 0,
+  -6, -12, -18, -24, -31, -37, -43, -49,
+] as const;
+
+function cppRotateTrig(angle: number, fn: 'sin' | 'cos'): number {
+  const dir = angle & 0xff;
+  if (dir >= 57 && dir <= 72) {
+    return (fn === 'sin' ? CPP_ROTATE_SIN_57_TO_72 : CPP_ROTATE_COS_57_TO_72)[dir - 57];
+  }
+  const radians = ((dir * Math.PI * 2) / 256);
+  return Math.round((fn === 'sin' ? Math.sin(radians) : Math.cos(radians)) * 256);
+}
+
 export interface SpriteSheetMeta {
   frameWidth: number;
   frameHeight: number;
@@ -26,6 +45,7 @@ export interface GhostShadowOptions {
   palette: number[][] | null;
   frac: number;
   destColorIndex?: number;
+  passthrough?: boolean;
 }
 
 export interface DrawFrameOptions {
@@ -36,7 +56,11 @@ export interface DrawFrameOptions {
   /** C++ CC_Draw_Shape rotation parameter, in 0..255 DirType units. */
   rotation256?: number;
   ghostShadow?: GhostShadowOptions;
+  /** C++ SHAPE_FADING source-pixel table when the sprite has not been pre-remapped. */
+  sourceFading?: GhostShadowOptions;
   conquerFading?: boolean;
+  /** Palette used only to build C++ fading lookup rows; output colors still come from the draw palette. */
+  fadingTablePalette?: number[][] | null;
 }
 
 export interface TranslucentControl {
@@ -311,11 +335,14 @@ export class AssetManager {
     if (options?.centerY) dy -= Math.floor(dh / 2);
     const rotation256 = options?.rotation256 ?? 0;
     if (rotation256 === 0 &&
-        options?.ghostShadow &&
+        (options?.ghostShadow || options?.sourceFading) &&
         this.drawFrameWithGhostShadow(ctx, source, meta, frameIndex, dx, dy, options)) {
       return;
     }
     if (rotation256 !== 0 && !options?.flip) {
+      if (this.drawFrameWithCppRotation(ctx, source, meta, frameIndex, x, y, options)) {
+        return;
+      }
       const originX = options?.centerX ? Math.floor(dw / 2) : 0;
       const originY = options?.centerY ? Math.floor(dh / 2) : 0;
       ctx.save();
@@ -331,6 +358,237 @@ export class AssetManager {
     } else {
       ctx.drawImage(source, sx, sy, meta.frameWidth, meta.frameHeight, dx, dy, dw, dh);
     }
+  }
+
+  private drawFrameWithCppRotation(
+    ctx: CanvasRenderingContext2D,
+    source: CanvasImageSource,
+    meta: SpriteSheetMeta,
+    frameIndex: number,
+    x: number,
+    y: number,
+    options?: DrawFrameOptions,
+  ): boolean {
+    if ((options?.scale ?? 1) !== 1 || options?.flip) return false;
+    if (!options?.centerX || !options?.centerY) return false;
+    if (!ctx.getImageData || !ctx.putImageData || !ctx.canvas) return false;
+
+    const src = this.getSourcePixels(source);
+    if (!src) return false;
+
+    const frameW = meta.frameWidth;
+    const frameH = meta.frameHeight;
+    const outW = frameW * 2;
+    const outH = frameH * 2;
+    if (frameW <= 0 || frameH <= 0 || outW <= 0 || outH <= 0) return false;
+
+    const out = new Uint8ClampedArray(outW * outH * 4);
+    const col = frameIndex % meta.columns;
+    const row = Math.floor(frameIndex / meta.columns);
+    const sx = col * frameW;
+    const sy = row * frameH;
+
+    // C++ CC_Draw_Shape converts the residual DirType rotation to the angle
+    // consumed by GraphicBufferClass::Scale_Rotate as (256 - (rotation - 64)).
+    const angle = (64 - (options.rotation256 ?? 0)) & 0xff;
+    const c = cppRotateTrig(angle, 'cos');
+    const s = cppRotateTrig(angle, 'sin');
+    const halfW = (ROTATE_SCALE_FIXED * frameW) >> 1;
+    const halfH = (ROTATE_SCALE_FIXED * frameH) >> 1;
+    const ptX = frameW;
+    const ptY = frameH;
+
+    const p0 = {
+      x: ptX + (((((halfH * c) >> 8) - ((halfW * s) >> 8)) >> 8)),
+      y: ptY + ((((-(halfH * s) >> 8) - ((halfW * c) >> 8)) >> 8)),
+    };
+    const p1 = {
+      x: ptX + (((((halfH * c) >> 8) + ((halfW * s) >> 8)) >> 8)),
+      y: ptY + ((((-(halfH * s) >> 8) + ((halfW * c) >> 8)) >> 8)),
+    };
+    const p2 = {
+      x: ptX + ((((-(halfH * c) >> 8) - ((halfW * s) >> 8)) >> 8)),
+      y: ptY + (((((halfH * s) >> 8) - ((halfW * c) >> 8)) >> 8)),
+    };
+
+    let fDeltaX = p1.x - p0.x;
+    let fDeltaY = p1.y - p0.y;
+    let fError = 0;
+    let fXStep = 1;
+    let fYStep = outW;
+    let sDeltaX = p2.x - p0.x;
+    let sDeltaY = p2.y - p0.y;
+    let sError = 0;
+    let sXStep = 1;
+    let sYStep = outW;
+
+    if (fDeltaY < 0) {
+      fDeltaY = -fDeltaY;
+      fYStep = -outW;
+    }
+    if (fDeltaX < 0) {
+      fDeltaX = -fDeltaX;
+      fXStep = -1;
+    }
+    if (sDeltaY < 0) {
+      sDeltaY = -sDeltaY;
+      sYStep = -outW;
+    }
+    if (sDeltaX < 0) {
+      sDeltaX = -sDeltaX;
+      sXStep = -1;
+    }
+
+    const drawSourcePixel = (scrpos: number, pixpos: number): void => {
+      if (scrpos < 0 || scrpos >= outW * outH || pixpos < 0 || pixpos >= frameW * frameH) return;
+      const px = pixpos % frameW;
+      const py = Math.floor(pixpos / frameW);
+      const srcOff = ((sy + py) * src.width + (sx + px)) * 4;
+      const a = src.data[srcOff + 3];
+      if (a === 0) return;
+      const outOff = scrpos * 4;
+      out[outOff] = src.data[srcOff];
+      out[outOff + 1] = src.data[srcOff + 1];
+      out[outOff + 2] = src.data[srcOff + 2];
+      out[outOff + 3] = a;
+    };
+
+    let pxError = 0;
+    let pyError = 0;
+    let pixpos = 0;
+    let scrpos = p0.x + outW * p0.y;
+    let temp = scrpos;
+
+    if (fDeltaX > fDeltaY) {
+      for (let j = 0; j < sDeltaY; j++) {
+        temp = scrpos;
+        for (let i = 0; i < fDeltaX; i++) {
+          drawSourcePixel(scrpos, pixpos);
+          pxError += frameW;
+          while (pxError > fDeltaX) {
+            pixpos++;
+            pxError -= fDeltaX;
+          }
+          scrpos += fXStep;
+          fError += fDeltaY;
+          if (fError > fDeltaX) {
+            drawSourcePixel(scrpos, pixpos);
+            fError -= fDeltaX;
+            scrpos += fYStep;
+          }
+        }
+        pxError = 0;
+        pixpos -= frameW - 1;
+        pyError += frameH;
+        while (pyError > sDeltaY) {
+          pixpos += frameW;
+          pyError -= sDeltaY;
+        }
+        fError = 0;
+        scrpos = temp + sYStep;
+        sError += sDeltaX;
+        if (sError > sDeltaY) {
+          sError -= sDeltaY;
+          scrpos += sXStep;
+        }
+      }
+    } else {
+      for (let j = 0; j < sDeltaX; j++) {
+        temp = scrpos;
+        for (let i = 0; i < fDeltaY; i++) {
+          drawSourcePixel(scrpos, pixpos);
+          pxError += frameW;
+          while (pxError > fDeltaY) {
+            pixpos++;
+            pxError -= fDeltaY;
+          }
+          scrpos += fYStep;
+          fError += fDeltaX;
+          if (fError > fDeltaY) {
+            drawSourcePixel(scrpos, pixpos);
+            fError -= fDeltaY;
+            scrpos += fXStep;
+          }
+        }
+        pxError = 0;
+        pixpos -= frameW - 1;
+        pyError += frameH;
+        while (pyError > sDeltaX) {
+          pixpos += frameW;
+          pyError -= sDeltaX;
+        }
+        scrpos = temp + sXStep;
+        sError += sDeltaY;
+        fError = 0;
+        if (sError > sDeltaX) {
+          sError -= sDeltaX;
+          scrpos += sYStep;
+        }
+      }
+    }
+
+    const destX = Math.round(x) - frameW;
+    const destY = Math.round(y) - frameH;
+    const clipX0 = Math.max(0, destX);
+    const clipY0 = Math.max(0, destY);
+    const clipX1 = Math.min(ctx.canvas.width, destX + outW);
+    const clipY1 = Math.min(ctx.canvas.height, destY + outH);
+    const clipW = clipX1 - clipX0;
+    const clipH = clipY1 - clipY0;
+    if (clipW <= 0 || clipH <= 0) return true;
+
+    const dest = ctx.getImageData(clipX0, clipY0, clipW, clipH);
+    const globalAlpha = Math.max(0, Math.min(1, ctx.globalAlpha ?? 1));
+    const ghost = options.ghostShadow;
+    const table = ghost?.palette
+      ? this.getFadingTable(ghost.palette, ghost.destColorIndex ?? RA_COLOR_BLACK, ghost.frac)
+      : null;
+
+    for (let yy = 0; yy < clipH; yy++) {
+      const srcY = clipY0 - destY + yy;
+      for (let xx = 0; xx < clipW; xx++) {
+        const srcX = clipX0 - destX + xx;
+        const outOff = (srcY * outW + srcX) * 4;
+        const a = out[outOff + 3];
+        if (a === 0) continue;
+
+        const destOff = (yy * clipW + xx) * 4;
+        if (a === 130 && ghost?.passthrough) continue;
+
+        if (a === 130 && ghost?.palette && table) {
+          const dstIndex = nearestPaletteIndex(
+            ghost.palette,
+            dest.data[destOff],
+            dest.data[destOff + 1],
+            dest.data[destOff + 2],
+          );
+          const shadow = ghost.palette[table[dstIndex]];
+          if (!shadow) continue;
+          dest.data[destOff] = shadow[0];
+          dest.data[destOff + 1] = shadow[1];
+          dest.data[destOff + 2] = shadow[2];
+          dest.data[destOff + 3] = 255;
+          continue;
+        }
+
+        const alpha = (a / 255) * globalAlpha;
+        if (alpha >= 1) {
+          dest.data[destOff] = out[outOff];
+          dest.data[destOff + 1] = out[outOff + 1];
+          dest.data[destOff + 2] = out[outOff + 2];
+          dest.data[destOff + 3] = 255;
+        } else {
+          const inv = 1 - alpha;
+          dest.data[destOff] = Math.round(out[outOff] * alpha + dest.data[destOff] * inv);
+          dest.data[destOff + 1] = Math.round(out[outOff + 1] * alpha + dest.data[destOff + 1] * inv);
+          dest.data[destOff + 2] = Math.round(out[outOff + 2] * alpha + dest.data[destOff + 2] * inv);
+          dest.data[destOff + 3] = Math.round(255 * alpha + dest.data[destOff + 3] * inv);
+        }
+      }
+    }
+
+    ctx.putImageData(dest, clipX0, clipY0);
+    return true;
   }
 
   private getSourcePixels(source: CanvasImageSource): {
@@ -403,7 +661,8 @@ export class AssetManager {
     options: DrawFrameOptions,
   ): boolean {
     const ghost = options.ghostShadow;
-    if (!ghost?.palette || options.flip || (options.scale ?? 1) !== 1) return false;
+    const sourceFading = options.sourceFading;
+    if ((!ghost?.palette && !sourceFading?.palette) || options.flip || (options.scale ?? 1) !== 1) return false;
     if (!ctx.getImageData || !ctx.putImageData || !ctx.canvas) return false;
 
     const src = this.getSourcePixels(source);
@@ -424,7 +683,12 @@ export class AssetManager {
     const sx = col * meta.frameWidth;
     const sy = row * meta.frameHeight;
     const dest = ctx.getImageData(clipX0, clipY0, clipW, clipH);
-    const table = this.getFadingTable(ghost.palette, ghost.destColorIndex ?? RA_COLOR_BLACK, ghost.frac);
+    const shadowTable = ghost?.palette
+      ? this.getFadingTable(ghost.palette, ghost.destColorIndex ?? RA_COLOR_BLACK, ghost.frac)
+      : null;
+    const sourceFadingTable = sourceFading?.palette
+      ? this.getFadingTable(sourceFading.palette, sourceFading.destColorIndex ?? RA_COLOR_BLACK, sourceFading.frac)
+      : null;
     const globalAlpha = Math.max(0, Math.min(1, ctx.globalAlpha ?? 1));
 
     for (let y = 0; y < clipH; y++) {
@@ -439,14 +703,16 @@ export class AssetManager {
         if (sa === 0) continue;
 
         const destOff = (y * clipW + x) * 4;
-        if (sa === 130) {
+        if (sa === 130 && ghost?.passthrough) continue;
+
+        if (sa === 130 && ghost?.palette && shadowTable) {
           const dstIndex = nearestPaletteIndex(
             ghost.palette,
             dest.data[destOff],
             dest.data[destOff + 1],
             dest.data[destOff + 2],
           );
-          const shadow = ghost.palette[table[dstIndex]];
+          const shadow = ghost.palette[shadowTable[dstIndex]];
           if (!shadow) continue;
           dest.data[destOff] = shadow[0];
           dest.data[destOff + 1] = shadow[1];
@@ -455,17 +721,29 @@ export class AssetManager {
           continue;
         }
 
+        let drawR = sr;
+        let drawG = sg;
+        let drawB = sb;
+        if (sourceFading?.palette && sourceFadingTable) {
+          const srcIndex = nearestPaletteIndex(sourceFading.palette, sr, sg, sb);
+          const faded = sourceFading.palette[sourceFadingTable[srcIndex]];
+          if (!faded) continue;
+          drawR = faded[0];
+          drawG = faded[1];
+          drawB = faded[2];
+        }
+
         const alpha = (sa / 255) * globalAlpha;
         if (alpha >= 1) {
-          dest.data[destOff] = sr;
-          dest.data[destOff + 1] = sg;
-          dest.data[destOff + 2] = sb;
+          dest.data[destOff] = drawR;
+          dest.data[destOff + 1] = drawG;
+          dest.data[destOff + 2] = drawB;
           dest.data[destOff + 3] = 255;
         } else {
           const inv = 1 - alpha;
-          dest.data[destOff] = Math.round(sr * alpha + dest.data[destOff] * inv);
-          dest.data[destOff + 1] = Math.round(sg * alpha + dest.data[destOff + 1] * inv);
-          dest.data[destOff + 2] = Math.round(sb * alpha + dest.data[destOff + 2] * inv);
+          dest.data[destOff] = Math.round(drawR * alpha + dest.data[destOff] * inv);
+          dest.data[destOff + 1] = Math.round(drawG * alpha + dest.data[destOff + 1] * inv);
+          dest.data[destOff + 2] = Math.round(drawB * alpha + dest.data[destOff + 2] * inv);
           dest.data[destOff + 3] = Math.round(255 * alpha + dest.data[destOff + 3] * inv);
         }
       }
@@ -559,6 +837,120 @@ export class AssetManager {
     ctx.putImageData(dest, clipX0, clipY0);
   }
 
+  private drawFrameFadedInternal(
+    ctx: CanvasRenderingContext2D,
+    source: CanvasImageSource,
+    meta: SpriteSheetMeta,
+    frameIndex: number,
+    x: number,
+    y: number,
+    palette: number[][] | null,
+    destColorIndex: number,
+    frac: number,
+    options?: DrawFrameOptions,
+  ): boolean {
+    if (!palette || !ctx.getImageData || !ctx.putImageData || !ctx.canvas) return false;
+    const src = this.getSourcePixels(source);
+    if (!src) return false;
+
+    const scale = options?.scale ?? 1;
+    if (options?.flip || scale !== 1 || (options?.rotation256 ?? 0) !== 0) return false;
+
+    let destX = Math.round(x);
+    let destY = Math.round(y);
+    if (options?.centerX) destX -= Math.floor(meta.frameWidth / 2);
+    if (options?.centerY) destY -= Math.floor(meta.frameHeight / 2);
+
+    const clipX0 = Math.max(0, destX);
+    const clipY0 = Math.max(0, destY);
+    const clipX1 = Math.min(ctx.canvas.width, destX + meta.frameWidth);
+    const clipY1 = Math.min(ctx.canvas.height, destY + meta.frameHeight);
+    const clipW = clipX1 - clipX0;
+    const clipH = clipY1 - clipY0;
+    if (clipW <= 0 || clipH <= 0) return true;
+
+    const col = frameIndex % meta.columns;
+    const row = Math.floor(frameIndex / meta.columns);
+    const sx = col * meta.frameWidth;
+    const sy = row * meta.frameHeight;
+    const dest = ctx.getImageData(clipX0, clipY0, clipW, clipH);
+    const table = this.getFadingTable(palette, destColorIndex, frac);
+
+    for (let py = 0; py < clipH; py++) {
+      const frameY = clipY0 - destY + py;
+      for (let px = 0; px < clipW; px++) {
+        const frameX = clipX0 - destX + px;
+        const srcOff = ((sy + frameY) * src.width + (sx + frameX)) * 4;
+        if (src.data[srcOff + 3] === 0) continue;
+
+        const srcIndex = nearestPaletteIndex(
+          palette,
+          src.data[srcOff],
+          src.data[srcOff + 1],
+          src.data[srcOff + 2],
+        );
+        const faded = palette[table[srcIndex]];
+        if (!faded) continue;
+
+        const destOff = (py * clipW + px) * 4;
+        dest.data[destOff] = faded[0];
+        dest.data[destOff + 1] = faded[1];
+        dest.data[destOff + 2] = faded[2];
+        dest.data[destOff + 3] = 255;
+      }
+    }
+
+    ctx.putImageData(dest, clipX0, clipY0);
+    return true;
+  }
+
+  /** Draw a shape through C++ SHAPE_FADING with a single fading-table pass. */
+  drawFrameFaded(
+    ctx: CanvasRenderingContext2D,
+    sheetName: string,
+    frameIndex: number,
+    x: number,
+    y: number,
+    palette: number[][] | null,
+    destColorIndex: number,
+    frac: number,
+    options?: DrawFrameOptions,
+  ): void {
+    const sheet = this.getSheet(sheetName);
+    if (!sheet) {
+      this.drawMissingAsset(ctx, sheetName, x, y, options);
+      return;
+    }
+    if (!this.drawFrameFadedInternal(ctx, sheet.image, sheet.meta, frameIndex, x, y,
+      palette, destColorIndex, frac, options)) {
+      this.drawFrame(ctx, sheetName, frameIndex, x, y, options);
+    }
+  }
+
+  /** Draw an already-remapped source canvas through C++ SHAPE_FADING. */
+  drawFrameFadedFrom(
+    ctx: CanvasRenderingContext2D,
+    source: HTMLCanvasElement,
+    sheetName: string,
+    frameIndex: number,
+    x: number,
+    y: number,
+    palette: number[][] | null,
+    destColorIndex: number,
+    frac: number,
+    options?: DrawFrameOptions,
+  ): void {
+    const sheet = this.getSheet(sheetName);
+    if (!sheet) {
+      this.drawMissingAsset(ctx, sheetName, x, y, options);
+      return;
+    }
+    if (!this.drawFrameFadedInternal(ctx, source, sheet.meta, frameIndex, x, y,
+      palette, destColorIndex, frac, options)) {
+      this.drawFrameFrom(ctx, source, sheetName, frameIndex, x, y, options);
+    }
+  }
+
   /** Draw a shape through C++ SHAPE_GHOST + DisplayClass::TranslucentTable.
    *
    * Build_Translucent_Table stores a 256-byte source-control map followed by
@@ -643,9 +1035,10 @@ export class AssetManager {
             dest.data[destOff + 1],
             dest.data[destOff + 2],
           );
+          const tablePalette = options?.fadingTablePalette ?? palette;
           const table = options?.conquerFading
-            ? this.getFadingTable(palette, control.destColorIndex, control.frac)
-            : this.getBuildFadingTable(palette, control.destColorIndex, control.frac);
+            ? this.getFadingTable(tablePalette, control.destColorIndex, control.frac)
+            : this.getBuildFadingTable(tablePalette, control.destColorIndex, control.frac);
           const remapped = palette[table[dstIndex]];
           if (!remapped) continue;
           dest.data[destOff] = remapped[0];

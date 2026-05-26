@@ -26,6 +26,7 @@ const TS_BASE_URL = process.env.TS_BASE_URL ?? BASE_URL;
 const OUT_DIR = process.env.OUT_DIR ?? path.join(process.cwd(), 'artifacts', 'visual-parity');
 const HARNESS_SALT = process.env.HARNESS_SALT ?? 'anti-shim-visual-v1';
 const EXPECT_PIXELS = process.env.EXPECT_PIXELS === '1';
+const EXPECT_STATE = process.env.EXPECT_STATE !== '0';
 const PIXEL_MISMATCH_THRESHOLD = Number(process.env.PIXEL_MISMATCH_THRESHOLD ?? 0.35);
 const MIN_NONBLACK_RATIO = Number(process.env.MIN_NONBLACK_RATIO ?? 0.01);
 const TS_FOG_MODE = process.env.TS_FOG_MODE ?? 'source';
@@ -344,8 +345,8 @@ test.describe('Visual Parity Suite', () => {
         const creditsDelta = Math.abs(tsState.credits - wasmState.credits);
         const timerDelta = Math.abs(tsState.missionTimer - wasmState.missionTimer);
         const tickDelta = Math.abs(tsState.tick - wasmState.tick);
-        const stateMatch = unitDelta <= 2 && enemyDelta <= 2 && structDelta <= 1 &&
-          creditsDelta <= 500 && (timerDelta <= 5 || tickDelta > 5);
+        const stateMatch = unitDelta === 0 && enemyDelta === 0 && structDelta === 0 &&
+          creditsDelta === 0 && timerDelta === 0 && tickDelta === 0;
 
         const wasmFrame = await wasmPage.evaluate((): CapturedFrame => {
           const M = (window as any).Module;
@@ -415,6 +416,12 @@ test.describe('Visual Parity Suite', () => {
 
         expect(wasmStats.nonBlackRatio, `${scenario} t${targetTick} WASM frame should not be blank`).toBeGreaterThan(MIN_NONBLACK_RATIO);
         expect(tsStats.nonBlackRatio, `${scenario} t${targetTick} TS frame should not be blank`).toBeGreaterThan(MIN_NONBLACK_RATIO);
+        if (EXPECT_STATE) {
+          expect(
+            stateMatch,
+            `${scenario} t${targetTick} state deltas: units=${unitDelta}, enemies=${enemyDelta}, structures=${structDelta}, credits=${creditsDelta}, timer=${timerDelta}, tick=${tickDelta}`,
+          ).toBe(true);
+        }
         if (EXPECT_PIXELS && pixelMetrics.comparable) {
           expect(pixelMetrics.mismatchRatio, `${scenario} t${targetTick} pixel mismatch ratio`).toBeLessThanOrEqual(PIXEL_MISMATCH_THRESHOLD);
         }

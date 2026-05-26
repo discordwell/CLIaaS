@@ -49,12 +49,12 @@ export function leptonToCell(lx: number, ly: number): { cx: number; cy: number }
 
 /** Convert pixel position to lepton */
 export function pixelToLepton(px: number): number {
-  return Math.trunc(px * 256 / 24);  // LEPTON_SIZE / CELL_SIZE
+  return Math.trunc((px * LEPTON_SIZE + CELL_SIZE / 2) / CELL_SIZE);
 }
 
 /** Convert lepton to pixel for rendering */
 export function leptonToPixel(lx: number): number {
-  return Math.trunc(lx * 24 / 256);
+  return Math.trunc((lx * CELL_SIZE + LEPTON_SIZE / 2) / LEPTON_SIZE);
 }
 
 // ── C++ 256-step sin/cos tables (coord.cpp:442-516) ─────────────────────────
@@ -387,7 +387,7 @@ export interface InfantryAnim {
 }
 
 export const CPP_CORPSE_FRAME_TICKS = 30;
-export const CPP_CORPSE_FRAME_COUNT = 6;
+export const CPP_CORPSE_FRAME_COUNT = 1;
 
 /** C++ infantry.cpp follow-up corpse AnimClass creation after death DoControls.
  *  InfDeath 4 (DO_FIRE_DEATH) and 5 (ELECT_DIE) do not create CORPSE anims. */
@@ -769,6 +769,7 @@ export interface UnitStats {
   isAircraft?: boolean;      // all aircraft (helicopters + fixed-wing)
   isFixedWing?: boolean;     // cannot hover, always moves forward
   isRotorEquipped?: boolean; // has rotor animation (helicopters)
+  isRadarEquipped?: boolean; // C++ UnitTypeClass::IsRadarEquipped — rotating dish/coil overlay
   landingBuilding?: string;  // preferred pad type ('AFLD' or 'HPAD')
   landingSpeed?: number;     // C++ AircraftTypeClass LandingSpeed byte
   maxAmmo?: number;          // ammo capacity (rearm at pad)
@@ -857,9 +858,13 @@ export const EXPLOSION_FRAMES: Record<string, number> = {
   smoke_m: 91,
   // Projectile smoke puff trail (C++ ANIM_SMOKE_PUFF / SMOKEY.SHP)
   smokey: 7,
+  // C++ weapon->Anim firing animations.
+  gunfire: 3, minigun: 48, samfire: 144,
   // Chronosphere warp box (C++ ANIM_CHRONO_BOX — CHRONBOX.SHP)
   chronbox: 25,
 };
+
+export type WeaponFiringAnim = 'gunfire' | 'minigun' | 'samfire';
 
 export interface WeaponStats {
   name: string;
@@ -891,6 +896,7 @@ export interface WeaponStats {
   isDegenerate?: boolean;   // C++ bullet.cpp:478-480 — projectile loses 1 strength/tick during flight (min 5)
   isHigh?: boolean;         // C++ type.h:1365 — flies over walls (missiles, rockets); non-high explode on wall contact (bullet.cpp:903-913)
   isFlameEquipped?: boolean; // C++ bullet.cpp:377-386 — alternates fireball/smoke puff behind bullet each tick
+  firingAnim?: WeaponFiringAnim; // C++ WeaponTypeClass::Anim (rules.ini Anim=GUNFIRE/MINIGUN/SAMFIRE)
 }
 
 // C6: Warhead splash falloff properties — warhead.cpp:72
@@ -947,9 +953,9 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   DOG:  { type: UnitType.I_DOG, name: 'Attack Dog', image: 'dog', strength: 12, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: 'DogJaw', scanDelay: 8, crushable: true, owner: 'soviet', cost: 200, isCanine: true, guardRange: 7, points: 5 },
   SPY:  { type: UnitType.I_SPY, name: 'Spy', image: 'spy', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true, owner: 'allied', cost: 500, isInfiltrate: true, points: 15 },
   MEDI: { type: UnitType.I_MEDI, name: 'Medic', image: 'medi', strength: 80, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Heal', crushable: true, owner: 'allied', cost: 800, points: 15, isCrawling: true },
-  GNRL: { type: UnitType.I_GNRL, name: 'Stavros', image: 'e1', strength: 80, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Pistol', crushable: true, isInfiltrate: true, points: 15, isCrawling: true },  // rules.ini: Infiltrate=yes
-  CHAN: { type: UnitType.I_CHAN, name: 'Specialist', image: 'e1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true, points: 1 },
-  DELPHI: { type: UnitType.I_DELPHI, name: 'Agent Delphi', image: 'e1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: 'Pistol', crushable: true, maxAmmo: 10, points: 1 },
+  GNRL: { type: UnitType.I_GNRL, name: 'Stavros', image: 'gnrl', strength: 80, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 3, rot: 8, isInfantry: true, primaryWeapon: 'Pistol', crushable: true, isInfiltrate: true, points: 15, isCrawling: true },  // C++ idata.cpp: InfantryTypeClass "GNRL"; rules.ini: Infiltrate=yes
+  CHAN: { type: UnitType.I_CHAN, name: 'Specialist', image: 'chan', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true, points: 1 }, // C++ idata.cpp: InfantryTypeClass "CHAN"
+  DELPHI: { type: UnitType.I_DELPHI, name: 'Agent Delphi', image: 'delphi', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: 'Pistol', crushable: true, maxAmmo: 10, points: 1 }, // C++ idata.cpp: InfantryTypeClass "DELPHI"
   // Civilians — crushable, IsFraidyCat=true (C++ idata.cpp / rules.ini Fraidycat=yes)
   C1: { type: UnitType.I_C1, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: 'Pistol', crushable: true, maxAmmo: 10, isFraidyCat: true, points: 1 },
   C2: { type: UnitType.I_C2, name: 'Civilian', image: 'c1', strength: 25, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 2, rot: 8, isInfantry: true, primaryWeapon: null, crushable: true, isFraidyCat: true, points: 1 },
@@ -968,11 +974,11 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   // Counterstrike/Aftermath expansion vehicles — crusher for tank variants
   STNK: { type: UnitType.V_STNK, name: 'Phase Transport', image: 'stnk', strength: 200, armor: 'heavy', speed: 10, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', passengers: 1, crusher: true, isCloakable: true, points: 25 },  // aftrmath.ini Tracked=yes
   CTNK: { type: UnitType.V_CTNK, name: 'Chrono Tank', image: 'ctnk', strength: 350, armor: 'light', speed: 5, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'APTusk', crusher: true, points: 25 },  // aftrmath.ini Tracked=yes
-  TTNK: { type: UnitType.V_TTNK, name: 'Tesla Tank', image: 'ttnk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.TRACK, sight: 7, rot: 5, isInfantry: false, primaryWeapon: 'TTankZap', crusher: true, noMovingFire: true, points: 30 },  // aftrmath.ini Tracked=yes
+  TTNK: { type: UnitType.V_TTNK, name: 'Tesla Tank', image: 'ttnk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.TRACK, sight: 7, rot: 5, isInfantry: false, primaryWeapon: 'TTankZap', crusher: true, noMovingFire: true, points: 30, isRadarEquipped: true },  // aftrmath.ini Tracked=yes; C++ udata.cpp IsRadarEquipped
   QTNK: { type: UnitType.V_QTNK, name: 'M.A.D. Tank', image: 'qtnk', strength: 300, armor: 'heavy', speed: 3, speedClass: SpeedClass.TRACK, sight: 6, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, points: 60 },  // aftrmath.ini Tracked=yes
   DTRK: { type: UnitType.V_DTRK, name: 'Demo Truck', image: 'dtrk', strength: 110, armor: 'light', speed: 8, speedClass: SpeedClass.WHEEL, sight: 3, rot: 5, isInfantry: false, primaryWeapon: 'Democharge', explodesOnDeath: true, points: 5 },  // aftrmath.ini: Explodes=yes
-  MRJ: { type: UnitType.V_MRJ, name: 'Radar Jammer', image: 'mrj', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.TRACK, sight: 7, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, owner: 'allied', cost: 600, points: 30, crewed: true },  // rules.ini Tracked=yes
-  MGG: { type: UnitType.V_MGG, name: 'Mobile Gap Generator', image: 'mgg', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, owner: 'allied', cost: 600, points: 40, crewed: true },  // C++ udata.cpp:265 IsCrusher=true
+  MRJ: { type: UnitType.V_MRJ, name: 'Radar Jammer', image: 'mrj', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.TRACK, sight: 7, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, owner: 'allied', cost: 600, points: 30, crewed: true, isRadarEquipped: true },  // rules.ini Tracked=yes; C++ udata.cpp IsRadarEquipped
+  MGG: { type: UnitType.V_MGG, name: 'Mobile Gap Generator', image: 'mgg', strength: 110, armor: 'light', speed: 9, speedClass: SpeedClass.WHEEL, sight: 4, rot: 5, isInfantry: false, primaryWeapon: null, crusher: true, owner: 'allied', cost: 600, points: 40, crewed: true, isRadarEquipped: true },  // C++ udata.cpp:265 IsCrusher=true, IsRadarEquipped=true
   // Transport vehicles
   TRAN: { type: UnitType.V_TRAN, name: 'Chinook', image: 'tran', strength: 90, armor: 'light', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 5, isInfantry: false, primaryWeapon: null, passengers: 5, isAircraft: true, isRotorEquipped: true, landingSpeed: 0xFF, points: 35 },  // C++ aadata.cpp:168: STRUCT_NONE — lands anywhere via Good_LZ(), not at HPAD
   LST: { type: UnitType.V_LST, name: 'Transport', image: 'lst', strength: 350, armor: 'heavy', speed: 14, speedClass: SpeedClass.FLOAT, sight: 6, rot: 10, isInfantry: false, primaryWeapon: null, passengers: 5, isVessel: true, points: 25 },
@@ -992,7 +998,7 @@ export const UNIT_STATS: Record<string, UnitStats> = {
   HIND: { type: UnitType.V_HIND, name: 'Hind', image: 'hind', strength: 225, armor: 'heavy', speed: 12, speedClass: SpeedClass.WINGED, sight: 0, rot: 4, isInfantry: false, primaryWeapon: 'ChainGun', isAircraft: true, isRotorEquipped: true, landingBuilding: 'HPAD', landingSpeed: 0xFF, maxAmmo: 12, guardRange: 30, points: 40, crewed: true },
   // Tanya & Thief (new infantry)
   E7:   { type: UnitType.I_TANYA, name: 'Tanya', image: 'e7', strength: 100, armor: 'none', speed: 5, speedClass: SpeedClass.FOOT, sight: 6, rot: 8, isInfantry: true, primaryWeapon: 'Colt45', secondaryWeapon: 'Colt45', crushable: true, owner: 'both', cost: 1200, canSwim: true, hasC4: true, isInfiltrate: true, points: 25, isCrawling: true },
-  THF:  { type: UnitType.I_THF, name: 'Thief', image: 'e1', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, secondaryWeapon: null, crushable: true, owner: 'allied', cost: 500, isInfiltrate: true, points: 10 },  // NO Fraidycat=yes in rules.ini
+  THF:  { type: UnitType.I_THF, name: 'Thief', image: 'thf', strength: 25, armor: 'none', speed: 4, speedClass: SpeedClass.FOOT, sight: 5, rot: 8, isInfantry: true, primaryWeapon: null, secondaryWeapon: null, crushable: true, owner: 'allied', cost: 500, isInfiltrate: true, points: 10 },  // C++ idata.cpp: InfantryTypeClass "THF"; NO Fraidycat=yes in rules.ini
   // Expansion vehicles (V2 Rocket, Minelayer)
   V2RL: { type: UnitType.V_V2RL, name: 'V2 Rocket', image: 'v2rl', strength: 150, armor: 'light', speed: 7, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: 'SCUD', secondaryWeapon: null, owner: 'soviet', cost: 700, noMovingFire: true, maxAmmo: 1, crusher: true, points: 40, crewed: true },  // rules.ini Tracked=yes
   MNLY: { type: UnitType.V_MNLY, name: 'Minelayer', image: 'mnly', strength: 100, armor: 'heavy', speed: 9, speedClass: SpeedClass.TRACK, sight: 5, rot: 5, isInfantry: false, primaryWeapon: null, secondaryWeapon: null, owner: 'both', cost: 800, maxAmmo: 5, crusher: true, points: 50, crewed: true },  // rules.ini Tracked=yes
@@ -1005,19 +1011,19 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   M1Carbine:        { name: 'M1Carbine',        damage: 15,  rof: 20, range: 3.0,  warhead: 'SA', projSpeed: 100, isInvisible: true },  // Invisible projectile: Inviso=yes, no Degenerates in INI
   Grenade:          { name: 'Grenade',           damage: 50,  rof: 60, range: 4.0,  warhead: 'HE', splash: 1.5, inaccuracy: 0.5, projectileSpeed: 0.33, isArcing: true, projSpeed: 5, isHigh: true, isInaccurate: true }, // C++ Speed=5 (Lobbed)
   Dragon:           { name: 'Dragon',            damage: 35,  rof: 50, range: 5.0,  warhead: 'AP', projectileSpeed: 1.67, projectileROT: 5, projectileArm: 2, projSpeed: 25, isHigh: true, isInaccurate: true, isFueled: true, isAntiAir: true },
-  RedEye:           { name: 'RedEye',            damage: 50,  rof: 50, range: 7.5,  warhead: 'AP', projectileSpeed: 3.33, projectileROT: 20, projectileArm: 3, projSpeed: 50, isAntiAir: true, isAntiGround: false, isHigh: true, isFueled: true },
+  RedEye:           { name: 'RedEye',            damage: 50,  rof: 50, range: 7.5,  warhead: 'AP', projectileSpeed: 3.33, projectileROT: 20, projectileArm: 3, projSpeed: 50, isAntiAir: true, isAntiGround: false, isHigh: true, isFueled: true, firingAnim: 'samfire' },
   Flamer:           { name: 'Flamer',            damage: 70,  rof: 50, range: 3.5,  warhead: 'Fire', splash: 1.0, projectileSpeed: 0.8, projSpeed: 12, isFlameEquipped: true },  // C++ bbdata.cpp: Animates=yes — flame trail
   DogJaw:           { name: 'DogJaw',            damage: 100, rof: 10, range: 2.2,  warhead: 'Organic', projectileSpeed: 0.5, projSpeed: 20, projectileROT: 20 }, // LeapDog: Translucent=yes, Rotates=yes, Proximity=yes, ROT=20 — no Inviso, no Degenerates
   Heal:             { name: 'Heal',              damage: -50, rof: 80, range: 1.83, warhead: 'Organic', projSpeed: 100, isInvisible: true },
   Sniper:           { name: 'Sniper',            damage: 100, rof: 5,  range: 3.75, warhead: 'HollowPoint', projSpeed: 100, isInvisible: true },  // Invisible projectile
   // Vehicle weapons
-  M60mg:            { name: 'M60mg',             damage: 15,  rof: 20, range: 4.0,  warhead: 'SA', projSpeed: 100, isInvisible: true },  // Invisible projectile
-  '75mm':           { name: '75mm',              damage: 25,  rof: 40, range: 4.0,  warhead: 'AP', projectileSpeed: 2.67, projSpeed: 40 },  // Cannon projectile — no Degenerates
-  '90mm':           { name: '90mm',              damage: 30,  rof: 50, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 40 },  // Cannon projectile
-  '105mm':          { name: '105mm',             damage: 30,  rof: 70, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 40 },  // Cannon projectile
-  '120mm':          { name: '120mm',             damage: 40,  rof: 80, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 40, burst: 2 },  // Cannon projectile
+  M60mg:            { name: 'M60mg',             damage: 15,  rof: 20, range: 4.0,  warhead: 'SA', projSpeed: 100, isInvisible: true, firingAnim: 'minigun' },  // Invisible projectile, Anim=MINIGUN
+  '75mm':           { name: '75mm',              damage: 25,  rof: 40, range: 4.0,  warhead: 'AP', projectileSpeed: 2.67, projSpeed: 40, firingAnim: 'gunfire' },  // Cannon projectile — no Degenerates
+  '90mm':           { name: '90mm',              damage: 30,  rof: 50, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 40, firingAnim: 'gunfire' },  // Cannon projectile
+  '105mm':          { name: '105mm',             damage: 30,  rof: 70, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 40, firingAnim: 'gunfire' },  // Cannon projectile
+  '120mm':          { name: '120mm',             damage: 40,  rof: 80, range: 4.75, warhead: 'AP', projectileSpeed: 2.67, projSpeed: 40, burst: 2, firingAnim: 'gunfire' },  // Cannon projectile
   MammothTusk:      { name: 'MammothTusk',       damage: 75,  rof: 80, range: 5.0,  warhead: 'HE', splash: 1.5, projectileSpeed: 2.0, burst: 2, projectileROT: 5, projectileArm: 2, projSpeed: 30, isHigh: true, isInaccurate: true, isFueled: true, isAntiAir: true },
-  '155mm':          { name: '155mm',             damage: 150, rof: 65, range: 6.0,  warhead: 'HE', splash: 2.0, inaccuracy: 1.5, minRange: 2.0, projectileSpeed: 0.8, isArcing: true, projSpeed: 12, isInaccurate: true, isHigh: true },
+  '155mm':          { name: '155mm',             damage: 150, rof: 65, range: 6.0,  warhead: 'HE', splash: 2.0, inaccuracy: 1.5, minRange: 2.0, projectileSpeed: 0.8, isArcing: true, projSpeed: 12, isInaccurate: true, isHigh: true, firingAnim: 'gunfire' },
   TeslaCannon:      { name: 'TeslaCannon',       damage: 100, rof: 120, range: 8.5, warhead: 'Super', splash: 1.0, projSpeed: 40 },
   // Counterstrike/Aftermath expansion weapons
   PortaTesla:       { name: 'PortaTesla',        damage: 45,  rof: 70, range: 3.5,  warhead: 'Super', splash: 0.5, projSpeed: 100, isInvisible: true }, // Shock Trooper
@@ -1034,10 +1040,10 @@ export const WEAPON_STATS: Record<string, WeaponStats> = {
   // Aircraft weapons (C++ RULES.INI — aircraft.cpp)
   Maverick:         { name: 'Maverick',          damage: 50,  rof: 3,  range: 6.0,  warhead: 'AP', projSpeed: 30, projectileSpeed: 2.0, projectileROT: 5, projectileArm: 2, isHigh: true, isInaccurate: true, isFueled: true, isAntiAir: true },  // Air-to-ground missile (MIG)
   Hellfire:         { name: 'Hellfire',           damage: 40,  rof: 60, range: 4.0,  warhead: 'AP', splash: 1.0, projSpeed: 30, projectileSpeed: 2.0, projectileROT: 5, projectileArm: 2, isHigh: true, isInaccurate: true, isFueled: true, isAntiAir: true },  // Helicopter missile (HELI)
-  ChainGun:         { name: 'ChainGun',           damage: 40,  rof: 3,  range: 5.0,  warhead: 'SA', projSpeed: 100, isInvisible: true },  // Invisible projectile — HIND/YAK rapid-fire
+  ChainGun:         { name: 'ChainGun',           damage: 40,  rof: 3,  range: 5.0,  warhead: 'SA', projSpeed: 100, isInvisible: true, firingAnim: 'minigun' },  // Invisible projectile — HIND/YAK rapid-fire
   // New parity weapons
-  '8Inch':          { name: '8Inch',             damage: 500, rof: 160, range: 22.0, warhead: 'HE', projSpeed: 6, isArcing: true, inaccuracy: 1.0, isSupressed: true, isHigh: true, isInaccurate: true },   // Cruiser main gun, rules.ini Supress=yes
-  '2Inch':          { name: '2Inch',             damage: 25,  rof: 60, range: 5.5,  warhead: 'AP', projSpeed: 25 },  // Cannon projectile — Gunboat weapon
+  '8Inch':          { name: '8Inch',             damage: 500, rof: 160, range: 22.0, warhead: 'HE', projSpeed: 6, isArcing: true, inaccuracy: 1.0, isSupressed: true, isHigh: true, isInaccurate: true, firingAnim: 'gunfire' },   // Cruiser main gun, rules.ini Supress=yes
+  '2Inch':          { name: '2Inch',             damage: 25,  rof: 60, range: 5.5,  warhead: 'AP', projSpeed: 25, firingAnim: 'gunfire' },  // Cannon projectile — Gunboat weapon
   Colt45:           { name: 'Colt45',            damage: 50,  rof: 5,  range: 5.75, warhead: 'HollowPoint', projSpeed: 100, isInvisible: true },  // Tanya — Invisible projectile
   Pistol:           { name: 'Pistol',            damage: 1,   rof: 7,  range: 1.75, warhead: 'SA', projSpeed: 100, isInvisible: true },  // Invisible projectile — civilian weapon
   SCUD:             { name: 'SCUD',              damage: 600, rof: 400, range: 10.0, warhead: 'HE', projSpeed: 25, projectileSpeed: 2.0, projectileArm: 10, splash: 2.0, inaccuracy: 1.5, isFueled: true, isHigh: true, isInaccurate: true },  // V2 Rocket — FROG: Arm=10, High=yes, Proximity=yes, Animates=yes, Ranged=yes, Inaccurate=yes (NO Gigundo)
@@ -1272,6 +1278,9 @@ export const STRUCTURE_POINTS: Record<string, number> = {
   HOSP: 20,  // Hospital
   FCOM: 40,  // Forward Command
   MISS:  5,  // Tech Center (civilian)
+  ...Object.fromEntries(
+    Array.from({ length: 37 }, (_, i) => [`V${String(i + 1).padStart(2, '0')}`, 5]),
+  ),
 };
 
 for (const item of PRODUCTION_ITEMS) {

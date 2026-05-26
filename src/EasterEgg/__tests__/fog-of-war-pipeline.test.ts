@@ -156,15 +156,18 @@ describe('Shroud vs Fog vs Visible state transitions', () => {
     expect(countVis(map, 1)).toBe(0);
   });
 
-  it('creepShadow sets all cells back to shroud (0)', () => {
+  it('creepShadow only shrouds display shadow-edge cells', () => {
     const map = createClearMap();
     map.updateFogOfWar([unit(64, 64, 5)]);
     expect(countVis(map, 2)).toBeGreaterThan(0);
+    expect(map.getDisplayVisibility(64, 64)).toBe(2);
+    expect(map.getDisplayVisibility(69, 64)).toBe(1);
 
     map.creepShadow();
-    expect(countVis(map, 0)).toBe(MAP_CELLS * MAP_CELLS);
-    expect(countVis(map, 1)).toBe(0);
-    expect(countVis(map, 2)).toBe(0);
+    expect(map.getDisplayVisibility(64, 64)).toBe(2);
+    expect(map.getVisibility(64, 64)).toBe(2);
+    expect(map.getDisplayVisibility(69, 64)).toBe(0);
+    expect(map.getVisibility(69, 64)).toBe(0);
   });
 });
 
@@ -1327,31 +1330,35 @@ describe('GameMap.setVisibility direct usage', () => {
 // ========================================================================
 
 describe('creepShadow (tunnel darkness)', () => {
-  it('downgrades all fog and visible cells to shroud', () => {
+  it('shrouds mapped display-edge cells without clearing fully visible cells', () => {
     const map = createClearMap();
     map.updateFogOfWar([unit(64, 64, 5)]);
     expect(countVis(map, 2)).toBeGreaterThan(0);
+    expect(map.getDisplayVisibility(64, 64)).toBe(2);
+    expect(map.getDisplayVisibility(69, 64)).toBe(1);
 
     // Remove unit to create fog
     map.updateFogOfWar([]);
     expect(countVis(map, 1)).toBeGreaterThan(0);
 
-    // Creep shadow
+    // C++ DisplayClass::Encroach_Shadow only marks IsMapped && !IsVisible
+    // cells. In the TS display model that is displayVisibility === 1.
     map.creepShadow();
-    expect(countVis(map, 0)).toBe(MAP_CELLS * MAP_CELLS);
-    expect(countVis(map, 1)).toBe(0);
-    expect(countVis(map, 2)).toBe(0);
+    expect(map.getDisplayVisibility(64, 64)).toBe(2);
+    expect(map.getVisibility(64, 64)).toBe(1);
+    expect(map.getDisplayVisibility(69, 64)).toBe(0);
+    expect(map.getVisibility(69, 64)).toBe(0);
   });
 
   it('fog can be rebuilt after creepShadow', () => {
     const map = createClearMap();
     map.updateFogOfWar([unit(64, 64, 5)]);
     map.creepShadow();
-    // All shroud now
-    expect(countVis(map, 2)).toBe(0);
+    expect(map.getVisibility(69, 64)).toBe(0);
 
     // Reveal again
     map.updateFogOfWar([unit(64, 64, 5)]);
     expect(countVis(map, 2)).toBeGreaterThan(0);
+    expect(map.getVisibility(69, 64)).toBe(2);
   });
 });

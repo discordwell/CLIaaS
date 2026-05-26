@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { UNIT_STATS, PRODUCTION_ITEMS } from '../engine/types';
+import { UNIT_STATS, PRODUCTION_ITEMS, STRUCTURE_POINTS } from '../engine/types';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -495,6 +495,19 @@ describe('Fake building Points= values (rules.ini)', () => {
       const parsed = ALL_POINTS.get(fake);
       expect(parsed, `${fake} should have Points=15 in rules.ini`).toBeDefined();
       expect(parsed).toBe(15);
+    });
+  }
+});
+
+// ── 11. Civilian village building Points= values ──────────────────────────
+
+describe('Civilian village building Points= values (rules.ini)', () => {
+  const VILLAGE_BUILDINGS = Array.from({ length: 37 }, (_, i) => `V${String(i + 1).padStart(2, '0')}`);
+
+  for (const type of VILLAGE_BUILDINGS) {
+    it(`${type}: Points=5`, () => {
+      expect(ALL_POINTS.get(type)).toBe(5);
+      expect(STRUCTURE_POINTS[type]).toBe(5);
     });
   }
 });

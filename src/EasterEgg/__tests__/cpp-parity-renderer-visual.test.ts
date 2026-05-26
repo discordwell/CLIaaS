@@ -22,13 +22,14 @@ import {
   buildCppDefaultPaletteAdjustmentMap,
   BUILDING_FRAME_TABLE,
   cppDefaultAdjustedPaletteColor,
+  entitySpriteRenderSpec,
   HOUSE_MINIMAP_COLOR,
   Renderer,
   waterPaletteCycleShift,
 } from '../engine/renderer';
 import { NonCriticalRandom } from '../engine/random';
 import { RA_COLOR_BLACK, conquerBuildFadingTable, nearestPaletteIndex } from '../engine/shadow';
-import { CELL_SIZE, House, LEPTON_SIZE, Mission, UnitType } from '../engine/types';
+import { CELL_SIZE, House, LEPTON_SIZE, Mission, UnitType, leptonToPixel } from '../engine/types';
 
 describe('sprite SHAPE_CENTER placement (2keyfbuf.cpp Buffer_Frame_To_Page)', () => {
   function managerWithSheet(width: number, height: number): AssetManager {
@@ -118,6 +119,37 @@ describe('minimap blip colors per house (hdata.cpp → radar.cpp:740)', () => {
     expect(HOUSE_MINIMAP_COLOR[House.Multi6]).toBe(HOUSE_MINIMAP_COLOR[House.Germany]);
     expect(HOUSE_MINIMAP_COLOR[House.Multi7]).toBe(HOUSE_MINIMAP_COLOR[House.France]);
     expect(HOUSE_MINIMAP_COLOR[House.Multi8]).toBe(HOUSE_MINIMAP_COLOR[House.Turkey]);
+  });
+});
+
+describe('spy visible disguise rendering (infantry.cpp:4096 + techno.cpp:4401-4404)', () => {
+  it('draws a non-player-owned spy as player-colored E1 imagery', () => {
+    // C++ InfantryClass::Get_Image_Data returns E1.SHP for non-owned spies,
+    // then Techno_Draw_Object swaps the remap table to PlayerPtr.
+    const spy = new Entity(UnitType.I_SPY, House.GoodGuy, 10, 10);
+
+    expect(entitySpriteRenderSpec(spy, House.USSR)).toEqual({
+      sheetName: 'e1',
+      remapHouse: House.USSR,
+    });
+  });
+
+  it('keeps a player-owned spy on the spy sheet with its own remap', () => {
+    const spy = new Entity(UnitType.I_SPY, House.USSR, 10, 10);
+
+    expect(entitySpriteRenderSpec(spy, House.USSR)).toEqual({
+      sheetName: 'spy',
+      remapHouse: House.USSR,
+    });
+  });
+
+  it('does not apply the spy disguise path to normal infantry', () => {
+    const rifle = new Entity(UnitType.I_E1, House.GoodGuy, 10, 10);
+
+    expect(entitySpriteRenderSpec(rifle, House.USSR)).toEqual({
+      sheetName: 'e1',
+      remapHouse: House.GoodGuy,
+    });
   });
 });
 
@@ -654,7 +686,8 @@ describe('renderer structure shadow sentinels (Techno_Draw_Object SHAPE_GHOST)',
 });
 
 describe('renderer structure body remap flags (TechnoClass::Remap_Table const)', () => {
-  function setup(sheetName: string, frameCount = 2) {
+  function setup(sheetName: string | string[], frameCount = 2) {
+    const sheetNames = new Set(Array.isArray(sheetName) ? sheetName : [sheetName]);
     const ctx = {
       imageSmoothingEnabled: false,
       globalAlpha: 1,
@@ -693,7 +726,7 @@ describe('renderer structure body remap flags (TechnoClass::Remap_Table const)',
       getDisplayVisibility: () => 2,
     };
     const assets = {
-      getSheet: vi.fn((name: string) => name === sheetName
+      getSheet: vi.fn((name: string) => sheetNames.has(name)
         ? { meta: { frameWidth: 24, frameHeight: 24, frameCount } }
         : null),
       getRemappedSheet: vi.fn(() => ({ meta: { frameWidth: 24, frameHeight: 24, frameCount } })),
@@ -731,10 +764,15 @@ describe('renderer structure body remap flags (TechnoClass::Remap_Table const)',
     expect(assets.drawFrameFrom).not.toHaveBeenCalled();
   });
 
-  it('does not owner-remap REMAP_NONE mine buildings', () => {
-    // C++ MINV/MINP have IsRemappable=true, but HouseClass::Remap_Table
-    // returns null when the type remap mode is REMAP_NONE.
+  it('draws REMAP_NONE mine buildings through FadingShade, not owner remap', () => {
+    // C++ bdata.cpp ClassAVMine/ClassAPMine set IsRemappable=true but
+    // REMAP_NONE. TechnoClass::Remap_Table therefore calls
+    // HouseClass::Remap_Table(..., REMAP_NONE), which returns null; conquer.cpp
+    // then supplies DisplayClass::FadingShade for the SHAPE_FADING body pass.
     const { ctx, renderer, camera, map, assets } = setup('minv', 1);
+    const palette = Array.from({ length: 256 }, () => [0, 0, 0, 255]);
+    (renderer as any).pal = palette;
+    renderer.playerHouse = House.USSR;
     const mine = {
       type: 'MINV',
       image: 'minv',
@@ -749,6 +787,55 @@ describe('renderer structure body remap flags (TechnoClass::Remap_Table const)',
     (renderer as any).renderStructures(camera, map as any, [mine] as any, assets as any, 100);
 
     expect(assets.getRemappedSheet).not.toHaveBeenCalled();
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'minv', 0, 252, 252,
+      expect.objectContaining({
+        centerX: true,
+        centerY: true,
+        ghostShadow: { palette, frac: 130 },
+        sourceFading: { palette, frac: 130 },
+      }));
+    expect(assets.drawFrameFrom).not.toHaveBeenCalled();
+  });
+
+  it('hides invisible AP/AV mines that are not owned by PlayerPtr', () => {
+    // bdata.cpp marks MINV/MINP as IsInvisible. TechnoClass::Visual_Character()
+    // shows invisible technos only when IsOwnedByPlayer is true; ally reveal
+    // and mapped terrain do not make enemy mines visible.
+    const { renderer, camera, map, assets } = setup('minv', 5);
+    renderer.playerHouse = House.USSR;
+    const enemyMine = {
+      type: 'MINV',
+      image: 'minv',
+      house: House.Greece,
+      cx: 10,
+      cy: 10,
+      hp: 1,
+      maxHp: 1,
+      alive: true,
+    };
+
+    (renderer as any).renderStructures(camera, map as any, [enemyMine] as any, assets as any, 50);
+
+    expect(assets.drawFrame).not.toHaveBeenCalled();
+    expect(assets.drawFrameFrom).not.toHaveBeenCalled();
+  });
+
+  it('still renders AP/AV mines owned by PlayerPtr', () => {
+    const { ctx, renderer, camera, map, assets } = setup('minv', 5);
+    renderer.playerHouse = House.USSR;
+    const playerMine = {
+      type: 'MINV',
+      image: 'minv',
+      house: House.USSR,
+      cx: 10,
+      cy: 10,
+      hp: 1,
+      maxHp: 1,
+      alive: true,
+    };
+
+    (renderer as any).renderStructures(camera, map as any, [playerMine] as any, assets as any, 50);
+
     expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'minv', 0, 252, 252, {
       centerX: true,
       centerY: true,
@@ -773,6 +860,81 @@ describe('renderer structure body remap flags (TechnoClass::Remap_Table const)',
 
     expect(assets.getRemappedSheet).toHaveBeenCalledWith('powr', House.USSR);
     expect(assets.drawFrameFrom).toHaveBeenCalled();
+  });
+
+  it('owner-remaps the WEAP2 war-factory door overlay', () => {
+    // C++ building.cpp draws WarFactoryOverlay through Techno_Draw_Object,
+    // so the door overlay uses the owning house remap just like the body.
+    // SCU12EA exposed this as a Greece war factory with a gold TS door roof.
+    const { renderer, camera, map, assets } = setup(['weap', 'weap2'], 8);
+    assets.hasSheet.mockImplementation((name: string) => name === 'weap2');
+    const weap = {
+      type: 'WEAP',
+      image: 'weap',
+      house: House.Greece,
+      cx: 10,
+      cy: 10,
+      hp: 1000,
+      maxHp: 1000,
+      alive: true,
+      doorFrame: 0,
+    };
+
+    (renderer as any).renderStructures(camera, map as any, [weap] as any, assets as any, 50);
+
+    expect(assets.getRemappedSheet).toHaveBeenCalledWith('weap', House.Greece);
+    expect(assets.getRemappedSheet).toHaveBeenCalledWith('weap2', House.Greece);
+    expect(assets.drawFrameFrom).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'weap2',
+      0,
+      expect.any(Number),
+      expect.any(Number),
+      { centerX: true, centerY: true },
+    );
+    expect(assets.drawFrame).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'weap2',
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Object),
+    );
+  });
+
+  it('draws the WEAP2 door from DoorClass state without mutating it from production UI', () => {
+    const { renderer, camera, map, assets } = setup(['weap', 'weap2'], 8);
+    assets.hasSheet.mockImplementation((name: string) => name === 'weap2');
+    renderer.sidebarQueue.set('unit', {
+      item: {} as any,
+      progress: 0.5,
+      queueCount: 1,
+    });
+    const weap = {
+      type: 'WEAP',
+      image: 'weap',
+      house: House.Greece,
+      cx: 10,
+      cy: 10,
+      hp: 1000,
+      maxHp: 1000,
+      alive: true,
+      doorFrame: 2,
+    };
+
+    (renderer as any).renderStructures(camera, map as any, [weap] as any, assets as any, 50);
+
+    expect(weap.doorFrame).toBe(2);
+    expect(assets.drawFrameFrom).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'weap2',
+      2,
+      expect.any(Number),
+      expect.any(Number),
+      { centerX: true, centerY: true },
+    );
   });
 
   it('does not animate healthy DOME into its damaged frame', () => {
@@ -857,6 +1019,36 @@ describe('renderer structure body remap flags (TechnoClass::Remap_Table const)',
       expect.anything(),
       'fact',
       26,
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Object),
+    );
+  });
+
+  it('keeps damaged idle repair facilities on frame 7, not a later repair-pad state', () => {
+    // bdata.cpp _anims: STRUCT_REPAIR has BSTATE_ACTIVE Start=0 Count=7 and
+    // BSTATE_IDLE Start=0 Count=1. building.cpp Shape_Number() uses the largest
+    // registered span as the damaged offset, so damaged idle FIX is frame 7.
+    const { renderer, camera, map, assets } = setup('fix', 14);
+    const fix = {
+      type: 'FIX',
+      image: 'fix',
+      house: House.USSR,
+      cx: 10,
+      cy: 10,
+      hp: 350,
+      maxHp: 800,
+      alive: true,
+      mission: Mission.GUARD,
+    };
+
+    (renderer as any).renderStructures(camera, map as any, [fix] as any, assets as any, 1);
+
+    expect(assets.drawFrameFrom).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'fix',
+      7,
       expect.any(Number),
       expect.any(Number),
       expect.any(Object),
@@ -1424,6 +1616,7 @@ describe('renderer theatre-specific terrain object art', () => {
     map.setBounds(10, 10, 1, 1);
     map.setTerrain(10, 10, Terrain.CLEAR);
     map.setTreeType(10, 10, 'tc01');
+    map.setVisibility(10, 10, 2);
 
     const assets = {
       hasSheet: vi.fn((name: string) => name === 'tc01_snow'),
@@ -1484,15 +1677,83 @@ describe('renderer theatre-specific terrain object art', () => {
       immune: true,
       occupyCells: TREE_OCCUPY.tc02.map(([dx, dy]) => (68 + dy) * 128 + (43 + dx)),
     });
+    map.setVisibility(43, 68, 2);
 
     const assets = {
       hasSheet: vi.fn((name: string) => name === 'tc02_snow'),
+      getSheet: vi.fn((name: string) => name === 'tc02_snow'
+        ? { meta: { frameWidth: 72, frameHeight: 48, frameCount: 10, columns: 10, rows: 1, sheetWidth: 720, sheetHeight: 48 } }
+        : undefined),
       drawFrame: vi.fn(),
     };
 
     (renderer as any).renderTerrain(camera, map, 0, assets);
 
     expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'tc02_snow', 0, 204, -8);
+  });
+
+  it('draws tall tree clumps whose SHP rectangle overlaps from two rows above the viewport', () => {
+    // SCU36EA has TC04 at (30,78) with screen origin y=-32 while the tactical
+    // viewport starts at y=16. TC04.SNO is 96x72, so C++ still draws its bottom
+    // strip. Culling by origin plus one cell incorrectly drops it.
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      fillStyle: '#000',
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+    };
+    const canvas = {
+      width: 640,
+      height: 400,
+      getContext: () => ctx,
+    } as unknown as HTMLCanvasElement;
+    const renderer = new Renderer(canvas);
+    renderer.theatre = 'SNOW';
+
+    const camera = new Camera(480, 384, 0, 16);
+    camera.x = 696;
+    camera.y = 1920;
+
+    const map = new GameMap();
+    map.setBounds(29, 31, 70, 65);
+    map.setTreeType(30, 78, 'tc04');
+    map.addTree({
+      type: 'tc04',
+      cx: 30,
+      cy: 78,
+      hp: 600,
+      maxHp: 600,
+      immune: true,
+      occupyCells: TREE_OCCUPY.tc04.map(([dx, dy]) => (78 + dy) * 128 + (30 + dx)),
+    });
+    map.setVisibility(30, 78, 2);
+
+    const assets = {
+      hasSheet: vi.fn((name: string) => name === 'tc04_snow'),
+      getSheet: vi.fn((name: string) => name === 'tc04_snow'
+        ? { meta: { frameWidth: 96, frameHeight: 72, frameCount: 10, columns: 10, rows: 1, sheetWidth: 960, sheetHeight: 72 } }
+        : undefined),
+      drawFrame: vi.fn(),
+    };
+
+    (renderer as any).renderTerrain(camera, map, 0, assets);
+
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'tc04_snow', 0, 24, -32);
   });
 
   it.each([
@@ -1557,6 +1818,36 @@ describe('renderer theatre-specific terrain object art', () => {
     });
     expect(ctx.fillRect).not.toHaveBeenCalled();
   });
+
+  it('draws V12-V18 rock overlays through OverlayTypeClass art', () => {
+    // C++ OverlayTypeClass::Draw_It handles V12..V18 exactly like other
+    // OverlayPack entries: centered SHP frame 0 with SHAPE_GHOST shadow.
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    renderer.theatre = 'SNOW';
+    (renderer as any).pal = Array.from({ length: 256 }, () => [0, 0, 0, 255]);
+
+    const camera = new Camera(0, 0);
+    camera.x = 12 * CELL_SIZE;
+    camera.y = 12 * CELL_SIZE;
+
+    const map = new GameMap();
+    map.overlay[12 * 128 + 12] = 17; // OVERLAY_V16
+
+    const assets = {
+      hasSheet: vi.fn((name: string) => name === 'v16_snow'),
+      drawFrame: vi.fn(),
+    };
+
+    (renderer as any).renderOverlays(camera, map, 7, assets);
+
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'v16_snow', 0, 12, 12, {
+      centerX: true,
+      centerY: true,
+      ghostShadow: { palette: (renderer as any).pal, frac: 75 },
+    });
+    expect(ctx.fillRect).not.toHaveBeenCalled();
+  });
 });
 
 describe('renderer smudge/crater art (sdata.cpp SmudgeTypeClass::Draw_It)', () => {
@@ -1614,6 +1905,31 @@ describe('renderer smudge/crater art (sdata.cpp SmudgeTypeClass::Draw_It)', () =
     (renderer as any).renderDecals(camera, map, assets);
 
     expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'sc3_snow', 0, 0, 0);
+    expect(ctx.ellipse).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back to temperate smudge art when INTERIOR has no matching SHP', () => {
+    // C++ SmudgeTypeClass::Init builds SC3.INT for INTERIOR and stores null
+    // ImageData when the file is absent; Draw_It then renders nothing.
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    renderer.theatre = 'INTERIOR';
+
+    const camera = new Camera(0, 0);
+    camera.x = 12 * CELL_SIZE;
+    camera.y = 12 * CELL_SIZE;
+
+    const map = new GameMap();
+    map.smudges.push({ type: 'SC3', cx: 12, cy: 12 });
+
+    const assets = {
+      hasSheet: vi.fn((name: string) => name === 'sc3'),
+      drawFrame: vi.fn(),
+    };
+
+    (renderer as any).renderDecals(camera, map, assets);
+
+    expect(assets.drawFrame).not.toHaveBeenCalled();
     expect(ctx.ellipse).not.toHaveBeenCalled();
   });
 
@@ -1924,6 +2240,7 @@ describe('renderer corpse AnimClass art (infantry.cpp corpse follow-up)', () => 
     map.setBounds(10, 10, 1, 1);
     map.setTerrain(10, 10, Terrain.ORE);
     map.setTreeType(10, 10, 't16');
+    map.setVisibility(10, 10, 2);
     map.overlay[10 * 128 + 10] = GameMap.OVERLAY_GOLD1;
     map.oreDensity[10 * 128 + 10] = 3;
 
@@ -1990,6 +2307,7 @@ describe('renderer corpse AnimClass art (infantry.cpp corpse follow-up)', () => 
     const map = new GameMap();
     map.setBounds(0, 0, 8, 8);
     map.setTreeType(1, 1, 'tc02');
+    map.setVisibility(1, 1, 2);
 
     const calls: string[] = [];
     const assets = {
@@ -2044,6 +2362,7 @@ describe('renderer corpse AnimClass art (infantry.cpp corpse follow-up)', () => 
     const map = new GameMap();
     map.setBounds(0, 0, 128, 128);
     map.addTerrainObject('boxes06', 21, 54, TERRAIN_OBJECT_OCCUPY.boxes06, 11);
+    map.setVisibility(21, 54, 2);
 
     const assets = {
       getTheatrePalette: vi.fn(() => Array.from({ length: 256 }, () => [0, 0, 0, 255])),
@@ -2078,6 +2397,59 @@ describe('renderer corpse AnimClass art (infantry.cpp corpse follow-up)', () => 
     renderer.render(camera, map, [], [], assets as any, {} as any, new Set(), [], 1);
 
     expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'boxes06', 0, 288, 252, {
+      ghostShadow: { palette: (renderer as any).pal, frac: 130 },
+    });
+  });
+
+  it('queues ore mine TerrainClass objects with MINE theatre art', () => {
+    // C++ tdata.cpp TERRAIN_MINE uses MINE.TEM/MINE.SNO as a TerrainClass
+    // object. It is separate from invisible BuildingClass MINP/MINV land mines.
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    (renderer as any).pal = Array.from({ length: 256 }, () => [0, 0, 0, 255]);
+
+    const camera = new Camera(640, 400);
+    camera.x = 384;
+    camera.y = 1188;
+
+    const map = new GameMap();
+    map.setBounds(0, 0, 128, 128);
+    map.addTerrainObject('mine', 17, 51, TERRAIN_OBJECT_OCCUPY.mine, 12);
+    map.setVisibility(17, 51, 2);
+
+    const assets = {
+      getTheatrePalette: vi.fn(() => Array.from({ length: 256 }, () => [0, 0, 0, 255])),
+      hasTileset: vi.fn(() => false),
+      hasSheet: vi.fn((name: string) => name === 'mine'),
+      drawFrame: vi.fn(),
+    };
+
+    for (const method of [
+      'renderDecals',
+      'renderOverlays',
+      'renderCorpses',
+      'renderStructures',
+      'renderCrates',
+      'renderEntities',
+      'renderTargetLines',
+      'renderWaypoints',
+      'renderLogicAnims',
+      'renderEffects',
+      'renderFogOfWar',
+      'renderSelectionBox',
+      'renderOffscreenIndicators',
+      'renderSidebar',
+      'renderMinimap',
+      'renderSidebarButtonRow',
+      'renderVerticalPowerBar',
+      'renderCursor',
+    ]) {
+      (renderer as any)[method] = vi.fn();
+    }
+
+    renderer.render(camera, map, [], [], assets as any, {} as any, new Set(), [], 1);
+
+    expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'mine', 0, 24, 36, {
       ghostShadow: { palette: (renderer as any).pal, frac: 130 },
     });
   });
@@ -2901,15 +3273,29 @@ describe('renderer vessel and aircraft body frames', () => {
     }
   });
 
-  it('does not draw destroyed vessels retained for logic bookkeeping', () => {
-    // C++ vessel.cpp:958-973 removes destroyed vessels from the map draw path:
-    // Mark(MARK_UP) erases the shape, then delete this clears the active object.
-    const sub = new Entity(UnitType.V_SS, House.USSR, 64, 64);
-    sub.alive = false;
-    sub.hp = 0;
-    sub.mission = Mission.DIE;
+  it('draws zero-strength vessels that C++ keeps down in the ground layer', () => {
+    // Dual-runtime probes show SCU11EA logic 91 (DD, Strength=0) and SCG07EA
+    // logic 72 (SS, Strength=0) still present in LAYER_GROUND with IsDown=true.
+    // C++ Render() still calls Draw_It for those active VesselClass objects when
+    // IsToDisplay is set, so TS must not treat hp=0 as a render removal by itself.
+    const dd = new Entity(UnitType.V_DD, House.Greece, 64, 64);
+    dd.alive = false;
+    dd.hp = 0;
+    dd.mission = Mission.DIE;
 
-    const calls = renderSingleCalls(sub, 32);
+    const calls = renderSingleCalls(dd, 32);
+
+    expect(calls[0][1]).toBe('dd');
+  });
+
+  it('does not draw vessels that have been limboed off the map', () => {
+    const dd = new Entity(UnitType.V_DD, House.Greece, 64, 64);
+    dd.alive = false;
+    dd.hp = 0;
+    dd.mission = Mission.DIE;
+    dd.inLimbo = true;
+
+    const calls = renderSingleCalls(dd, 32);
 
     expect(calls).toEqual([]);
   });
@@ -3044,9 +3430,92 @@ describe('renderer vessel and aircraft body frames', () => {
     expect(shadow![5]).toBe((renderer as any).pal);
     expect(shadow![6]).toEqual({ centerX: true, centerY: true });
     expect(body![3]).toBeCloseTo(tran.pos.x);
-    expect(body![4]).toBeCloseTo(tran.pos.y - tran.flightAltitude);
+    expect(body![4]).toBeCloseTo(tran.pos.y - leptonToPixel(tran.aircraftHeightLeptons));
     expect(assets.drawFrameSpecialGhost.mock.invocationCallOrder[0])
       .toBeLessThan(assets.drawFrame.mock.invocationCallOrder[0]);
+  });
+
+  it('subtracts ObjectClass::Height when rendering falling infantry bodies', () => {
+    // C++ techno.cpp:4392-4396 subtracts Lepton_To_Pixel(Height) in
+    // Techno_Draw_Object for every TechnoClass, including paradropped infantry.
+    const { canvas } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    const camera = new Camera(160, 120);
+    const map = new GameMap();
+    map.setBounds(0, 0, 128, 128);
+    map.revealAll();
+
+    const e1 = new Entity(UnitType.I_E1, House.USSR, 96, 96);
+    e1.prevPos = { ...e1.pos };
+    e1.isFalling = true;
+    e1.fallHeightLeptons = 160;
+    e1.flightAltitude = leptonToPixel(e1.fallHeightLeptons);
+
+    const assets = {
+      getSheet: vi.fn(() => ({
+        meta: {
+          frameWidth: 50,
+          frameHeight: 39,
+          frameCount: 256,
+        },
+      })),
+      getRemappedSheet: vi.fn(() => null),
+      drawFrame: vi.fn(),
+      drawFrameFrom: vi.fn(),
+    };
+
+    (renderer as any).renderEntities(camera, map, [e1], assets, new Set(), 100);
+    const body = assets.drawFrame.mock.calls.find((call) => call[1] === 'e1');
+
+    expect(body).toBeDefined();
+    expect(body![3]).toBeCloseTo(e1.pos.x - 2);
+    expect(body![4]).toBeCloseTo(e1.pos.y - leptonToPixel(160) + 4);
+  });
+
+  it('draws attached PARACH anims at C++ Target_Coord - 0x30 in the ground layer', () => {
+    // C++ object.cpp:1866 and anim.cpp:825-840 attach ANIM_PARACHUTE to the
+    // falling object. AnimClass::In_Which_Layer keeps attached anims in
+    // LAYER_GROUND even while ObjectClass::In_Which_Layer promotes the high
+    // falling infantry body to LAYER_TOP.
+    const { canvas } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    const camera = new Camera(160, 120);
+    const map = new GameMap();
+    map.setBounds(0, 0, 128, 128);
+    map.revealAll();
+
+    const e1 = new Entity(UnitType.I_E1, House.USSR, 96, 96);
+    e1.leptonX = 1024;
+    e1.leptonY = 1024;
+    e1.syncPosFromLeptons();
+    e1.prevPos = { ...e1.pos };
+    e1.isFalling = true;
+    e1.fallHeightLeptons = 172;
+    e1.flightAltitude = leptonToPixel(e1.fallHeightLeptons);
+    e1.fallParachuteAnimActive = true;
+    e1.fallParachuteAnimStage = 7;
+    e1.fallParachuteAnimLogicIndexHint = 42;
+
+    const assets = {
+      getSheet: vi.fn((name: string) => ({
+        meta: name === 'parach'
+          ? { frameWidth: 23, frameHeight: 35, frameCount: 16 }
+          : { frameWidth: 50, frameHeight: 39, frameCount: 256 },
+      })),
+      getRemappedSheet: vi.fn(() => null),
+      drawFrame: vi.fn(),
+      drawFrameFrom: vi.fn(),
+    };
+
+    (renderer as any).renderGroundLayer(camera, map, [e1], [], assets, new Set(), 100);
+    const parach = assets.drawFrame.mock.calls.find((call) => call[1] === 'parach');
+    const body = assets.drawFrame.mock.calls.find((call) => call[1] === 'e1');
+
+    expect(parach).toBeDefined();
+    expect(parach![2]).toBe(7);
+    expect(parach![3]).toBeCloseTo(e1.pos.x);
+    expect(parach![4]).toBeCloseTo((e1.leptonY - 172 - 0x30) * CELL_SIZE / LEPTON_SIZE);
+    expect(body).toBeUndefined();
   });
 
   it('draws player-owned fully cloaked submarines as C++ VISUAL_SHADOWY', () => {
@@ -3154,7 +3623,7 @@ describe('renderer vessel and aircraft body frames', () => {
 
     expect(rotors.map((call) => call[1])).toEqual(['rrotor', 'lrotor']);
     expect(rotors.map((call) => call[2])).toEqual([3, 3]);
-    const bodyY = tran.pos.y - tran.flightAltitude;
+    const bodyY = tran.pos.y - leptonToPixel(tran.aircraftHeightLeptons);
     expect(rotors[0][3]).toBeCloseTo(tran.pos.x);
     expect(rotors[0][4]).toBeCloseTo(bodyY - 7 - 2);
     expect(rotors[1][3]).toBeCloseTo(tran.pos.x);
@@ -3275,6 +3744,28 @@ describe('renderer sidebar map button state (sidebar.cpp:341-344)', () => {
     (renderer as any).renderButtonRow(480, 160, assets);
 
     expect(assets.drawFrame).toHaveBeenCalledWith(ctx, 'map_btn', 0, 480 + Renderer.BUTTON_THREE_X, Renderer.BUTTON_ROW_Y);
+  });
+
+  it('only flashes the power bar when HouseClass emits a low-power warning', () => {
+    // C++ PowerClass::AI does not start FlashTimer from Drain > Power.
+    // HouseClass::AI calls Flash_Power() only when SpeakPowerDelay reaches
+    // zero and the low-power EVA/message is emitted.
+    const { canvas } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    renderer.sidebarPowerProduced = 100;
+    renderer.sidebarPowerConsumed = 300;
+
+    for (let i = 0; i < 30; i++) renderer.updatePowerAnimation();
+    expect((renderer as any).powerFlashTimer).toBe(0);
+
+    renderer.flashPowerBar();
+    expect((renderer as any).powerFlashTimer).toBe(15);
+
+    for (let i = 0; i < 15; i++) renderer.updatePowerAnimation();
+    expect((renderer as any).powerFlashTimer).toBe(0);
+
+    renderer.updatePowerAnimation();
+    expect((renderer as any).powerFlashTimer).toBe(0);
   });
 
   it('draws MAP.SHP unpressed when zoom is enabled but not selected', () => {
@@ -3500,5 +3991,89 @@ describe('renderer screen shake parity (conquer.cpp:5523-5566)', () => {
 
     expect(ctx.translate).not.toHaveBeenCalled();
     expect(renderer.screenShake).toBe(0);
+  });
+});
+
+describe('structure turret render frame parity (building.cpp:619-642)', () => {
+  function mockCanvas(): { canvas: HTMLCanvasElement; ctx: any } {
+    const ctx = {
+      imageSmoothingEnabled: false,
+      globalAlpha: 1,
+      globalCompositeOperation: 'source-over',
+      fillStyle: '#000',
+      font: '',
+      textAlign: 'start',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+      fillText: vi.fn(),
+      measureText: () => ({ width: 0 }),
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      closePath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      arc: vi.fn(),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
+    };
+    return {
+      canvas: {
+        width: 160,
+        height: 120,
+        getContext: () => ctx,
+      } as unknown as HTMLCanvasElement,
+      ctx,
+    };
+  }
+
+  it('uses Dir_To_32(PrimaryFacing), not the rounded 8-way turretDir, for GUN frames', () => {
+    // SCU12 has two guard turrets at C++ PrimaryFacing 32 and 224. The rounded
+    // turretDir values are 1 and 7, but C++ Shape_Number indexes BODY_SHAPE
+    // with the const.cpp Facing32[256] lookup table:
+    // Facing32[32]=3 => BODY_SHAPE[3]=29, Facing32[224]=29 => BODY_SHAPE[29]=3.
+    const { canvas, ctx } = mockCanvas();
+    const renderer = new Renderer(canvas);
+    const camera = new Camera(160, 120);
+    const map = { getDisplayVisibility: () => 2 };
+    const assets = {
+      getSheet: vi.fn(() => ({ meta: { frameWidth: 24, frameHeight: 24, frameCount: 128 } })),
+      getRemappedSheet: vi.fn(() => ({ meta: { frameWidth: 24, frameHeight: 24, frameCount: 128 } })),
+      drawFrame: vi.fn(),
+      drawFrameFrom: vi.fn(),
+      hasSheet: vi.fn(() => false),
+    };
+    const structures = [
+      {
+        type: 'GUN',
+        image: 'gun',
+        house: House.Greece,
+        cx: 2,
+        cy: 2,
+        hp: 400,
+        maxHp: 400,
+        alive: true,
+        turretDir: 1,
+        turretFacing256: 32,
+      },
+      {
+        type: 'GUN',
+        image: 'gun',
+        house: House.Greece,
+        cx: 4,
+        cy: 2,
+        hp: 400,
+        maxHp: 400,
+        alive: true,
+        turretDir: 7,
+        turretFacing256: 224,
+      },
+    ];
+
+    (renderer as any).renderStructures(camera, map as any, structures as any, assets as any, 50);
+
+    expect(assets.drawFrameFrom.mock.calls.map(call => call[3])).toEqual([29, 3]);
+    expect(ctx.drawImage).not.toHaveBeenCalled();
   });
 });

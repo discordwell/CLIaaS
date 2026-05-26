@@ -961,8 +961,8 @@ char* agent_get_state(void)
 	}
 
 	HousesType player_house = PlayerPtr->Class->House;
-	int power_produced = agent_power_produced();
-	int power_consumed = agent_power_consumed();
+	int power_produced = PlayerPtr->Power;
+	int power_consumed = PlayerPtr->Drain;
 
 	extern unsigned long g_rng_call_count;
 	extern bool g_rng_tracking;
@@ -2225,11 +2225,15 @@ char* agent_get_radar_info(void)
 	buf_cat("{\"radarCell\":%d,\"radarX\":%d,\"radarY\":%d,"
 		"\"tacticalCell\":%d,\"tacticalX\":%d,\"tacticalY\":%d,"
 		"\"radarPx\":%d,\"radarPy\":%d,\"isZoomed\":%d,"
+		"\"isActive\":%s,\"doesExist\":%s,\"isJammed\":%s,"
 		"\"radX\":%d,\"radY\":%d,\"radOffX\":%d,\"radOffY\":%d,"
 		"\"radIWidth\":%d,\"radIHeight\":%d,\"radWidth\":%d,\"radHeight\":%d}",
 		(int)radar, Cell_X(radar), Cell_Y(radar),
 		(int)tactical, Cell_X(tactical), Cell_Y(tactical),
 		radar_px, radar_py, Map.Is_Zoomed() ? 1 : 0,
+		Map.Is_Radar_Active() ? "true" : "false",
+		Map.Is_Radar_Existing() ? "true" : "false",
+		Map.Get_Jammed() ? "true" : "false",
 		Map.RadX, Map.RadY, Map.RadOffX, Map.RadOffY,
 		Map.RadIWidth, Map.RadIHeight, Map.RadWidth, Map.RadHeight);
 	return s_cmd_buf;
@@ -2481,6 +2485,68 @@ char* agent_dump_anim_shape(int anim_type, int frame)
 
 	buf_cat("{\"type\":%d,\"name\":\"%s\",\"frame\":%d,\"frames\":%d,\"w\":%d,\"h\":%d,\"nonzero\":%d,\"pixels\":[",
 		anim_type, atype.IniName, frame, frame_count, width, height, nonzero);
+	bool first = true;
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			int off = y * width + x;
+			unsigned char px = shape_buf[off];
+			if (px == 0) continue;
+			if (!first) buf_cat(",");
+			first = false;
+			buf_cat("[%d,%d,%d]", x, y, (int)px);
+		}
+	}
+	buf_cat("]}");
+	return s_state_buf;
+}
+
+/* ======================================================================
+ * EXPORT: agent_dump_infantry_shape — decode one C++ InfantryTypeClass SHP frame.
+ * Mirrors agent_dump_anim_shape for infantry/unit visual parity diagnostics.
+ * ====================================================================== */
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+char* agent_dump_infantry_shape(int infantry_type, int frame)
+{
+	buf_init(s_state_buf, STATE_BUF_SIZE);
+
+	if (infantry_type < INFANTRY_FIRST || infantry_type >= INFANTRY_COUNT) {
+		buf_cat("{\"error\":\"bad-infantry-type\",\"type\":%d}", infantry_type);
+		return s_state_buf;
+	}
+
+	InfantryTypeClass const &itype = InfantryTypeClass::As_Reference((InfantryType)infantry_type);
+	void const *shapedata = itype.Get_Image_Data();
+	if (shapedata == NULL) {
+		buf_cat("{\"error\":\"no-shape\",\"type\":%d}", infantry_type);
+		return s_state_buf;
+	}
+
+	int frame_count = Get_Build_Frame_Count(shapedata);
+	int width = Get_Build_Frame_Width(shapedata);
+	int height = Get_Build_Frame_Height(shapedata);
+	int total = width * height;
+	if (frame < 0 || frame >= frame_count || width <= 0 || height <= 0 || total > (1024 * 1024)) {
+		buf_cat("{\"error\":\"bad-frame\",\"type\":%d,\"frame\":%d,\"frames\":%d,\"w\":%d,\"h\":%d}",
+			infantry_type, frame, frame_count, width, height);
+		return s_state_buf;
+	}
+
+	static unsigned char shape_buf[1024 * 1024];
+	memset(shape_buf, 0, sizeof(shape_buf));
+	if (Build_Frame(shapedata, (unsigned short)frame, shape_buf) == 0) {
+		buf_cat("{\"error\":\"decode-failed\",\"type\":%d,\"frame\":%d}", infantry_type, frame);
+		return s_state_buf;
+	}
+
+	int nonzero = 0;
+	for (int i = 0; i < total; i++) {
+		if (shape_buf[i] != 0) nonzero++;
+	}
+
+	buf_cat("{\"type\":%d,\"name\":\"%s\",\"frame\":%d,\"frames\":%d,\"w\":%d,\"h\":%d,\"nonzero\":%d,\"pixels\":[",
+		infantry_type, itype.IniName, frame, frame_count, width, height, nonzero);
 	bool first = true;
 	for (int y = 0; y < height; y++) {
 		for (int x = 0; x < width; x++) {

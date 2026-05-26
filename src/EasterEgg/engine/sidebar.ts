@@ -2,6 +2,7 @@ import {
   House,
   SuperweaponType,
   SUPERWEAPON_DEFS,
+  type FactoryType,
   type ProductionItem,
   type SidebarItem,
   type SidebarSpecialItem,
@@ -75,6 +76,22 @@ const SPECIAL_ORDER_INDEX = new Map<SuperweaponType, number>(
   SPECIAL_ORDER.map((value, index) => [value, index]),
 );
 
+export interface SidebarBuildableSource {
+  type: string;
+}
+
+const STRUCTURE_FACTORY: Record<string, FactoryType | undefined> = {
+  FACT: 'building',
+  WEAP: 'unit',
+  TENT: 'infantry',
+  BARR: 'infantry',
+  KENN: 'infantry',
+  HPAD: 'aircraft',
+  AFLD: 'aircraft',
+  SYRD: 'vessel',
+  SPEN: 'vessel',
+};
+
 function productionOrderKey(item: ProductionItem): number {
   if (item.isStructure) return 10_000 + (STRUCT_ORDER.get(item.type) ?? 9_999);
 
@@ -113,6 +130,47 @@ export function sortProductionItemsForCppSidebar(items: readonly ProductionItem[
   });
 }
 
+function canSourceAppendItem(source: SidebarBuildableSource, item: ProductionItem): boolean {
+  const factory = STRUCTURE_FACTORY[source.type];
+  if (factory === undefined) return false;
+  if (getFactoryType(item) !== factory) return false;
+
+  // building.cpp:2216-2223 — dogs are only appended by STRUCT_KENNEL, and
+  // kennel does not append normal infantry.
+  if (factory === 'infantry') {
+    const isDog = item.type === 'DOG';
+    return source.type === 'KENN' ? isDog : !isDog;
+  }
+  return true;
+}
+
+function buildProductionCandidatesForSources(
+  availableItems: readonly ProductionItem[],
+  sources: readonly SidebarBuildableSource[],
+): ProductionItem[] {
+  const orderedItems = sortProductionItemsForCppSidebar(availableItems);
+  const result: ProductionItem[] = [];
+  const seen = new Set<string>();
+
+  for (const source of sources) {
+    for (const item of orderedItems) {
+      if (seen.has(item.type)) continue;
+      if (!canSourceAppendItem(source, item)) continue;
+      result.push(item);
+      seen.add(item.type);
+    }
+  }
+
+  return result;
+}
+
+function canKeepExistingProductionItem(
+  item: ProductionItem,
+  sources: readonly SidebarBuildableSource[],
+): boolean {
+  return sources.some(source => canSourceAppendItem(source, item));
+}
+
 export function makeSidebarSpecialItem(state: SuperweaponState): SidebarSpecialItem {
   const def = SUPERWEAPON_DEFS[state.type];
   return {
@@ -141,10 +199,15 @@ export function getPlayerSidebarSpecialItems(
 export function buildCppSidebarCandidates(
   availableItems: readonly ProductionItem[],
   specialItems: readonly SidebarSpecialItem[],
+  buildableSources?: readonly SidebarBuildableSource[],
 ): SidebarItem[] {
+  const productionItems = buildableSources
+    ? buildProductionCandidatesForSources(availableItems, buildableSources)
+    : sortProductionItemsForCppSidebar(availableItems);
+
   return [
+    ...productionItems,
     ...[...specialItems].sort((a, b) => sidebarOrderKey(a) - sidebarOrderKey(b)),
-    ...sortProductionItemsForCppSidebar(availableItems),
   ];
 }
 
@@ -152,8 +215,9 @@ export function reconcileCppSidebarItems(
   previous: readonly SidebarItem[],
   availableItems: readonly ProductionItem[],
   specialItems: readonly SidebarSpecialItem[],
+  buildableSources?: readonly SidebarBuildableSource[],
 ): SidebarItem[] {
-  const candidates = buildCppSidebarCandidates(availableItems, specialItems);
+  const candidates = buildCppSidebarCandidates(availableItems, specialItems, buildableSources);
   const candidateByKey = new Map(candidates.map(item => [itemKey(item), item]));
   const kept: SidebarItem[] = [];
   const keptKeys = new Set<string>();
@@ -161,7 +225,13 @@ export function reconcileCppSidebarItems(
   for (const oldItem of previous) {
     const key = itemKey(oldItem);
     const current = candidateByKey.get(key);
-    if (!current) continue;
+    if (!current) {
+      if (!isSidebarSpecialItem(oldItem) && buildableSources && canKeepExistingProductionItem(oldItem, buildableSources)) {
+        kept.push(oldItem);
+        keptKeys.add(key);
+      }
+      continue;
+    }
     kept.push(current);
     keptKeys.add(key);
   }

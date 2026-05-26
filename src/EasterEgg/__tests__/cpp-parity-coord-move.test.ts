@@ -19,7 +19,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  directionToLeptons256, COS_TABLE_256, SIN_TABLE_256,
+  directionToLeptons256, COS_TABLE_256, SIN_TABLE_256, leptonToPixel, pixelToLepton,
 } from '../engine/types';
 
 describe('C++ Desired_Facing256 (face.cpp:150-227)', () => {
@@ -93,6 +93,15 @@ describe('C++ Desired_Facing256 (face.cpp:150-227)', () => {
 });
 
 describe('C++ Coord_Move calcx/calcy (coord.cpp:405-438)', () => {
+  it('rounds Pixel_To_Lepton and Lepton_To_Pixel like RA inline.h', () => {
+    // inline.h:99-121 adds half the divisor before integer division. Truncating
+    // here makes aircraft altitude and click/target coordinates one unit low.
+    expect(pixelToLepton(1)).toBe(11);
+    expect(pixelToLepton(12)).toBe(128);
+    expect(leptonToPixel(102)).toBe(10);
+    expect(leptonToPixel(113)).toBe(11);
+  });
+
   it('cardinal N: COS=0, SIN=127 → moves only in Y', () => {
     const dir = 0;
     const distance = 10;

@@ -11,8 +11,8 @@
  *
  * TS implementation:
  *   - combat.ts:629-647: IsFlameEquipped flame trail toggle
- *   - combat.ts:1281-1286: Structure fire muzzle effect
- *   - missionAI.ts:486-491: Unit fire muzzle flash with warhead color
+ *   - combat.ts: Weapon->Anim firing AnimClass submission
+ *   - missionAI.ts: Unit Fire_At calls spawnWeaponFiringAnim
  *   - logicAnim.ts: damaged building fire/smoke AnimClass equivalents
  *   - renderer.ts:2138-2152: Damaged vehicle smoke trail
  *   - types.ts: WeaponStats, WEAPONS, EXPLOSION_FRAMES
@@ -25,6 +25,8 @@ import {
 } from '../engine/types';
 import type { WeaponStats, WarheadType } from '../engine/types';
 import { logicAnimRenderSpec, processLogicAnim, spawnLogicAnim, type LogicAnim } from '../engine/logicAnim';
+import { STRUCTURE_WEAPONS } from '../engine/scenario';
+import { weaponFiringAnimStartFrame } from '../engine/combat';
 import type { Effect } from '../engine/renderer';
 
 // ── C++ Animation Data (adata.cpp) ──────────────────────────────────────────
@@ -302,16 +304,14 @@ describe('C++ animation data definitions (adata.cpp)', () => {
     expect(OILFIELD_BURN.loopEnd).toBe(99);
   });
 
-  it('GUN_N (guard tower minigun): sprite=MINIGUN, dim=18, 6 stages, 8 directional variants (N/NW/W/SW/S/SE/E/NE)', () => {
+  it('GUN_N (guard tower minigun): sprite=MINIGUN, dim=18, 6 stages, 8 directional variants in C++ enum order', () => {
     expect(GUN_N.graphicName).toBe('MINIGUN');
     expect(GUN_N.maxDimension).toBe(18);
     expect(GUN_N.stages).toBe(6);
-    // C++ techno.cpp:3129-3130: ANIM_GUN_N + Dir_Facing(Fire_Direction()) selects direction
-    // Each direction offset is startFrame = 6 * facing_index (0,6,12,18,24,30,36,42)
-    const directionStartFrames = [0, 6, 12, 18, 24, 30, 36, 42];
-    for (let facing = 0; facing < 8; facing++) {
-      expect(directionStartFrames[facing], `GUN direction ${facing} startFrame`).toBe(facing * 6);
-    }
+    // C++ defines.h enum order is N,NE,E,SE,S,SW,W,NW, while adata.cpp's SHP
+    // frame bands are N,NW,W,SW,S,SE,E,NE.
+    expect([0, 32, 64, 96, 128, 160, 192, 224].map(dir => weaponFiringAnimStartFrame('minigun', dir)))
+      .toEqual([0, 42, 36, 30, 24, 18, 12, 6]);
   });
 
   it('ON_FIRE_SMALL chains to SMOKE_M (adata.cpp:470)', () => {
@@ -492,9 +492,8 @@ describe('muzzle flash spawning (techno.cpp:3127-3152)', () => {
     // C++ techno.cpp:3129-3130:
     //   case ANIM_GUN_N:
     //     a = AnimType(a + Dir_Facing(Fire_Direction()));
-    // Dir_Facing converts DirType to 0-7 facing index
-    // So the animation selected is ANIM_GUN_N, ANIM_GUN_NW, ..., ANIM_GUN_NE
-    const directions = ['N', 'NW', 'W', 'SW', 'S', 'SE', 'E', 'NE'];
+    // Dir_Facing converts DirType to the C++ FacingType enum order.
+    const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
     for (let i = 0; i < 8; i++) {
       const animName = `ANIM_GUN_${directions[i]}`;
       expect(animName).toContain('ANIM_GUN_');
@@ -506,7 +505,7 @@ describe('muzzle flash spawning (techno.cpp:3127-3152)', () => {
     //   case ANIM_SAM_N:
     //     a = AnimType(ANIM_SAM_N + Dir_Facing(PrimaryFacing.Current()));
     // Uses PrimaryFacing instead of Fire_Direction (differs for turrets)
-    const directions = ['N', 'NW', 'W', 'SW', 'S', 'SE', 'E', 'NE'];
+    const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
     for (let i = 0; i < 8; i++) {
       const animName = `ANIM_SAM_${directions[i]}`;
       expect(animName).toContain('ANIM_SAM_');
@@ -529,57 +528,28 @@ describe('muzzle flash spawning (techno.cpp:3127-3152)', () => {
     expect(isTranslucent).toBe(true);
   });
 
-  it('TS muzzle flash uses warhead-based color (warheadMuzzleColor)', () => {
-    // C++ techno.cpp does not have warhead-colored muzzle flash — it uses weapon->Anim.
-    // TS approximates this by coloring the muzzle flash by warhead type.
-    // This is a TS design choice to provide visual weapon variety.
-    const muzzleColors: Record<string, string> = {
-      'Fire': '255,150,50',        // orange fire
-      'Super': '100,150,255',      // blue (tesla)
-      'AP': '255,200,80',          // amber armor-piercing
-      'HE': '255,255,100',         // yellow high-explosive
-      'Organic': '100,255,100',    // green organic
-      'SA': '255,255,150',         // default
-    };
-
-    expect(muzzleColors['Fire']).toBe('255,150,50');
-    expect(muzzleColors['Super']).toBe('100,150,255');
-    expect(muzzleColors['AP']).toBe('255,200,80');
-    expect(muzzleColors['HE']).toBe('255,255,100');
-    expect(muzzleColors['Organic']).toBe('100,255,100');
-    expect(muzzleColors['SA']).toBe('255,255,150');
+  it('TS weapon stats carry source rules.ini Anim values instead of warhead-colored muzzle approximations', () => {
+    expect(WEAPON_STATS.M60mg.firingAnim).toBe('minigun');
+    expect(WEAPON_STATS.ChainGun.firingAnim).toBe('minigun');
+    expect(WEAPON_STATS['75mm'].firingAnim).toBe('gunfire');
+    expect(WEAPON_STATS['8Inch'].firingAnim).toBe('gunfire');
+    expect(WEAPON_STATS.RedEye.firingAnim).toBe('samfire');
+    expect(WEAPON_STATS.M1Carbine.firingAnim).toBeUndefined();
   });
 
-  it('TS structure fire spawns muzzle effect at structure position (combat.ts:1282-1286)', () => {
-    // C++ building.cpp → Fire_At → techno.cpp:3147 → AnimClass at Fire_Coord
-    // TS combat.ts:1282-1286: effects.push({ type: 'muzzle', x: sx, y: sy, ... })
-    // Both spawn at the firing coordinate
-    const effectType = 'muzzle';
-    const maxFrames = 4;  // TS uses 4 frames for fade-out
-    const sprite = 'piff';
-    expect(effectType).toBe('muzzle');
-    expect(maxFrames).toBe(4);
-    expect(sprite).toBe('piff');
+  it('TS defensive structures carry their structure-only weapon Anim values', () => {
+    expect(STRUCTURE_WEAPONS.HBOX.firingAnim).toBe('minigun');
+    expect(STRUCTURE_WEAPONS.PBOX.firingAnim).toBe('minigun');
+    expect(STRUCTURE_WEAPONS.GUN.firingAnim).toBe('gunfire');
+    expect(STRUCTURE_WEAPONS.AGUN.firingAnim).toBe('gunfire');
+    expect(STRUCTURE_WEAPONS.SAM.firingAnim).toBe('samfire');
+    expect(STRUCTURE_WEAPONS.TSLA.firingAnim).toBeUndefined();
   });
 
-  it('TS unit fire uses "gunfire" sprite for vehicles, "piff" for infantry (missionAI.ts:487-488)', () => {
-    // C++ uses weapon->Anim which is typically ANIM_GUN_N for guard tower (MINIGUN.SHP)
-    // or ANIM_MUZZLE_FLASH (GUNFIRE.SHP) for other weapons
-    // TS: muzzleSprite = (!isInfantry && warhead !== 'Fire') ? 'gunfire' : 'piff'
-    // Vehicle fire uses screen blend mode for gunfire sprite (C++ isTranslucent)
-
-    const isInfantry = false;
-    const warhead = 'AP';
-    const muzzleSprite = (!isInfantry && warhead !== 'Fire') ? 'gunfire' : 'piff';
-    expect(muzzleSprite).toBe('gunfire');
-
-    const isInfantry2 = true;
-    const muzzleSprite2 = (!isInfantry2 && warhead !== 'Fire') ? 'gunfire' : 'piff';
-    expect(muzzleSprite2).toBe('piff');
-
-    const warhead2 = 'Fire';
-    const muzzleSprite3 = (!isInfantry && warhead2 !== 'Fire') ? 'gunfire' : 'piff';
-    expect(muzzleSprite3).toBe('piff');
+  it('TS firing LogicAnim specs point at the source SHP files', () => {
+    expect(logicAnimRenderSpec('gunfire')).toEqual({ sprite: 'gunfire', groundLayer: true });
+    expect(logicAnimRenderSpec('minigun')).toEqual({ sprite: 'minigun', groundLayer: false });
+    expect(logicAnimRenderSpec('samfire')).toEqual({ sprite: 'samfire', groundLayer: false });
   });
 });
 

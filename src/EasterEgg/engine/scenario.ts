@@ -4,14 +4,14 @@
  */
 
 import {
-  type CellPos, type UnitStats, type WeaponStats, type ArmorType,
+  type CellPos, type UnitStats, type WeaponStats, type ArmorType, type WeaponFiringAnim,
   CELL_SIZE, MAP_CELLS, cellIndexToPos, cellToWorld, worldToCell, cellToLepton, leptonDist,
   House, Mission, UnitType, AnimState, Dir, DIR_DX, DIR_DY,
   UNIT_STATS,
   SUBCELL_LEPTON_OFFSETS,
 } from './types';
 import { buildScenarioRuleOverrides } from './scenarioRules';
-import { Entity, dir256ToFacing8, dir256ToFacing32 } from './entity';
+import { Entity, aircraftPoseDir256, dir256ToFacing8, dir256ToFacing32, setAircraftUnlimboFacing256 } from './entity';
 import { GameMap, Terrain, TREE_OCCUPY, TREE_MAX_HP, TERRAIN_OBJECT_OCCUPY, type MapTree } from './map';
 import { type TilesetMeta, type AssetManager } from './assets';
 import { nearbyLocation } from './pathfinding';
@@ -548,6 +548,8 @@ interface ScenarioData {
   waypoints: Map<number, CellPos>;
   playerCredits: number;
   playerTechLevel: number;
+  /** C++ global NewUnitsEnabled from [Aftermath] NewUnitsEnabled=. */
+  newUnitsEnabled: boolean;
   units: Array<{
     house: string;
     type: string;
@@ -591,6 +593,7 @@ interface ScenarioData {
   overlayPack: string;  // raw Base64 OverlayPack data
   toCarryOver: boolean; // surviving units carry to next mission
   toInherit: boolean;   // next mission inherits carry-over units
+  fillSilos: boolean;   // [Basic] FillSilos=yes moves starting cash into silo storage
   baseStructures: Array<{ type: string; cell: number; house: string }>; // [Base] section pre-placed structures
   smudges: Array<{ type: string; cell: number; data?: number }>; // [SMUDGE] section scorch/crater marks
   theatre: string; // TEMPERATE, INTERIOR, etc.
@@ -1045,6 +1048,7 @@ export function parseScenarioINI(text: string, scenarioId = ''): ScenarioData {
     waypoints,
     playerCredits: credits,
     playerTechLevel: techLevel,
+    newUnitsEnabled: parseIniBool(get('Aftermath', 'NewUnitsEnabled', '0'), false),
     units,
     infantry,
     structures,
@@ -1056,6 +1060,7 @@ export function parseScenarioINI(text: string, scenarioId = ''): ScenarioData {
     overlayPack,
     toCarryOver: get('Basic', 'ToCarryOver', 'no').toLowerCase() === 'yes',
     toInherit: get('Basic', 'ToInherit', 'no').toLowerCase() === 'yes',
+    fillSilos: parseIniBool(get('Basic', 'FillSilos', 'no'), false),
     isTanyaEvac: get('Basic', 'CivEvac', 'no').toLowerCase() === 'yes',
     isNoSpyPlane: get('Basic', 'NoSpyPlane', 'no').toLowerCase() === 'yes',
     gpsTechLevel: parseGeneralInt(sections, 'GPSTechLevel', 8),
@@ -1525,6 +1530,7 @@ export interface StructureWeapon {
   projectileArm?: number; // projectile Arm= arming delay in game frames
   isInvisible?: boolean; // Projectile=Invisible/Ack Inviso=yes
   isAntiAir?: boolean; // can target airborne aircraft
+  firingAnim?: WeaponFiringAnim; // C++ WeaponTypeClass::Anim from rules.ini
 }
 
 export interface MapStructure {
@@ -1533,8 +1539,7 @@ export interface MapStructure {
   house: House;
   cx: number;         // cell position
   cy: number;
-  /** C++ Logic vector index for runtime-created buildings.
-   *  Scenario INI buildings are kept in structures[] order and leave this unset. */
+  /** C++ Logic vector index; scenario and runtime buildings both occupy slots. */
   logicIndexHint?: number;
   hp: number;         // current HP (0-256 scale)
   maxHp: number;      // max HP (256 = full)
@@ -1608,6 +1613,10 @@ export interface MapStructure {
   weapDoorStage?: number;
   /** C++ DoorClass StageClass rate countdown for WEAP Mission_Unload. */
   weapDoorTimer?: number;
+  /** TS mirror of CDTimerClass frame anchoring. Set_Rate starts counting after
+   *  the logic frame that armed it, so DoorClass::AI in that same frame still
+   *  sees the full rate. */
+  weapDoorTimerStartedTick?: number;
   /** C++ MissionClass::Mission for buildings. Weapon buildings use GUARD to scan, then ATTACK to fire. */
   mission?: Mission;
   /** C++ MissionClass::MissionQueue for buildings. Assign_Mission queues here;
@@ -1665,19 +1674,20 @@ export interface MapStructure {
    *  Used by tickStructuresInterleaved() to process the helicopter interleaved with buildings
    *  (matching C++ Logic array order) instead of in the aircraft pass. */
   hpadHelicopterId?: number;
-  /** C++ building.cpp Door_Stage() — war factory door animation frame (0=closed, 7=fully open).
-   *  Animates 0→7 during production, stays open while unit exits, then closes 7→0. */
+  /** C++ building.cpp Door_Stage() — war factory door overlay frame.
+   *  WEAP Mission_Unload calls Open_Door(8, 5), so DoorClass stores Stages=4
+   *  and returns frames 0..3 even though WEAP2.SHP contains additional frames. */
   doorFrame?: number;
 }
 
 /** Weapon stats for defensive structures */
 export const STRUCTURE_WEAPONS: Record<string, StructureWeapon> = {
-  HBOX:  { weaponName: 'Vulcan', damage: 40, range: 5, rof: 40, warhead: 'SA', projSpeed: 100, isInvisible: true }, // Vulcan → Invisible
-  PBOX:  { weaponName: 'Vulcan', damage: 40, range: 5, rof: 40, warhead: 'SA', projSpeed: 100, isInvisible: true }, // Vulcan → Invisible
-  GUN:   { weaponName: 'TurretGun', damage: 40, range: 6, rof: 50, warhead: 'AP', splash: 0.5, projSpeed: 40 },
+  HBOX:  { weaponName: 'Vulcan', damage: 40, range: 5, rof: 40, warhead: 'SA', projSpeed: 100, isInvisible: true, firingAnim: 'minigun' }, // Vulcan → Invisible, Anim=MINIGUN
+  PBOX:  { weaponName: 'Vulcan', damage: 40, range: 5, rof: 40, warhead: 'SA', projSpeed: 100, isInvisible: true, firingAnim: 'minigun' }, // Vulcan → Invisible, Anim=MINIGUN
+  GUN:   { weaponName: 'TurretGun', damage: 40, range: 6, rof: 50, warhead: 'AP', splash: 0.5, projSpeed: 40, firingAnim: 'gunfire' },
   TSLA:  { weaponName: 'TeslaZap', damage: 100, range: 8.5, rof: 120, warhead: 'Super', splash: 1, projSpeed: 100, isInvisible: true },
-  SAM:   { weaponName: 'Nike', damage: 50, range: 7.5, rof: 20, warhead: 'AP', projSpeed: 50, projectileArm: 3, isAntiAir: true },
-  AGUN:  { weaponName: 'ZSU-23', secondaryWeaponName: 'ZSU-23', damage: 25, range: 6, rof: 10, warhead: 'AP', projSpeed: 100, isInvisible: true, isAntiAir: true },
+  SAM:   { weaponName: 'Nike', damage: 50, range: 7.5, rof: 20, warhead: 'AP', projSpeed: 50, projectileArm: 3, isAntiAir: true, firingAnim: 'samfire' },
+  AGUN:  { weaponName: 'ZSU-23', secondaryWeaponName: 'ZSU-23', damage: 25, range: 6, rof: 10, warhead: 'AP', projSpeed: 100, isInvisible: true, isAntiAir: true, firingAnim: 'gunfire' },
   FTUR:  { weaponName: 'FireballLauncher', damage: 125, range: 4, rof: 50, warhead: 'Fire', projSpeed: 12 },
   QUEE:  { weaponName: 'TeslaZap', damage: 60, range: 5, rof: 30, splash: 1, warhead: 'Super', projSpeed: 40 }, // Queen Ant
 };
@@ -1763,7 +1773,9 @@ export const STRUCTURE_IMAGES: Record<string, string> = {
 // Structures whose body SHP is drawn through the owning house color remap.
 // BuildingClass::Draw_It is const, so its Techno_Draw_Object call resolves to
 // TechnoClass::Remap_Table(void) const, not BuildingClass::Remap_Table(void).
-// That C++ path owner-remaps only when bdata.cpp marks IsRemappable=true.
+// That C++ path owner-remaps only when bdata.cpp marks IsRemappable=true and
+// the type's Remap mode is not REMAP_NONE. MINP/MINV are IsRemappable but use
+// REMAP_NONE, so HouseClass::Remap_Table returns null and they draw raw art.
 // Non-remappable buildings still get PCOLOR_GOLD's identity table; in TS that
 // is visually equivalent to drawing the source sheet.
 export const OWNER_REMAPPED_STRUCTURE_TYPES = new Set([
@@ -2214,6 +2226,8 @@ export interface ScenarioResult {
   cellTriggers: Map<number, string>;
   credits: number;
   toCarryOver: boolean;
+  /** C++ Scen.IsMoneyTiberium — [Basic] FillSilos=yes moves starting money into silo storage. */
+  fillSilos: boolean;
   theatre: string;
   /** Per-scenario unit stats (UNIT_STATS merged with INI overrides) */
   scenarioUnitStats: Record<string, UnitStats>;
@@ -2237,6 +2251,8 @@ export interface ScenarioResult {
   playerHouse: House;
   /** Player tech level from scenario INI [Basic] TechLevel= (gates production items) */
   playerTechLevel: number;
+  /** C++ global NewUnitsEnabled from [Aftermath] NewUnitsEnabled=. */
+  newUnitsEnabled: boolean;
   /** C++ Scen.IsNoSpyPlane — [Basic] NoSpyPlane=yes suppresses free airstrip recon. */
   isNoSpyPlane: boolean;
   /** C++ RulesClass::GPSTechLevel after scenario [General] override pass. */
@@ -2429,12 +2445,14 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
   // No house sorting — entities appear in the exact order from the INI file.
   const entities: Entity[] = [];
 
+  let cppUnitHeapId = 0;
   for (const u of data.units) {
     const unitType = toUnitType(u.type);
     if (!unitType) continue;
     const pos = cellIndexToPos(u.cell);
     const world = cellToWorld(pos.cx, pos.cy);
     const entity = new Entity(unitType, toHouse(u.house), world.x, world.y);
+    entity.cppUnitIndexHint = cppUnitHeapId++;
     entity.bodyFacing256 = u.facing & 0xff;
     entity.facing = dir256ToFacing8(entity.bodyFacing256);
     entity.desiredFacing = entity.facing;
@@ -2630,6 +2648,9 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
           }
         }
         const entity = new Entity(unitType, House.Spain, spawnX + ox, spawnY + oy);
+        if (!entity.stats.isInfantry && !entity.stats.isAircraft && !entity.stats.isVessel) {
+          entity.cppUnitIndexHint = cppUnitHeapId++;
+        }
         entity.hp = cu.hp;
         entity.maxHp = cu.maxHp;
         entity.kills = cu.kills;
@@ -2688,15 +2709,19 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
 
     if (s.type === 'HPAD') {
       // Check if any aircraft already parked here
-      // C++ parity: HPAD is 2x2, aircraft spawns at (cx+1, cy) — the top-right cell center.
-      // C++ helipad Unlimbo docks aircraft at this position.
-      const padWorld = cellToWorld(s.cx + 1, s.cy);
+      // C++ BuildingClass docking coord for HPAD is XYP_COORD(24,18) from
+      // the building origin, not the top-right cell center.
+      const padWorld = {
+        x: s.cx * CELL_SIZE + 24,
+        y: s.cy * CELL_SIZE + 18,
+      };
       const alreadyParked = entities.some(e =>
         e.stats.isAircraft && Math.abs(e.pos.x - padWorld.x) < CELL_SIZE * 2 && Math.abs(e.pos.y - padWorld.y) < CELL_SIZE * 2
       );
       if (!alreadyParked) {
         const heliType = isSoviet ? UnitType.V_HIND : UnitType.V_HELI;
         const heli = new Entity(heliType, s.house, padWorld.x, padWorld.y);
+        setAircraftUnlimboFacing256(heli, aircraftPoseDir256(heli));
         heli.mission = Mission.GUARD;
         heli.aircraftState = 'landed';
         heli.flightAltitude = 0;
@@ -2754,6 +2779,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     cellTriggers: data.cellTriggers,
     credits: data.playerCredits * 100, // INI Credits field is ×100
     toCarryOver: data.toCarryOver,
+    fillSilos: data.fillSilos,
     theatre: data.theatre,
     scenarioUnitStats,
     scenarioWeaponStats,
@@ -2766,6 +2792,7 @@ export async function loadScenario(scenarioId: string, assets?: AssetManager): P
     baseBlueprint: data.baseStructures.map(bs => ({ type: bs.type, cell: bs.cell, house: toHouse(bs.house) })),
     playerHouse: toHouse(data.playerHouse ?? 'Spain'),
     playerTechLevel: data.playerTechLevel,
+    newUnitsEnabled: data.newUnitsEnabled,
     isNoSpyPlane: data.isNoSpyPlane,
     gpsTechLevel: data.gpsTechLevel,
     airstripSpecialTechLevels: data.airstripSpecialTechLevels,
@@ -3039,8 +3066,14 @@ export function classifyInteriorTerrain(
   // from broad template ranges. `template,icon` is needed because the same
   // interior template can mix Clear and Rock cells (e.g. 397,1 is Rock).
   // Fall back to the old range table only when metadata is unavailable.
-  for (let cy = map.boundsY; cy < map.boundsY + map.boundsH; cy++) {
-    for (let cx = map.boundsX; cx < map.boundsX + map.boundsW; cx++) {
+  //
+  // MapPack is still a full 128x128 CellClass terrain layer in INTERIOR
+  // missions. The [Map] rectangle controls radar/display bounds, not which
+  // cells UnitClass::Can_Enter_Cell can inspect. SCA04EA sends a team to an
+  // off-radar waypoint over INTERIOR floor template 253; C++ sees LAND_CLEAR
+  // there, so leaving-map Basic_Path must be able to route through it.
+  for (let cy = 0; cy < MAP_CELLS; cy++) {
+    for (let cx = 0; cx < MAP_CELLS; cx++) {
       const idx = cy * 128 + cx;
       const tmpl = templateType[idx];
 
@@ -3053,6 +3086,7 @@ export function classifyInteriorTerrain(
       if (tmpl === 255) {
         // Historical sentinel: C++ skips template lookup and falls through to
         // LAND_CLEAR. This is distinct from TEMPLATE_NONE (0xFFFF).
+        map.setTerrain(cx, cy, Terrain.CLEAR);
         continue;
       }
 
@@ -3061,9 +3095,7 @@ export function classifyInteriorTerrain(
         const entry = tilesetMeta.tiles[`${tmpl},${icon}`];
         if (entry) {
           const terrain = LAND_NAME_TO_TERRAIN[entry.lt ?? 'Clear'] ?? Terrain.CLEAR;
-          if (terrain !== Terrain.CLEAR) {
-            map.setTerrain(cx, cy, terrain);
-          }
+          map.setTerrain(cx, cy, terrain);
           continue;
         }
       }
@@ -3074,6 +3106,8 @@ export function classifyInteriorTerrain(
       } else if (tmpl >= 329 && tmpl <= 377) {
         // Walls — impassable
         map.setTerrain(cx, cy, Terrain.ROCK);
+      } else {
+        map.setTerrain(cx, cy, Terrain.CLEAR);
       }
     }
   }
@@ -3468,6 +3502,7 @@ export function executeTriggerAction(
   map?: GameMap,
   existingEntities?: Entity[],
   existingStructures?: readonly MapStructure[],
+  cppUnitIndexHintForNewUnit?: () => number | undefined,
 ): TriggerActionResult {
   const result: TriggerActionResult = { spawned: [] };
 
@@ -3613,6 +3648,9 @@ export function executeTriggerAction(
             spawnY = edgeWorld.y;
           }
           const entity = new Entity(unitType, house, spawnX, spawnY);
+          if (!stats.isInfantry && !stats.isAircraft && !stats.isVessel) {
+            entity.cppUnitIndexHint = cppUnitIndexHintForNewUnit?.();
+          }
           // C++ reinf.cpp:465-468: ground units face outward (source<<1),
           // aircraft get Random_Pick(DIR_N, DIR_MAX) — random facing.
           if (stats.isAircraft) {
@@ -3732,21 +3770,7 @@ export function executeTriggerAction(
         // C++ reinf.cpp:466-468: desiredfacing = (DirType)Random_Pick(DIR_N, DIR_MAX)
         // DIR_N=0, DIR_MAX=255 — full 256-step DirType range for precise curved flight paths.
         const randomFacing256 = ScenarioRandom.nextInRange(0, 255);
-        entity.facing256 = randomFacing256;
-        entity.desiredFacing256 = randomFacing256;
-        entity.bodyFacing256 = randomFacing256;
-        // Derive 8-dir facing for rendering/game-logic compatibility.
-        entity.facing = dir256ToFacing8(randomFacing256);
-        entity.desiredFacing = entity.facing;
-        // C++ AircraftClass::Unlimbo sets SecondaryFacing to the unlimbo
-        // direction; fixed-wing Rotation_AI keeps it copied from PrimaryFacing.
-        entity.turretFacing256 = randomFacing256;
-        entity.desiredTurretFacing256 = randomFacing256;
-        entity.turretFacing = entity.facing;
-        entity.desiredTurretFacing = entity.facing;
-        entity.bodyFacing32 = dir256ToFacing32(randomFacing256);
-        entity.turretFacing32 = dir256ToFacing32(randomFacing256);
-        entity.prevTurretFacing32 = entity.turretFacing32;
+        setAircraftUnlimboFacing256(entity, randomFacing256);
       };
       const aircraftUnlimboOrder = transport
         ? aircraftNeedingUnlimboFacing

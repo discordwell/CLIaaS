@@ -410,9 +410,9 @@ describe('Sight reveal is circular — C++ RadiusCount cell counts (map.cpp:83)'
     expect(map.getVisibility(64, 64)).toBe(0);
   });
 
-  it('CLOSED: sight radius 1 reveals 9 cells (center+8), matching C++ RadiusCount[1]', () => {
-    // C++ RadiusCount[1] = 9 — includes diagonals (precomputed offset table)
-    // CLOSED: TS now special-cases radius 1 to reveal all 8 neighbors (3x3 grid).
+  it('sight radius 1 reveals 5 cells after the C++ Distance() filter', () => {
+    // C++ RadiusCount[1] = 9 is only the candidate count. Sight_From then
+    // applies coord.cpp Distance(); diagonal cells are 1.5 cells away and fail.
     const map = new GameMap();
     revealAroundCell(map, 64, 64, 1);
 
@@ -423,14 +423,14 @@ describe('Sight reveal is circular — C++ RadiusCount cell counts (map.cpp:83)'
     expect(map.getVisibility(63, 64)).toBe(2);
     expect(map.getVisibility(64, 65)).toBe(2);
     expect(map.getVisibility(64, 63)).toBe(2);
-    // 4 diagonal — now revealed
-    expect(map.getVisibility(65, 65)).toBe(2);
-    expect(map.getVisibility(63, 63)).toBe(2);
-    expect(map.getVisibility(65, 63)).toBe(2);
-    expect(map.getVisibility(63, 65)).toBe(2);
+    // 4 diagonal — rejected by C++ Distance()
+    expect(map.getVisibility(65, 65)).toBe(0);
+    expect(map.getVisibility(63, 63)).toBe(0);
+    expect(map.getVisibility(65, 63)).toBe(0);
+    expect(map.getVisibility(63, 65)).toBe(0);
 
     const visCount = countVisibleInRadius(map, 64, 64, 1);
-    expect(visCount).toBe(9); // matches C++ RadiusCount[1] = 9
+    expect(visCount).toBe(5);
   });
 
   it('sight reveal pattern is circular, not square', () => {
@@ -646,10 +646,10 @@ describe('Gap generator requires power (building.cpp:990-1006)', () => {
     ctx.tick = GAP_UPDATE_INTERVAL;
     updateGapGenerators(ctx);
 
-    // Gap should be unjammed
+    // Gap should be unjammed. C++ RadarClass::UnJam_Cell only clears the jam
+    // bit; it does not remap a cell that enemy GAP shroud made unmapped.
     expect(ctx.gapGeneratorCells.size).toBe(0);
-    // Unjammed cell restores to fog (1), not visible (2)
-    expect(map.getVisibility(entry.cx, entry.cy)).toBe(1);
+    expect(map.getVisibility(entry.cx, entry.cy)).toBe(0);
   });
 
   it('dead GAP generator does NOT jam (building AI only runs on alive buildings)', () => {
@@ -898,11 +898,28 @@ describe('Sight_From range cap and boundaries (map.cpp:286-296)', () => {
     }
   });
 
-  it('structures not in STRUCTURE_SIGHT default to 5 (fog.ts:101)', () => {
-    // TS fog.ts:101: const sight = STRUCTURE_SIGHT[s.type] ?? 5;
-    // Structures missing from the lookup get a default sight of 5.
-    // This is a TS-specific behavior — in C++, every structure has an explicit Sight=.
-    const unknownSight = STRUCTURE_SIGHT['NONEXISTENT_TYPE'] ?? 5;
-    expect(unknownSight).toBe(5);
+  it('structures missing from STRUCTURE_SIGHT default to sight=0 like C++ TechnoTypeClass', () => {
+    // C++ techno.cpp: TechnoTypeClass initializes SightRange to 0. Only rules.ini
+    // or explicit type data can make a structure reveal map cells.
+    const unknownSight = STRUCTURE_SIGHT['NONEXISTENT_TYPE'] ?? 0;
+    expect(unknownSight).toBe(0);
+  });
+
+  it('mine buildings have no sight and do not reveal the display shroud', () => {
+    const map = new GameMap();
+    const mine = {
+      type: 'MINV',
+      house: House.Spain,
+      alive: true,
+      cx: 64,
+      cy: 64,
+    };
+    const ctx = makeFogContext({ map, structures: [mine as any] });
+
+    updateFogOfWar(ctx);
+
+    expect(STRUCTURE_SIGHT['MINV'] ?? 0).toBe(0);
+    expect(map.getVisibility(64, 64)).toBe(0);
+    expect(map.getDisplayVisibility(64, 64)).toBe(0);
   });
 });

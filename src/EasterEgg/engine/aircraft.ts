@@ -12,7 +12,7 @@ import {
 } from './types';
 // Re-export tables for backward compatibility (canonical definitions now in types.ts).
 export { COS_TABLE_256, SIN_TABLE_256 };
-import { Entity, CloakState, dir256ToFacing8, dir256ToFacing32, attachFallingParachuteAnim } from './entity';
+import { Entity, CloakState, aircraftPoseDir256, dir256ToFacing8, dir256ToFacing32, attachFallingParachuteAnim, setObjectUnlimboFacing256 } from './entity';
 import { LP, PIXEL_LEPTON_W } from './tracks';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type GameMap, MoveResult } from './map';
@@ -253,14 +253,6 @@ function setDesiredAircraftSecondaryFacing256(entity: Entity, dir256: number): v
   entity.desiredTurretFacing = dir256ToFacing8(dir);
 }
 
-function aircraftPoseDir256(entity: Entity): number {
-  // C++ AircraftClass::Pose_Dir: TRAN lands facing north, fixed-wing faces
-  // east down the runway, other helicopters use northeast.
-  if (entity.type === UnitType.V_TRAN) return 0;
-  if (entity.isFixedWing) return 64;
-  return 32;
-}
-
 function aircraftTargetFacing256(entity: Entity): number | null {
   const targetPos = getAircraftTargetPos(entity);
   if (targetPos) return directionTo256(entity.pos, targetPos);
@@ -269,7 +261,7 @@ function aircraftTargetFacing256(entity: Entity): number | null {
 }
 
 function rotateAircraftSecondaryFacing(entity: Entity): void {
-  if (!entity.stats.isAircraft || entity.isFixedWing) return;
+  if (!entity.stats.isAircraft) return;
 
   if (entity.turretFacing256 < 0 ||
       dir256ToFacing32(entity.turretFacing256) !== entity.turretFacing32 ||
@@ -1390,13 +1382,6 @@ function aircraftFlyInFacing(
   // use this metric. Euclidean pixel distance is ~15% shorter at diagonal angles,
   // causing approach slowdown to trigger too early and flight times to diverge.
   const distLeptons = leptonDist(entity.leptonX, entity.leptonY, targetLX, targetLY);
-  // C++ Process_Fly_To always applies the stop-radius speed clear; it is not
-  // gated by any course-update cadence. Leaving stale approach speed here lets
-  // helicopters drift while FIRE_AT_TARGET is just waiting on rearm.
-  if (distLeptons < 16) {
-    entity.aircraftSpeedFraction = 0;
-    return true;
-  }
 
   // Step 1: Set desired facing toward target and rotate.
   entity.rotTickedThisFrame = false;
@@ -1430,6 +1415,12 @@ function aircraftFlyInFacing(
       speedFraction = clampedSpeed / 0xFF;
     }
     entity.aircraftSpeedFraction = speedFraction;
+  }
+  // C++ Process_Fly_To refreshes PrimaryFacing.Desired() before the stop-radius
+  // Set_Speed(0), so Rotation_AI still applies the final one-step adjustment.
+  if (distLeptons < 16) {
+    entity.aircraftSpeedFraction = 0;
+    return true;
   }
 
   // Lepton accumulator (C++ fly.cpp:62-106) — same math as entity.moveToward
@@ -1520,6 +1511,9 @@ function handleMapExit(ctx: AircraftContext, entity: Entity): void {
 }
 
 function startParadropFall(ctx: AircraftContext, passenger: Entity): void {
+  // C++ ObjectClass::Paradrop calls Unlimbo(coord, DIR_S) for the dropped
+  // object before attaching the parachute.
+  setObjectUnlimboFacing256(passenger, 128);
   passenger.isFalling = true;
   passenger.fallHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
   passenger.fallRiser = 0;

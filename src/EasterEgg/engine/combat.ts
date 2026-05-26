@@ -4,7 +4,7 @@
  */
 
 import {
-  type WorldPos, type WeaponStats, type ArmorType, type WarheadType,
+  type WorldPos, type WeaponStats, type ArmorType, type WarheadType, type WeaponFiringAnim,
   type WarheadMeta, type WarheadProps,
   CELL_SIZE, LEPTON_SIZE, MAP_CELLS, CONDITION_YELLOW, RULE_GRAVITY,
   WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, WEAPON_STATS,
@@ -14,7 +14,7 @@ import {
   DIR_DX, DIR_DY, DIR_COUNT, MISSION_CONTROL, COS_TABLE_256, SIN_TABLE_256,
   HOUSE_FACTION, PRONE_DAMAGE_BIAS,
 } from './types';
-import { Entity, CloakState, CLOAK_TRANSITION_FRAMES, attachFallingParachuteAnim } from './entity';
+import { Entity, CloakState, CLOAK_TRANSITION_FRAMES, attachFallingParachuteAnim, dir256ToFacing8, setObjectUnlimboFacing256 } from './entity';
 import { type MapStructure, type StructureWeapon, STRUCTURE_SIZE, STRUCTURE_POWERED, STRUCTURE_WEAPONS, STRUCTURE_ARMOR, CREWED_BUILDINGS, INSIGNIFICANT_STRUCTURE_TYPES, isStructureUnderConstruction, getStructureOccupyCells, structureCenterLeptons as cppStructureCenterLeptons } from './scenario';
 import { PRODUCTION_ITEMS } from './types';
 import { type Effect } from './renderer';
@@ -297,6 +297,67 @@ function aircraftFireDirection256(attacker: Entity, weapon: WeaponStats, targetC
   return directionToLeptons256(fireCoord.lx, fireCoord.ly, targetCoord.lx, targetCoord.ly);
 }
 
+const FIRING_ANIM_START_INDEX_BY_FACING = [0, 7, 6, 5, 4, 3, 2, 1] as const;
+
+export function weaponFiringAnimStartFrame(firingAnim: WeaponFiringAnim | undefined, fireDirection256: number): number {
+  if (firingAnim === 'gunfire' || firingAnim === undefined) return 0;
+  const facing = dir256ToFacing8(fireDirection256);
+  const startIndex = FIRING_ANIM_START_INDEX_BY_FACING[facing] ?? 0;
+  return startIndex * (firingAnim === 'samfire' ? 18 : 6);
+}
+
+function entityFireDirection256(entity: Entity): number {
+  if (entity.hasTurret || entity.isAirUnit) {
+    if (entity.turretFacing256 >= 0) return entity.turretFacing256 & 0xff;
+    if (entity.turretFacing32 >= 0) return (entity.turretFacing32 * 8) & 0xff;
+    return (entity.turretFacing * 32) & 0xff;
+  }
+  if (entity.bodyFacing256 >= 0) return entity.bodyFacing256 & 0xff;
+  return (entity.facing * 32) & 0xff;
+}
+
+type WeaponFiringAnimContext = Pick<
+  CombatContext,
+  'logicAnims' | 'effects' | 'logicAnimsAlreadyProcessed' | 'logicIndexHintForNewObject' | 'reserveAnimSlot' | 'tick'
+>;
+
+export function spawnWeaponFiringAnim(
+  ctx: WeaponFiringAnimContext,
+  weapon: Pick<WeaponStats, 'firingAnim'> | Pick<StructureWeapon, 'firingAnim'>,
+  fireCoord: { lx: number; ly: number },
+  fireDirection256: number,
+  attachedEntity?: Entity,
+): boolean {
+  const firingAnim = weapon.firingAnim;
+  if (!firingAnim) return false;
+
+  const target = attachedEntity?.targetCoordLeptons();
+  const logicIndexHint = ctx.logicIndexHintForNewObject?.();
+  return spawnLogicAnim(
+    ctx.logicAnims,
+    ctx.effects,
+    firingAnim,
+    fireCoord.lx * CELL_SIZE / LEPTON_SIZE,
+    fireCoord.ly * CELL_SIZE / LEPTON_SIZE,
+    1,
+    true,
+    ctx.logicAnimsAlreadyProcessed === true,
+    logicIndexHint,
+    ctx.logicIndexHintForNewObject,
+    ctx.reserveAnimSlot,
+    false,
+    undefined,
+    0,
+    undefined,
+    ctx.tick,
+    undefined,
+    weaponFiringAnimStartFrame(firingAnim, fireDirection256),
+    attachedEntity?.id,
+    target ? fireCoord.lx - target.lx : undefined,
+    target ? fireCoord.ly - target.ly : undefined,
+  );
+}
+
 function aircraftProjectileImpactAfterScatter(
   attacker: Entity,
   weapon: WeaponStats,
@@ -568,9 +629,50 @@ export function structureFireLeptons(s: MapStructure, target?: Entity): { lx: nu
   return coord;
 }
 
-function structureFirePixels(s: MapStructure, target?: Entity): { x: number; y: number } {
-  const p = structureFireLeptons(s, target);
-  return { x: p.lx * CELL_SIZE / LEPTON_SIZE, y: p.ly * CELL_SIZE / LEPTON_SIZE };
+function structureFiringAnimDirection256(s: MapStructure, target: Entity, firingAnim: WeaponFiringAnim | undefined): number {
+  if (firingAnim === 'samfire' || TURRETED_STRUCTURES.has(s.type)) {
+    return structureTurretFacing256(s, target);
+  }
+  const center = structureCenterLeptons(s);
+  const targetCoord = entityTargetLeptons(target);
+  return directionToLeptons256(center.lx, center.ly, targetCoord.lx, targetCoord.ly);
+}
+
+function spawnStructureWeaponFiringAnim(
+  ctx: CombatContext,
+  s: MapStructure,
+  target: Entity,
+  fireCoord: { lx: number; ly: number },
+): boolean {
+  if (!s.weapon?.firingAnim) return false;
+  const logicIndexHint = ctx.logicIndexHintForNewObject?.();
+  const structureIndex = ctx.structures.indexOf(s);
+  const direction256 = structureFiringAnimDirection256(s, target, s.weapon.firingAnim);
+  return spawnLogicAnim(
+    ctx.logicAnims,
+    ctx.effects,
+    s.weapon.firingAnim,
+    fireCoord.lx * CELL_SIZE / LEPTON_SIZE,
+    fireCoord.ly * CELL_SIZE / LEPTON_SIZE,
+    1,
+    true,
+    ctx.logicAnimsAlreadyProcessed === true,
+    logicIndexHint,
+    ctx.logicIndexHintForNewObject,
+    ctx.reserveAnimSlot,
+    false,
+    structureIndex >= 0 ? structureIndex : undefined,
+    0,
+    undefined,
+    ctx.tick,
+    undefined,
+    weaponFiringAnimStartFrame(s.weapon.firingAnim, direction256),
+    undefined,
+    undefined,
+    undefined,
+    fireCoord.lx - structureCenterLeptons(s).lx,
+    fireCoord.ly - structureCenterLeptons(s).ly,
+  );
 }
 
 function withScenarioRandomSourceTag<T>(tag: number, fn: () => T): T {
@@ -1365,6 +1467,8 @@ export interface CombatContext {
   markCompleteRedrawForTacticalLine?(source: WorldPos, dest: WorldPos): void;
   /** C++ TechnoClass cloak state changes call RadarClass::Flag_To_Redraw(true). */
   markCloakRedraw?(entity: Entity): void;
+  /** C++ BuildingClass::Limbo flags PowerClass redraw for PlayerPtr-owned buildings. */
+  markPowerRedrawForStructureLimbo?(structure: MapStructure): void;
   /** C++ InfantryClass::Stop_Driver, used by InfantryClass::Assign_Destination. */
   stopInfantryDriver?(entity: Entity): void;
   /** C++ InfantryClass::Can_Enter_Cell, used by survivor Scatter(0,true). */
@@ -2324,15 +2428,16 @@ export function fireWeaponAt(
   ctx: CombatContext, attacker: Entity, target: Entity, weapon: WeaponStats,
 ): void {
   const houseBias = ctx.getFirepowerBias(attacker.house);
+  const targetCoord = entityTargetLeptons(target);
+  const fireCoord = typeof attacker.fireCoordForWeapon === 'function'
+    ? attacker.fireCoordForWeapon(weapon)
+    : { lx: attacker.leptonX, ly: attacker.leptonY };
+  const firingAnimDirection256 = entityFireDirection256(attacker);
   if (weapon.projSpeed !== undefined || weapon.projectileSpeed !== undefined) {
     // AircraftClass::Fire_At routes through FootClass/TechnoClass::Fire_At in
     // C++, so even light-speed invisible aircraft weapons create BulletClass
     // objects. Damage and Coord_Scatter happen during BulletClass::AI.
-    const targetCoord = entityTargetLeptons(target);
     const impact = entityTargetPixels(target);
-    const fireCoord = typeof attacker.fireCoordForWeapon === 'function'
-      ? attacker.fireCoordForWeapon(weapon)
-      : { lx: attacker.leptonX, ly: attacker.leptonY };
     const scatter = aircraftProjectileImpactAfterScatter(
       attacker,
       weapon,
@@ -2356,11 +2461,7 @@ export function fireWeaponAt(
       fireCoord,
       scatter.facing256,
     );
-    ctx.effects.push({
-      type: 'muzzle',
-      x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
-      frame: 0, maxFrames: 4, size: 4, sprite: 'piff', spriteStart: 0,
-    } as Effect);
+    spawnWeaponFiringAnim(ctx, weapon, fireCoord, firingAnimDirection256, attacker);
     return;
   }
 
@@ -2377,12 +2478,7 @@ export function fireWeaponAt(
       attacker,
     });
   }
-  // Fire effect
-  ctx.effects.push({
-    type: 'muzzle',
-    x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
-    frame: 0, maxFrames: 4, size: 4, sprite: 'piff', spriteStart: 0,
-  } as Effect);
+  spawnWeaponFiringAnim(ctx, weapon, fireCoord, firingAnimDirection256, attacker);
 }
 
 /** Fire weapon at a map coordinate target.
@@ -2397,11 +2493,12 @@ export function fireWeaponAtCoord(
   impact: WorldPos,
 ): void {
   const houseBias = ctx.getFirepowerBias(attacker.house);
+  const targetCoord = { lx: pixelToLepton(impact.x), ly: pixelToLepton(impact.y) };
+  const fireCoord = typeof attacker.fireCoordForWeapon === 'function'
+    ? attacker.fireCoordForWeapon(weapon)
+    : { lx: attacker.leptonX, ly: attacker.leptonY };
+  const firingAnimDirection256 = entityFireDirection256(attacker);
   if (weapon.projSpeed !== undefined || weapon.projectileSpeed !== undefined) {
-    const targetCoord = { lx: pixelToLepton(impact.x), ly: pixelToLepton(impact.y) };
-    const fireCoord = typeof attacker.fireCoordForWeapon === 'function'
-      ? attacker.fireCoordForWeapon(weapon)
-      : { lx: attacker.leptonX, ly: attacker.leptonY };
     const scatter = aircraftProjectileImpactAfterScatter(
       attacker,
       weapon,
@@ -2426,11 +2523,7 @@ export function fireWeaponAtCoord(
       scatter.facing256,
       targetCoord,
     );
-    ctx.effects.push({
-      type: 'muzzle',
-      x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
-      frame: 0, maxFrames: 4, size: 4, sprite: 'piff', spriteStart: 0,
-    } as Effect);
+    spawnWeaponFiringAnim(ctx, weapon, fireCoord, firingAnimDirection256, attacker);
     return;
   }
 
@@ -2442,17 +2535,17 @@ export function fireWeaponAtCoord(
     attacker.house,
     attacker,
   );
-  ctx.effects.push({
-    type: 'muzzle',
-    x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
-    frame: 0, maxFrames: 4, size: 4, sprite: 'piff', spriteStart: 0,
-  } as Effect);
+  spawnWeaponFiringAnim(ctx, weapon, fireCoord, firingAnimDirection256, attacker);
 }
 
 /** Fire weapon at structure target (helper for aircraft) — uses full damage pipeline */
 export function fireWeaponAtStructure(
   ctx: CombatContext, attacker: Entity, s: MapStructure, weapon: WeaponStats,
 ): void {
+  const fireCoord = typeof attacker.fireCoordForWeapon === 'function'
+    ? attacker.fireCoordForWeapon(weapon)
+    : { lx: attacker.leptonX, ly: attacker.leptonY };
+  const firingAnimDirection256 = entityFireDirection256(attacker);
   const wh = (weapon.warhead ?? 'HE') as WarheadType;
   const houseBias = ctx.getFirepowerBias(attacker.house);
   const armor = s.armor ?? (STRUCTURE_ARMOR[s.type] ?? 'wood');
@@ -2460,11 +2553,7 @@ export function fireWeaponAtStructure(
   const damage = modifyDamage(weapon.damage, wh, armor, 0, houseBias, whMult, getWarheadMeta(wh, ctx.scenarioWarheadMeta).spreadFactor);
   const destroyed = structureDamage(ctx, s, damage, attacker, wh);
   if (destroyed) attacker.creditKill();
-  ctx.effects.push({
-    type: 'muzzle',
-    x: attacker.pos.x, y: attacker.pos.y - attacker.flightAltitude,
-    frame: 0, maxFrames: 4, size: 4, sprite: 'piff', spriteStart: 0,
-  } as Effect);
+  spawnWeaponFiringAnim(ctx, weapon, fireCoord, firingAnimDirection256, attacker);
 }
 
 function maybeSuspendTeamsForBaseAttack(
@@ -2976,6 +3065,7 @@ export function handleUnitDeath(ctx: CombatContext, victim: Entity, opts: {
         // Unlimbo. TechnoClass::AI then returns early while this non-air infantry
         // still has Height > 0, so a survivor appended to Logic mid-frame cannot
         // immediately run Mission_Guard/HUNT RNG on the same tick.
+        setObjectUnlimboFacing256(inf, 128);
         inf.isFalling = true;
         inf.fallHeightLeptons = Entity.FLIGHT_LEVEL_LEPTONS;
         inf.fallRiser = 0;
@@ -4061,7 +4151,11 @@ export function updateInflightProjectiles(
     const liveBefore = countLiveProjectilePredecessors(ctx, predecessors);
     const unprocessed = queue.slice(i + 1);
     const knownProjectiles = new Set<InflightProjectile>([...survivors, ...unprocessed, ...deferred]);
-    ctx.inflightProjectiles = [...survivors, ...unprocessed, ...deferred];
+    // BulletClass stays in C++ Logic while Bullet_Explodes constructs impact
+    // anims and barrel-chain bullets. It is deleted after the detonation work,
+    // so new Logic objects must allocate after this projectile's slot and then
+    // shift down when the projectile is released below.
+    ctx.inflightProjectiles = [...survivors, proj, ...unprocessed, ...deferred];
 
     detonateProjectile(ctx, proj);
     const liveAfter = countLiveProjectilePredecessors(ctx, predecessors);
@@ -4075,7 +4169,7 @@ export function updateInflightProjectiles(
     ctx.deferLogicSlotRelease?.(projectileDeleteHint);
     projectileDeletesThisPass++;
 
-    const spawnedProjectiles = ctx.inflightProjectiles.filter(p => !knownProjectiles.has(p));
+    const spawnedProjectiles = ctx.inflightProjectiles.filter(p => p !== proj && !knownProjectiles.has(p));
     for (const spawned of spawnedProjectiles) {
       spawnedThisPass.add(spawned);
       projectileTrace({
@@ -5147,6 +5241,7 @@ export function tickDestroyedStructureDebris(ctx: CombatContext, s: MapStructure
   // window, so the delayed detach is required in addition to the damage-time
   // detach.
   detachStructureFromTargeting(ctx, s);
+  ctx.markPowerRedrawForStructureLimbo?.(s);
   runBuildingDropDebris(ctx, s);
   s.debrisDropped = true;
   s.debrisCountdown = undefined;
@@ -5495,7 +5590,6 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
       return;
     }
 
-    const { x: sx, y: sy } = structureFirePixels(s);
     const assignedTarget = getAssignedStructureTarget(ctx, s);
     if (s.targetEntityId !== undefined && !assignedTarget) {
       s.targetEntityId = undefined;
@@ -5511,6 +5605,9 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
     const bestTarget = assignedTarget ?? findStructureThreatTarget(ctx, s);
 
     if (bestTarget) {
+      const fireCoord = structureFireLeptons(s, bestTarget);
+      const sx = fireCoord.lx * CELL_SIZE / LEPTON_SIZE;
+      const sy = fireCoord.ly * CELL_SIZE / LEPTON_SIZE;
       const bestTargetPixels = entityTargetPixels(bestTarget);
       // Update turret direction for turreted structures
       if (TURRETED_STRUCTURES.has(s.type)) {
@@ -5591,12 +5688,7 @@ export function updateSingleStructureCombat(ctx: CombatContext, s: MapStructure,
         });
       }
 
-      // Fire effects — color by warhead type (C++ parity)
-      ctx.effects.push({
-        type: 'muzzle', x: sx, y: sy,
-        frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
-        muzzleColor: ctx.warheadMuzzleColor(wh),
-      } as Effect);
+      spawnStructureWeaponFiringAnim(ctx, s, bestTarget, fireCoord);
 
       // Tesla coil and Queen Ant get special effect
       if (s.type === 'TSLA' || s.type === 'QUEE') {

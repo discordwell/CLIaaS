@@ -82,6 +82,7 @@ export interface SpecialUnitsContext {
   addEntity(entity: Entity): void;
   logicIndexHintForNewObject?(): number;
   createMineStructure?(type: 'MINP' | 'MINV', house: House, cx: number, cy: number): boolean;
+  markPowerRedrawForStructureLimbo?(structure: MapStructure): void;
   reserveAnimSlot?(): boolean;
 
   // Renderer
@@ -411,6 +412,27 @@ function structureMineAsMine(s: MapStructure): MineLike | null {
   };
 }
 
+function deleteMineStructure(ctx: SpecialUnitsContext, s: MapStructure): void {
+  // C++ unit.cpp:1831 / infantry.cpp:926 delete the BuildingClass mine
+  // directly. Its destructor calls BuildingClass::Limbo(), which marks the
+  // player power chrome dirty even though mines have no power/drain.
+  ctx.markPowerRedrawForStructureLimbo?.(s);
+  s.alive = false;
+  s.hp = 0;
+  s.rubble = false;
+}
+
+function deletePairedMineStructure(ctx: SpecialUnitsContext, mine: MineLike): void {
+  const structureType = mine.type === 'AV' ? 'MINV' : 'MINP';
+  const structure = ctx.structures.find(s =>
+    s.alive &&
+    s.type === structureType &&
+    s.house === mine.house &&
+    s.cx === mine.cx &&
+    s.cy === mine.cy);
+  if (structure) deleteMineStructure(ctx, structure);
+}
+
 /** Mine trigger check — enemy enters mined cell.
  *  C++ parity (infantry.cpp:920-937, unit.cpp:1815-1837):
  *  - AP mines (STRUCT_APMINE) only trigger on infantry (infantry.cpp:920)
@@ -426,6 +448,7 @@ export function tickMines(ctx: SpecialUnitsContext): void {
     const mine = ctx.mines[i];
     for (const e of ctx.entities) {
       if (detonateMineOnEntity(ctx, mine, e)) {
+        deletePairedMineStructure(ctx, mine);
         ctx.mines.splice(i, 1);
         break;
       }
@@ -440,6 +463,7 @@ export function triggerMineAtCell(ctx: SpecialUnitsContext, e: Entity): boolean 
   for (let i = ctx.mines.length - 1; i >= 0; i--) {
     const mine = ctx.mines[i];
     if (detonateMineOnEntity(ctx, mine, e)) {
+      deletePairedMineStructure(ctx, mine);
       ctx.mines.splice(i, 1);
       return true;
     }
@@ -449,9 +473,7 @@ export function triggerMineAtCell(ctx: SpecialUnitsContext, e: Entity): boolean 
     const mine = structureMineAsMine(s);
     if (!mine) continue;
     if (detonateMineOnEntity(ctx, mine, e)) {
-      s.alive = false;
-      s.hp = 0;
-      s.rubble = false;
+      deleteMineStructure(ctx, s);
       return true;
     }
   }

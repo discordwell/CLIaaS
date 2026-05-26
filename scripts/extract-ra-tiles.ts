@@ -162,15 +162,20 @@ const TEMPERATE_TEMPLATES: Record<number, string> = {
   590: 'FORD3', 591: 'FORD4',
 };
 
-// INTERIOR template IDs (from OpenRA interior.yaml) — IDs 253-399
+// INTERIOR template IDs from Red Alert's TemplateType enum in defines.h.
+//
+// Note the odd gap at 255: the enum names TEMPLATE_ARRO0003 there, but
+// CellClass rendering and terrain code explicitly treat raw TType 255 as a
+// historical clear sentinel. Campaign MapPacks use the post-sentinel values
+// (256..267) for ARRO0004..ARRO0015.
 const INTERIOR_TEMPLATES: Record<number, string> = {
   // Clear floor
   255: 'CLEAR1',
   // Arrow/marking tiles (1x1)
   253: 'ARRO0001', 254: 'ARRO0002',
-  256: 'ARRO0003', 257: 'ARRO0004', 258: 'ARRO0005', 259: 'ARRO0006',
-  260: 'ARRO0007', 261: 'ARRO0008', 262: 'ARRO0009', 263: 'ARRO0010',
-  264: 'ARRO0011', 265: 'ARRO0012', 266: 'ARRO0013', 267: 'ARRO0014',
+  256: 'ARRO0004', 257: 'ARRO0005', 258: 'ARRO0006', 259: 'ARRO0007',
+  260: 'ARRO0008', 261: 'ARRO0009', 262: 'ARRO0010', 263: 'ARRO0011',
+  264: 'ARRO0012', 265: 'ARRO0013', 266: 'ARRO0014', 267: 'ARRO0015',
   // Floor tiles (1x1)
   268: 'FLOR0001', 269: 'FLOR0002', 270: 'FLOR0003', 271: 'FLOR0004',
   272: 'FLOR0005', 273: 'FLOR0006', 274: 'FLOR0007',

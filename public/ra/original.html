@@ -1615,12 +1615,16 @@ document.getElementById('canvas').addEventListener('mouseleave', function() { wi
     'SCU38EA.INI'
   ];
 
-  Module.preRun = Module.preRun || [];
-  Module.preRun.push(function mountLooseRaIniFiles() {
-    if (!Module.addRunDependency || !Module.removeRunDependency) return;
-    Module.addRunDependency('loose-ra-ini-files');
+  var looseExpansionMixFiles = [
+    { source: 'assets/original/EXPAND.MIX', target: 'EXPAND.MIX' }
+  ];
 
-    Promise.all(looseIniFiles.map(async function(name) {
+  Module.preRun = Module.preRun || [];
+  Module.preRun.push(function mountLooseRaExpansionFiles() {
+    if (!Module.addRunDependency || !Module.removeRunDependency) return;
+    Module.addRunDependency('loose-ra-expansion-files');
+
+    var iniMounts = looseIniFiles.map(async function(name) {
       var assetName = name.toLowerCase();
       var response = await fetch('assets/' + assetName);
       if (!response.ok) {
@@ -1645,13 +1649,40 @@ document.getElementById('canvas').addEventListener('mouseleave', function() { wi
         console.warn('[RA FS] failed to mount ' + targetName + ': ' + (err && err.message ? err.message : err));
         return false;
       }
-    })).then(function(results) {
+    });
+
+    var mixMounts = looseExpansionMixFiles.map(async function(file) {
+      var response = await fetch(file.source);
+      if (!response.ok) {
+        console.warn('[RA FS] loose expansion MIX not available: ' + file.source);
+        return false;
+      }
+      var data = new Uint8Array(await response.arrayBuffer());
+      try {
+        if (typeof FS !== 'undefined' && FS.analyzePath('/' + file.target).exists) {
+          return false;
+        }
+        var createFile = Module.FS_createDataFile ||
+          (typeof FS_createDataFile === 'function' ? FS_createDataFile : null);
+        if (!createFile) {
+          console.warn('[RA FS] FS_createDataFile unavailable for ' + file.target);
+          return false;
+        }
+        createFile('/', file.target, data, true, true, true);
+        return true;
+      } catch (err) {
+        console.warn('[RA FS] failed to mount ' + file.target + ': ' + (err && err.message ? err.message : err));
+        return false;
+      }
+    });
+
+    Promise.all(iniMounts.concat(mixMounts)).then(function(results) {
       var count = results.filter(Boolean).length;
-      console.log('[RA FS] mounted ' + count + ' loose expansion INI file(s)');
+      console.log('[RA FS] mounted ' + count + ' loose expansion file(s)');
     }).catch(function(err) {
-      console.warn('[RA FS] loose INI mount failed: ' + (err && err.message ? err.message : err));
+      console.warn('[RA FS] loose expansion mount failed: ' + (err && err.message ? err.message : err));
     }).finally(function() {
-      Module.removeRunDependency('loose-ra-ini-files');
+      Module.removeRunDependency('loose-ra-expansion-files');
     });
   });
 })();

@@ -112,7 +112,7 @@ export function updateFogOfWar(ctx: FogContext): void {
         ((ctx.allyReveal ?? true) && ctx.isAllied(s.house, ctx.playerHouse));
     if (s.alive && revealsForPlayer) {
       // C++ building.cpp uses Class->SightRange directly — no health reduction.
-      const sight = STRUCTURE_SIGHT[s.type] ?? 5;
+      const sight = STRUCTURE_SIGHT[s.type] ?? 0;
       // C++ map.cpp:296: if (!sightrange || sightrange > 10) return;
       if (!sight || sight > 10) continue;
       const look = structureLookCell(s);
@@ -122,7 +122,7 @@ export function updateFogOfWar(ctx: FogContext): void {
     }
   }
 
-  ctx.map.updateFogOfWar(units);
+  ctx.map.updateFogOfWar(units, { mapDisplay: false });
   updateSubDetection(ctx);
 }
 

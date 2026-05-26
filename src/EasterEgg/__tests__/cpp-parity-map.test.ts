@@ -1030,12 +1030,17 @@ describe('Visibility — fog of war states (map.cpp)', () => {
     expect(map.getVisibility(127, 127)).toBe(2);
   });
 
-  it('creepShadow downgrades all visible/fog cells back to shroud (0)', () => {
-    map.revealAll();
+  it('creepShadow shrouds display shadow-edge cells but not fully visible cells', () => {
+    map.updateFogOfWar([{ x: 15 * CELL_SIZE + CELL_SIZE / 2, y: 15 * CELL_SIZE + CELL_SIZE / 2, sight: 5 }]);
     expect(map.getVisibility(15, 15)).toBe(2);
+    expect(map.getDisplayVisibility(15, 15)).toBe(2);
+    expect(map.getVisibility(20, 15)).toBe(2);
+    expect(map.getDisplayVisibility(20, 15)).toBe(1);
     map.creepShadow();
-    expect(map.getVisibility(15, 15)).toBe(0);
-    expect(map.getVisibility(64, 64)).toBe(0);
+    expect(map.getVisibility(15, 15)).toBe(2);
+    expect(map.getDisplayVisibility(15, 15)).toBe(2);
+    expect(map.getVisibility(20, 15)).toBe(0);
+    expect(map.getDisplayVisibility(20, 15)).toBe(0);
   });
 
   it('creepShadow does not affect already-shrouded cells', () => {

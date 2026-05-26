@@ -157,8 +157,9 @@ async function waitForHttp(url: string, timeoutMs: number): Promise<void> {
 
 export async function ensureParityServer(): Promise<ParityServerHandle> {
   const port = Number.parseInt(new URL(RA_PARITY_BASE_URL).port || '80', 10);
+  const probeUrl = new URL('/ra/original.html', RA_PARITY_BASE_URL).toString();
   if (await isPortOpen(port)) {
-    await waitForHttp(RA_PARITY_BASE_URL, 10_000);
+    await waitForHttp(probeUrl, 10_000);
     return { startedByTest: false };
   }
 
@@ -176,7 +177,7 @@ export async function ensureParityServer(): Promise<ParityServerHandle> {
   });
 
   try {
-    await waitForHttp(RA_PARITY_BASE_URL, DEFAULT_TIMEOUT_MS);
+    await waitForHttp(probeUrl, DEFAULT_TIMEOUT_MS);
   } catch (error) {
     const pid = processHandle.pid;
     if (pid) {

@@ -9,7 +9,7 @@ import {
   type AllianceTable, buildDefaultAlliances, buildAlliancesFromINI,
 	  CELL_SIZE, MAP_CELLS, GAME_TICKS_PER_SEC, MPH_TO_PX, LEPTON_SIZE, RESFACTOR,
 	  MAX_DAMAGE, REPAIR_STEP, CONDITION_RED, CONDITION_YELLOW, RULE_GRAVITY,
-		  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell, pixelToLepton, leptonToPixel, leptonDist, cellDist, radiusCellOffsets, directionToLeptons, directionToLeptons256, cellTargetToLepton, DIR_DX, DIR_DY, COS_TABLE_256, SIN_TABLE_256,
+		  Dir, Mission, AnimState, House, UnitType, Stance, SpeedClass, worldDist, directionTo, worldToCell, pixelToLepton, leptonToPixel, leptonDist, cellDist, radiusCellOffsets, directionToLeptons, directionToLeptons256, cellTargetToLepton, coordTargetRoundTripLepton, DIR_DX, DIR_DY, COS_TABLE_256, SIN_TABLE_256,
 	  WARHEAD_VS_ARMOR, WARHEAD_PROPS, WARHEAD_META, type WarheadType, UNIT_STATS, WEAPON_STATS, armorIndex, EXPLOSION_FRAMES,
   MISSION_CONTROL,
   type ProductionItem, type SidebarItem, CursorType, type StripType, getStripSide, getFactoryType, isSidebarSpecialItem,
@@ -29,6 +29,7 @@ import {
   buildCppSidebarCandidates,
   getPlayerSidebarSpecialItems,
   reconcileCppSidebarItems,
+  type SidebarBuildableSource,
 } from './sidebar';
 // NOTE: For server-side code that needs rules.ini-derived faction data,
 // import from './rulesIniPipeline' instead of using PRODUCTION_ITEMS directly.
@@ -289,10 +290,12 @@ import {
   type AIContext,
   type AIHouseState,
   DIFFICULTY_MODS,
-  AI_DIFFICULTY_MODS,
-  AI_BUILD_RULES,
-  CPP_DAMAGE_DELAY_TICKS,
-  createAIHouseState as _createAIHouseState,
+	  AI_DIFFICULTY_MODS,
+	  AI_BUILD_RULES,
+	  CPP_DAMAGE_DELAY_TICKS,
+	  CPP_INITIAL_SPEAK_POWER_DELAY_TICKS,
+	  CPP_SPEAK_DELAY_TICKS,
+	  createAIHouseState as _createAIHouseState,
   updateAIIQGates as _updateAIIQGates,
   updateAIStrategicPlanner as _updateAIStrategicPlanner,
   updateAIHarvesters as _updateAIHarvesters,
@@ -571,6 +574,7 @@ export class Game {
   private _terrainMineSpreadCells: Array<{ cx: number; cy: number; logicIndex: number }> = [];
   /** C++ CellClass::Occupy_Down order for non-building Cell_Occupier chains. */
   private _nextCellOccupierSerial = 1;
+  private _nextCppUnitHeapId = 0;
   selectedIds = new Set<number>();
   selectedStructureIdx = -1; // index into structures[] for selected building (-1 = none)
   controlGroups: Map<number, Set<number>> = new Map(); // 0-9 → entity IDs (C++ parity: keys 1-0)
@@ -602,6 +606,8 @@ export class Game {
   private lastVoiceTick = 0;
   // Economy
   credits = 0;
+  private tiberiumCredits = 0; // C++ HouseClass::Tiberium, silo-stored harvested ore only.
+  private houseTiberiumCredits = new Map<House, number>();
   displayCredits = 0; // animated counter shown in sidebar (ticks toward credits)
   private displayCreditsCountdown = 0;
   /** Cached silo storage capacity (PROC=2000, SILO=1500 each per rules.ini Storage=) — recalculated on structure change */
@@ -748,6 +754,7 @@ export class Game {
   private scenarioUnitStats: Record<string, UnitStats> = UNIT_STATS;
   private scenarioWeaponStats: Record<string, WeaponStats> = WEAPON_STATS;
   private scenarioProductionItems: ProductionItem[] = PRODUCTION_ITEMS;
+  private newUnitsEnabled = false;
   private incomingProjectileSpeed = 10;
   private warheadOverrides: Record<string, [number, number, number, number, number]> = {};
   private scenarioWarheadMeta: Record<string, WarheadMeta> = WARHEAD_META;
@@ -954,6 +961,7 @@ export class Game {
       isRevealedToHouse: (cx, cy, hi) => this.isRevealedToHouse(cx, cy, hi),
       markCompleteRedrawForTacticalLine: (source, dest) => this.markCompleteRedrawForTacticalLine(source, dest),
       markCloakRedraw: (entity) => this.markCompleteRedrawForCloakChange(entity),
+      markPowerRedrawForStructureLimbo: (structure) => this.markPowerRedrawForStructureLimbo(structure),
       stopInfantryDriver: (e) => this.stopInfantryDriver(e),
       infantryCanEnterCell: (e, cx, cy, facing) => this.infantryCanEnterCell(e, cx, cy, facing),
       clearInfantryOccupyBit: (cellIdx, subCell) => this.clearInfantryOccupyBit(cellIdx, subCell),
@@ -1244,7 +1252,7 @@ export class Game {
     }
 
     for (const structure of this.structures) {
-      logicIdx++;
+      structure.logicIndexHint = logicIdx++;
       if (structure.hpadHelicopterId === undefined) continue;
       const heli = this.entityById.get(structure.hpadHelicopterId);
       if (!heli || !heli.isAirUnit || !heli.occupiesCppLogic()) continue;
@@ -1257,6 +1265,40 @@ export class Game {
     if (entity.isAirUnit && entity.flightAltitude > 0) return;
     entity.cellOccupierSerial = this._nextCellOccupierSerial++;
     if (recordTick) entity.lastCellOccupierDownTick = this.tick;
+  }
+
+  private isCppUnitClassEntity(entity: Entity): boolean {
+    return !entity.stats.isInfantry && !entity.stats.isAircraft && !entity.stats.isVessel;
+  }
+
+  private initializeScenarioCppUnitHeapIds(): void {
+    let nextId = 0;
+    for (const entity of this.entities) {
+      if (!this.isCppUnitClassEntity(entity)) continue;
+      if (entity.cppUnitIndexHint === undefined) {
+        entity.cppUnitIndexHint = nextId;
+      }
+      nextId = Math.max(nextId, entity.cppUnitIndexHint + 1);
+    }
+    this._nextCppUnitHeapId = nextId;
+  }
+
+  private allocateCppUnitHeapIdForNewUnit(): number {
+    const used = new Set<number>();
+    for (const entity of this.entities) {
+      if (!entity.alive || !this.isCppUnitClassEntity(entity)) continue;
+      if (entity.cppUnitIndexHint !== undefined) used.add(entity.cppUnitIndexHint);
+    }
+    let id = 0;
+    while (used.has(id)) id++;
+    this._nextCppUnitHeapId = Math.max(this._nextCppUnitHeapId, id + 1);
+    return id;
+  }
+
+  private prepareRuntimeEntityForInsertion(entity: Entity): void {
+    if (this.isCppUnitClassEntity(entity) && entity.cppUnitIndexHint === undefined) {
+      entity.cppUnitIndexHint = this.allocateCppUnitHeapIdForNewUnit();
+    }
   }
 
   private cellOccupierOrderKey(entity: Entity): number {
@@ -1591,7 +1633,7 @@ export class Game {
   private _runRepairSell<T>(fn: (ctx: RepairSellContext) => T): T {
     const ctx = this._repairSellCtx;
     const result = fn(ctx);
-    this.credits = ctx.credits;
+    this.syncPlayerCreditPools(ctx.credits);
     return result;
   }
 
@@ -1625,9 +1667,10 @@ export class Game {
       } : undefined),
       damageStructure: (s, d) => this.damageStructure(s, d),
       handleUnitDeath: (v, o) => this.handleUnitDeath(v, o),
-      addEntity: (e) => { this.markEntityCellOccupierDown(e); this.entities.push(e); this.entityById.set(e.id, e); },
+      addEntity: (e) => { this.prepareRuntimeEntityForInsertion(e); this.markEntityCellOccupierDown(e); this.entities.push(e); this.entityById.set(e.id, e); },
       logicIndexHintForNewObject: () => this.logicIndexHintForNewObject(),
       createMineStructure: (type, house, cx, cy) => this.createMinelayerMineStructure(type, house, cx, cy),
+      markPowerRedrawForStructureLimbo: (structure) => this.markPowerRedrawForStructureLimbo(structure),
       reserveAnimSlot: () => this.reserveCppAnimSlot(),
       screenShake: this.renderer.screenShake,
     };
@@ -1637,7 +1680,7 @@ export class Game {
   private _runSpecialUnits<T>(fn: (ctx: SpecialUnitsContext) => T): T {
     const ctx = this._specialUnitsCtx;
     const result = fn(ctx);
-    this.credits = ctx.credits;
+    this.syncPlayerCreditPools(ctx.credits);
     this.isThieved = ctx.isThieved;
     this.renderer.screenShake = Math.max(this.renderer.screenShake, ctx.screenShake);
     return result;
@@ -1655,6 +1698,11 @@ export class Game {
       powerProduced: this.powerProduced,
       powerConsumed: this.powerConsumed,
       houseTechLevel: (house) => this.houseTechLevels.get(house) ?? this.defaultScenarioTechLevel(),
+      structureTechLevel: (type) => {
+        const item = this.scenarioProductionItems.find(p => p.type === type && p.isStructure)
+          ?? this.scenarioProductionItems.find(p => p.type === type);
+        return item?.techLevel;
+      },
       gpsTechLevel: this.gpsTechLevel,
       airstripSpecialTechLevels: this.airstripSpecialTechLevels,
       isNoSpyPlane: this.isNoSpyPlane,
@@ -1674,7 +1722,7 @@ export class Game {
       playSoundAt: (n, x, y) => this.playSoundAt(n as SoundName, x, y),
       damageEntity: (t, a, w) => this.damageEntity(t, a, w as WarheadType),
       damageStructure: (s, d) => this.damageStructure(s, d),
-	      addEntity: (e) => { this.markEntityCellOccupierDown(e); this.entities.push(e); this.entityById.set(e.id, e); },
+	      addEntity: (e) => { this.prepareRuntimeEntityForInsertion(e); this.markEntityCellOccupierDown(e); this.entities.push(e); this.entityById.set(e.id, e); },
       aiIQ: (h) => this.aiStates.get(h)?.iq ?? 0,
       getWarheadMult: (w, a) => this.getWarheadMult(w as WarheadType, a as ArmorType),
       markCloakRedraw: (entity) => this.markCompleteRedrawForCloakChange(entity),
@@ -1686,6 +1734,7 @@ export class Game {
       whitePaletteFade: this.renderer.whitePaletteFade,
       activeVortices: this.activeVortices,
       timeQuake: this.timeQuake,
+      isStructureActiveForHouseScan: (s, index) => this.isStructureActiveForHouseScan(s, index),
     };
   }
 
@@ -1719,6 +1768,7 @@ export class Game {
       playerTechLevel: this.playerTechLevel,
       baseDiscovered: this.baseDiscovered,
       scenarioProductionItems: this.scenarioProductionItems,
+      newUnitsEnabled: this.newUnitsEnabled,
       productionQueue: this.productionQueue,
       pendingPlacement: this.pendingPlacement,
       wallPlacementPrepaid: this.wallPlacementPrepaid,
@@ -1731,10 +1781,10 @@ export class Game {
       builtAircraftTypes: this.builtAircraftTypes,
       rallyPoints: this.rallyPoints,
       isAllied: (a, b) => this.isAllied(a, b),
-      hasBuilding: (t) => this.hasBuilding(t),
+      hasBuilding: (t) => this.hasActivePlayerProductionPrerequisite(t),
       playSound: (n) => this.audio.play(n as SoundName),
       playEva: (n) => this.playEva(n as SoundName),
-	      addEntity: (e) => { this.markEntityCellOccupierDown(e); this.entities.push(e); this.entityById.set(e.id, e); },
+	      addEntity: (e) => { this.prepareRuntimeEntityForInsertion(e); this.markEntityCellOccupierDown(e); this.entities.push(e); this.entityById.set(e.id, e); },
       findPassableSpawn: (cx, cy, scx, scy, fw, fh) => this.findPassableSpawn(cx, cy, scx, scy, fw, fh),
     };
   }
@@ -1743,7 +1793,7 @@ export class Game {
   private _runProduction<T>(fn: (ctx: ProductionContext) => T): T {
     const ctx = this._productionCtx;
     const result = fn(ctx);
-    this.credits = ctx.credits;
+    this.syncPlayerCreditPools(ctx.credits);
     this.pendingPlacement = ctx.pendingPlacement;
     this.wallPlacementPrepaid = ctx.wallPlacementPrepaid;
     return result;
@@ -1796,7 +1846,7 @@ export class Game {
   private _runPlacement<T>(fn: (ctx: PlacementContext) => T): T {
     const ctx = this._placementCtx;
     const result = fn(ctx);
-    this.credits = ctx.credits;
+    this.syncPlayerCreditPools(ctx.credits);
     this.pendingPlacement = ctx.pendingPlacement;
     this.wallPlacementPrepaid = ctx.wallPlacementPrepaid;
     this.cachedAvailableItems = ctx.cachedAvailableItems;
@@ -1836,12 +1886,17 @@ export class Game {
   private _housePowerGrid(house: House): { produced: number; consumed: number } {
     let produced = 0;
     let consumed = 0;
-    for (const s of this.structures) {
+    for (let i = 0; i < this.structures.length; i++) {
+      const s = this.structures[i];
       const inHousePower = s.alive || (!s.debrisDropped && s.debrisCountdown !== undefined);
       if (!inHousePower || s.sellProgress !== undefined || s.house !== house) continue;
       const power = structurePowerContribution(s);
       produced += power.produced;
-      consumed += power.consumed;
+      if (power.consumed <= 0) continue;
+      const pendingDebrisLimbo = !s.alive && !s.debrisDropped && s.debrisCountdown !== undefined;
+      if (pendingDebrisLimbo || this.isStructureActiveForPowerDrain(s, i)) {
+        consumed += power.consumed;
+      }
     }
     return { produced, consumed };
   }
@@ -1871,6 +1926,42 @@ export class Game {
       }
       if (state.damageTimer > 0) state.damageTimer--;
     }
+  }
+
+  private isActiveStructureForHouse(s: MapStructure, house: House, type?: string): boolean {
+    return s.alive &&
+      s.house === house &&
+      (type === undefined || s.type === type) &&
+      s.sellProgress === undefined &&
+      !isStructureUnderConstruction(s);
+  }
+
+  private lowPowerTextForHouse(house: House): string {
+    // C++ house.cpp:1136-1144 checks AA first, then lets Tesla override it.
+    if (this.structures.some(s => this.isActiveStructureForHouse(s, house, 'TSLA'))) {
+      return 'Low Power: Tesla Coils offline';
+    }
+    if (this.structures.some(s => this.isActiveStructureForHouse(s, house, 'AGUN'))) {
+      return 'Low Power: AA Guns offline';
+    }
+    return 'Low Power';
+  }
+
+  /** C++ house.cpp:1130-1148 — SpeakPowerDelay + low-power map message. */
+  private tickPlayerLowPowerWarning(): void {
+    const state = this.ensureHouseRuntimeState(this.playerHouse);
+    state.speakPowerTimer ??= CPP_INITIAL_SPEAK_POWER_DELAY_TICKS;
+
+    if (state.speakPowerTimer <= 0 && this._housePowerFraction(this.playerHouse) < 1) {
+      if (this.structures.some(s => this.isActiveStructureForHouse(s, this.playerHouse, 'FACT'))) {
+        this.playEva('eva_low_power');
+        this.queueEvaMessage(this.lowPowerTextForHouse(this.playerHouse));
+        this.renderer.flashPowerBar();
+        state.speakPowerTimer = CPP_SPEAK_DELAY_TICKS;
+      }
+    }
+
+    if (state.speakPowerTimer > 0) state.speakPowerTimer--;
   }
 
   /** Run aircraft subsystem function with mutable state sync */
@@ -2207,6 +2298,7 @@ export class Game {
     this._terrainLogicCount = scenario.terrainLogicCount ?? scenario.terrainMineCount ?? 0;
     this._terrainMineCount = scenario.terrainMineCount ?? 0;
     this._terrainMineSpreadCells = scenario.terrainMineSpreadCells ?? [];
+    this.initializeScenarioCppUnitHeapIds();
     this.entityById.clear();
 	    for (const e of scenario.entities) {
 	      this.refreshTechnoLock(e);
@@ -2220,14 +2312,17 @@ export class Game {
     this.teamTypes = scenario.teamTypes;
     this.triggers = scenario.triggers;
     this.credits = scenario.credits;
+    this.tiberiumCredits = 0;
+    this.houseTiberiumCredits.clear();
     this.initialCredits = scenario.credits; // C++ Control.InitialCredits — capture before gameplay
+    this.harvestedCredits = 0;
+    this.stolenCredits = 0;
     this.playerHouse = scenario.playerHouse;
     this.playerFaction = HOUSE_FACTION[this.playerHouse] ?? 'allied';
     this.playerTechLevel = scenario.playerTechLevel ?? 10;
     this.isNoSpyPlane = scenario.isNoSpyPlane ?? false;
     this.gpsTechLevel = scenario.gpsTechLevel ?? 8;
     this.airstripSpecialTechLevels = scenario.airstripSpecialTechLevels ?? { spyPlane: 5, paraBomb: 8, paraInfantry: 5 };
-    this.initializeScenarioPowerDrain();
     // Calculate initial silo capacity (do NOT cap starting credits — C++ parity)
     // C++ house.cpp:7146-7147: starting credits go into the uncapped Credits pool,
     // not the Tiberium pool. Silo capacity only limits HARVESTED ore.
@@ -2239,6 +2334,7 @@ export class Game {
     this.scenarioUnitStats = scenario.scenarioUnitStats;
     this.scenarioWeaponStats = scenario.scenarioWeaponStats;
     this.scenarioProductionItems = scenario.scenarioProductionItems;
+    this.newUnitsEnabled = scenario.newUnitsEnabled;
     this.incomingProjectileSpeed = scenario.incomingProjectileSpeed;
     this.warheadOverrides = scenario.warheadOverrides;
     this.scenarioWarheadMeta = scenario.scenarioWarheadMeta;
@@ -2355,6 +2451,9 @@ export class Game {
     for (const [house, credits] of scenario.houseCredits) {
       this.houseCredits.set(house, credits);
     }
+    if (scenario.fillSilos) {
+      this.fillScenarioSilosFromCredits();
+    }
     // Store house edges for reinforcement spawning
     this.houseEdges = scenario.houseEdges;
     this.housePlayerControls = scenario.housePlayerControl;
@@ -2397,6 +2496,7 @@ export class Game {
     // cascade sight if a player unit maps their footprint and Revealed()
     // calls Look().
     this.applyScenarioInitLook();
+    this.initializeScenarioPowerDrain();
     // C++ scenario.cpp:588-599 marks the scenario perimeter ring after
     // scenario objects have unlimboed and performed their initial Look().
     this.map.markDisplayShroudRing();
@@ -2456,11 +2556,7 @@ export class Game {
   }
 
   private initializeScenarioPowerDrain(): void {
-    let consumed = 0;
-    for (const s of this.structures) {
-      if (!s.alive || s.sellProgress !== undefined || s.house !== this.playerHouse) continue;
-      consumed += structurePowerContribution(s).consumed;
-    }
+    const { consumed } = this._housePowerGrid(this.playerHouse);
     this.powerProduced = 0;
     this.powerConsumed = consumed;
     this.renderer.sidebarPowerProduced = this.powerProduced;
@@ -2665,8 +2761,10 @@ export class Game {
       // C++ Main_Loop renders the current HidPage before Logic.AI advances the
       // frame. Agent screenshots read that back buffer after agent_step(), so
       // the visible frame is the state before the final stepped logic tick.
-      if (this.tick > 0) this.advanceCreditDisplay();
-      this.advanceSidebarInputAI();
+      if (this.tick > 0) {
+        this.advanceCreditDisplay();
+        this.advanceSidebarInputAI();
+      }
       // When a deferred win/loss is pending, the batch may stop before its
       // requested final tick. Keep refreshing the pre-Logic frame during that
       // short terminal countdown so the agent canvas matches C++ HidPage rather
@@ -2676,8 +2774,11 @@ export class Game {
       if (willRender) {
         this.renderer.interpolationAlpha = 1;
         this.render();
-      } else {
+        if (this.tick === 0) this.advanceSidebarInputAI();
+      } else if (this.tick > 0) {
         this.renderer.advanceSidebarChromeCache();
+      } else {
+        this.advanceSidebarInputAI();
       }
       // C++ agent_step breaks on do_tick() returning true (game over).
       // Match this: stop stepping when game enters won/lost state.
@@ -2739,6 +2840,11 @@ export class Game {
   private markCompleteRedrawForCloakChange(entity: Entity): void {
     if (!entity.stats.isCloakable) return;
     this.renderer.markSidebarChromeDirty(true);
+  }
+
+  private markPowerRedrawForStructureLimbo(structure: MapStructure): void {
+    if (structure.house !== this.playerHouse) return;
+    this.renderer.markPowerChromeDirty();
   }
 
   private advanceMessageSystemTimer(elapsedMs: number): void {
@@ -4053,11 +4159,7 @@ export class Game {
     this.updatePlayerRadarAvailability();
     this.updatePlayerRadarJamming();
 
-    // Low power warning (every 10 seconds when power demand exceeds supply)
-    if (this.powerConsumed > this.powerProduced && this.powerProduced > 0 &&
-        this.tick % (GAME_TICKS_PER_SEC * 10) === 0) {
-      this.audio.play('eva_low_power');
-    }
+    this.tickPlayerLowPowerWarning();
 
     // Superweapon recharge and auto-fire
     this.updateSuperweapons();
@@ -4126,6 +4228,7 @@ export class Game {
 	            const mcv = new Entity(UnitType.V_MCV, s.house, wx, wy);
 	            mcv.hp = Math.max(1, Math.floor(mcv.maxHp * healthRatioAtSell));
 	            mcv.mission = Mission.GUARD;
+	            this.prepareRuntimeEntityForInsertion(mcv);
 	            this.markEntityCellOccupierDown(mcv);
 	            this.entities.push(mcv);
 	            this.entityById.set(mcv.id, mcv);
@@ -4269,7 +4372,7 @@ export class Game {
 
   private revealStructureSightForPlayer(structure: MapStructure): void {
     const look = structureLookCell(structure);
-    this.revealSightForPlayer(look.cx, look.cy, STRUCTURE_SIGHT[structure.type] ?? 5);
+    this.revealSightForPlayer(look.cx, look.cy, STRUCTURE_SIGHT[structure.type] ?? 0);
   }
 
   private revealMappedPlayerStructures(): void {
@@ -5238,14 +5341,28 @@ export class Game {
       this.playerHouse,
       (a, b) => this.isAllied(a, b),
     );
+    const buildableSources = this.getSidebarBuildableSources();
     if (this.tick === 0 && this.superweapons.size === 0) {
       // C++ sidebar additions come from HouseClass::AI, not drawing. A pre-Logic
       // render can preview current buildables, but it must not lock strip order
       // before Super_Weapon_Handler gets the first chance to add airstrip specials.
-      return buildCppSidebarCandidates(available, specials);
+      return buildCppSidebarCandidates(available, specials, buildableSources);
     }
-    this.sidebarItems = reconcileCppSidebarItems(this.sidebarItems, available, specials);
+    this.sidebarItems = reconcileCppSidebarItems(this.sidebarItems, available, specials, buildableSources);
     return this.sidebarItems;
+  }
+
+  private getSidebarBuildableSources(): SidebarBuildableSource[] {
+    const sources: SidebarBuildableSource[] = [];
+    for (let i = 0; i < this.structures.length; i++) {
+      const structure = this.structures[i];
+      if (structure.house !== this.playerHouse) continue;
+      if (isStructureUnderConstruction(structure)) continue;
+      if (structure.sellProgress !== undefined) continue;
+      if (!this.isStructureActiveForHouseScan(structure, i)) continue;
+      sources.push({ type: structure.type });
+    }
+    return sources;
   }
 
   private isNoYakMig(house: House): boolean {
@@ -5460,8 +5577,8 @@ export class Game {
   private playEva(sound: SoundName): void {
     // C++ audio.cpp:643-648 — Speak() has NO power gate. EVA always plays
     // regardless of power level. Removed AU4 power gate for C++ parity.
-    const last = this.lastEvaTime.get(sound) ?? 0;
-    if (this.tick - last < 45) return; // 3 second throttle
+    const last = this.lastEvaTime.get(sound);
+    if (last !== undefined && this.tick - last < 45) return; // 3 second throttle
     this.lastEvaTime.set(sound, this.tick);
     this.audio.play(sound);
   }
@@ -7554,9 +7671,22 @@ export class Game {
     }
 	    if (hasActiveHeadTo) {
 	      const wp = { lx: entity.headToLX, ly: entity.headToLY };
-      const arrived = entity.moveToward(wp, this.movementSpeed(entity), true);
+	      const arrived = entity.moveToward(wp, this.movementSpeed(entity), true);
 		      if (arrived) {
 	        const navComAtArrival = entity.moveTarget;
+        const arrivedAtNavCom =
+          navComAtArrival &&
+          Math.floor(navComAtArrival.lx / LEPTON_SIZE) === entity.cell.cx &&
+          Math.floor(navComAtArrival.ly / LEPTON_SIZE) === entity.cell.cy;
+        if (arrivedAtNavCom && (entity.mission as Mission) === Mission.MOVE) {
+          const savedMoveTarget = entity.moveTarget;
+          entity.moveTarget = null;
+          const idleMission = this.infantryEnterIdleMission(entity);
+          entity.moveTarget = savedMoveTarget;
+          if (idleMission === Mission.AREA_GUARD) {
+            this.refreshAreaGuardArchiveAtCurrentCoord(entity);
+          }
+        }
 		        if (entity.path.length > 0 && entity.pathIndex < entity.path.length) {
 		          entity.pathIndex++;
 	          this.consumeDrivePathFacings(entity, 1);
@@ -7596,14 +7726,16 @@ export class Game {
 	        // at NavCom clears the destination. If Mission is MOVE, Enter_Idle_Mode
         // queues the next mission (ATTACK when TarCom is legal) for the next
         // Commence gate; it does not direct-write Mission.
-        if (navComAtArrival &&
-            Math.floor(navComAtArrival.lx / LEPTON_SIZE) === entity.cell.cx &&
-            Math.floor(navComAtArrival.ly / LEPTON_SIZE) === entity.cell.cy) {
+        if (arrivedAtNavCom) {
           entity.moveTarget = null;
           this.clearDrivePath(entity);
           if ((entity.mission as Mission) === Mission.MOVE) {
-            assignMission(entity, this.infantryEnterIdleMission(entity));
-	          }
+            const idleMission = this.infantryEnterIdleMission(entity);
+            if (idleMission === Mission.AREA_GUARD) {
+              this.refreshAreaGuardArchiveAtCurrentCoord(entity);
+            }
+            assignMission(entity, idleMission);
+		          }
 	        }
       } else {
         this.markEntityCellOccupierDown(entity);
@@ -9505,6 +9637,15 @@ export class Game {
       return Mission.MOVE;
     }
     return this.idleMission(entity);
+  }
+
+  private refreshAreaGuardArchiveAtCurrentCoord(entity: Entity): void {
+    entity.archiveTargetEntity = null;
+    entity.archiveTarget = null;
+    entity.archiveTargetLeptons = {
+      lx: coordTargetRoundTripLepton(entity.leptonX),
+      ly: coordTargetRoundTripLepton(entity.leptonY),
+    };
   }
 
   private assignInfantryDestinationToStructure(entity: Entity, structure: MapStructure): void {
@@ -11745,10 +11886,13 @@ export class Game {
             entity.moveTarget = null;
             this.clearDrivePath(entity);
             resetPathThreshold(entity);
-            if ((entity.mission as Mission) === Mission.MOVE) {
-              const idleMission = this.infantryEnterIdleMission(entity);
-              if (entity.mission !== idleMission) entity.missionQueue = idleMission;
-            }
+	            if ((entity.mission as Mission) === Mission.MOVE) {
+	              const idleMission = this.infantryEnterIdleMission(entity);
+	              if (idleMission === Mission.AREA_GUARD) {
+	                this.refreshAreaGuardArchiveAtCurrentCoord(entity);
+	              }
+	              if (entity.mission !== idleMission) entity.missionQueue = idleMission;
+	            }
           } else if (
             entity.moveTarget &&
             leptonDist(entity.leptonX, entity.leptonY, entity.moveTarget.lx, entity.moveTarget.ly) < 16
@@ -11833,10 +11977,13 @@ export class Game {
             entity.moveTarget = null;
             this.clearDrivePath(entity);
             resetPathThreshold(entity);
-            if ((entity.mission as Mission) === Mission.MOVE) {
-              const idleMission = this.infantryEnterIdleMission(entity);
-              if (entity.mission !== idleMission) entity.missionQueue = idleMission;
-	            }
+	            if ((entity.mission as Mission) === Mission.MOVE) {
+	              const idleMission = this.infantryEnterIdleMission(entity);
+	              if (idleMission === Mission.AREA_GUARD) {
+	                this.refreshAreaGuardArchiveAtCurrentCoord(entity);
+	              }
+	              if (entity.mission !== idleMission) entity.missionQueue = idleMission;
+		            }
 	          }
 	        } else {
 	          this.markEntityCellOccupierDown(entity);
@@ -13321,6 +13468,7 @@ export class Game {
 	        applyScenarioOverrides([ant], this.scenarioUnitStats, this.scenarioWeaponStats);
 	        ant.mission = Mission.AREA_GUARD;
 	        ant.guardOrigin = { x: spawnX, y: spawnY };
+	        this.prepareRuntimeEntityForInsertion(ant);
 	        this.markEntityCellOccupierDown(ant);
 	        this.entities.push(ant);
 	        this.entityById.set(ant.id, ant);
@@ -14497,7 +14645,7 @@ export class Game {
         if (!s.alive || s.house !== this.playerHouse) continue;
         if (!this.isStructureFootprintMappedForPlayer(s)) continue;
         const look = structureLookCell(s);
-        changed = this.markPlayerMappedSight(look.cx, look.cy, STRUCTURE_SIGHT[s.type] ?? 5).length > 0 || changed;
+        changed = this.markPlayerMappedSight(look.cx, look.cy, STRUCTURE_SIGHT[s.type] ?? 0).length > 0 || changed;
       }
     }
   }
@@ -14511,14 +14659,28 @@ export class Game {
     for (const s of this.structures) {
       if (!s.alive || !this.structureRevealsForPlayer(s)) continue;
       const look = structureLookCell(s);
-      this.markPlayerMappedSight(look.cx, look.cy, STRUCTURE_SIGHT[s.type] ?? 5);
+      this.markPlayerMappedSight(look.cx, look.cy, STRUCTURE_SIGHT[s.type] ?? 0);
     }
   }
 
   private structureRevealsForPlayer(s: MapStructure): boolean {
-    if (s.house === this.playerHouse) return this.isStructureFootprintMappedForPlayer(s);
-    if (!this.allyReveal) return false;
-    return this.isAllied(s.house, this.playerHouse);
+    const index = this.structures.indexOf(s);
+    if (s.house === this.playerHouse) {
+      return this.isStructureFootprintMappedForPlayer(s);
+    }
+
+    if (!this.isAllied(s.house, this.playerHouse)) return false;
+
+    // C++ DisplayClass::All_To_Look first handles all PlayerControl technos in
+    // a separate branch and only calls Look() if IsDiscoveredByPlayer is already
+    // set. AllyReveal's building bootstrap applies only to non-PlayerControl
+    // allied buildings. SCG24EA's Germany/Turkey village buildings are
+    // PlayerControl=yes, so they must not discover themselves on tick 1.
+    if (this.isHouseHumanOrPlayerControl(s.house)) {
+      return index >= 0 && this.discoveredStructureIds.has(index);
+    }
+
+    return this.allyReveal;
   }
 
   private isCellMappedForPlayer(cx: number, cy: number): boolean {
@@ -14544,7 +14706,7 @@ export class Game {
     for (const s of this.structures) {
       if (!s.alive || !this.structureRevealsForPlayer(s)) continue;
       const look = structureLookCell(s);
-      if (inSight(look.cx, look.cy, STRUCTURE_SIGHT[s.type] ?? 5)) return true;
+      if (inSight(look.cx, look.cy, STRUCTURE_SIGHT[s.type] ?? 0)) return true;
     }
     return false;
   }
@@ -14709,7 +14871,7 @@ export class Game {
     }
     for (const s of this.structures) {
       if (!s.alive || !this.structureRevealsForPlayer(s)) continue;
-      const sight = STRUCTURE_SIGHT[s.type] ?? 5;
+      const sight = STRUCTURE_SIGHT[s.type] ?? 0;
       if (!sight || sight > 10) continue;
       if (cellDist(s.cx - cx, s.cy - cy) <= sight) return true;
     }
@@ -14862,7 +15024,10 @@ export class Game {
 
   private isEntityDiscoveredForActiveScan(entity: Entity): boolean {
     if (entity.house !== this.playerHouse) return this.discoveredEntityIds.has(entity.id);
-    return this.isCellMappedForPlayer(entity.cell.cx, entity.cell.cy);
+    // Player-owned technos are serialized by C++ with IsDiscoveredByPlayer set
+    // even when the current cell is under shroud. ActiveU/VScan must therefore
+    // keep locked player reinforcements alive for TEVENT_ALL_DESTROYED.
+    return true;
   }
 
   private isStructureDiscoveredForActiveScan(structure: MapStructure, index: number): boolean {
@@ -14876,6 +15041,11 @@ export class Game {
     if (!this.map.inBounds(structure.cx, structure.cy)) return false;
     return !this.isCppHumanHouseForActiveScan(structure.house) ||
       this.isStructureDiscoveredForActiveScan(structure, index);
+  }
+
+  private isStructureActiveForPowerDrain(structure: MapStructure, index: number): boolean {
+    if (isStructureUnderConstruction(structure)) return false;
+    return this.isStructureActiveForHouseScan(structure, index);
   }
 
   /**
@@ -14906,7 +15076,7 @@ export class Game {
       if (hi === undefined) continue;
       let set = this._houseRevealed.get(hi);
       if (!set) { set = new Set(); this._houseRevealed.set(hi, set); }
-      const sight = STRUCTURE_SIGHT[s.type] ?? 5;
+      const sight = STRUCTURE_SIGHT[s.type] ?? 0;
       if (!sight || sight > 10) continue;
       const look = structureLookCell(s);
       this._addOctagonalCells(set, look.cx, look.cy, sight);
@@ -15183,6 +15353,7 @@ export class Game {
       action, this.teamTypes, this.waypoints, this.globals, this.triggers, trigger.house,
       this.houseEdges, { x: this.map.boundsX, y: this.map.boundsY, w: this.map.boundsW, h: this.map.boundsH },
       Game.HOUSE_TO_INDEX[this.playerHouse] ?? -1, this.map, this.entities, this.structures,
+      () => this.allocateCppUnitHeapIdForNewUnit(),
     );
     this.applyTriggerActionResult(result, trigger);
     // C++ taction.cpp:587-590 executes forced triggers synchronously via
@@ -15528,6 +15699,8 @@ export class Game {
     }
     if (result.creepShadow) {
       this.map.creepShadow();
+      this.creepPlayerMappedShadow();
+      this.runPlayerAllToLook(false);
     }
     if (result.textMessage !== undefined) {
       this.showTutorialTextMessage(result.textMessage);
@@ -15796,6 +15969,7 @@ export class Game {
     // Track spawned entities with team missions for Team creation
     const teamEntities: Entity[] = [];
     for (const entity of result.spawned) {
+      this.prepareRuntimeEntityForInsertion(entity);
       this.refreshTechnoLock(entity);
       // C++ Do_Reinforcements Unlimbo()s each spawned object immediately,
       // appending it to Logic in spawn order. Preserve that runtime slot so
@@ -16290,13 +16464,47 @@ export class Game {
     this.markEntityDiscoveredByPlayer(entity);
   }
 
-  private runPlayerHouseAllToLook(): void {
-    if (!this.playerHouseIsToLook) return;
-    this.playerHouseIsToLook = false;
+  private shroudPlayerMappedCell(cx: number, cy: number): void {
+    if (cx < this.map.boundsX || cx >= this.map.boundsX + this.map.boundsW ||
+        cy < this.map.boundsY || cy >= this.map.boundsY + this.map.boundsH) {
+      return;
+    }
+    const idx = cy * MAP_CELLS + cx;
+    if (!this.playerMappedCells[idx]) return;
 
-    // C++ house.cpp:1380 + display.cpp:4444-4462. HouseClass::IsToLook starts
-    // true, and PlayerPtr consumes it on the first HouseClass::AI frame with a
-    // full All_To_Look() pass. This is not a per-frame sight rebuild.
+    this.playerMappedCells[idx] = 0;
+    this.playerVisibleMappedCells[idx] = 0;
+
+    const facingOrder: Array<[number, number]> = [
+      [0, -1], [1, -1], [1, 0], [1, 1],
+      [0, 1], [-1, 1], [-1, 0], [-1, -1],
+    ];
+    for (const [dx, dy] of facingOrder) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (nx < this.map.boundsX || nx >= this.map.boundsX + this.map.boundsW ||
+          ny < this.map.boundsY || ny >= this.map.boundsY + this.map.boundsH) {
+        continue;
+      }
+      this.playerVisibleMappedCells[ny * MAP_CELLS + nx] = 0;
+    }
+  }
+
+  private creepPlayerMappedShadow(): void {
+    const toShroud: number[] = [];
+    for (let cy = this.map.boundsY; cy < this.map.boundsY + this.map.boundsH; cy++) {
+      for (let cx = this.map.boundsX; cx < this.map.boundsX + this.map.boundsW; cx++) {
+        const idx = cy * MAP_CELLS + cx;
+        if (this.playerMappedCells[idx] && !this.playerVisibleMappedCells[idx]) toShroud.push(idx);
+      }
+    }
+
+    for (const idx of toShroud) {
+      this.shroudPlayerMappedCell(idx % MAP_CELLS, Math.floor(idx / MAP_CELLS));
+    }
+  }
+
+  private runPlayerAllToLook(unitsOnly: boolean): void {
     for (const entity of this.entities) {
       if (!entity.alive || entity.inLimbo || entity.isAirUnit) continue;
       if (!this.isHouseHumanOrPlayerControl(entity.house)) continue;
@@ -16305,18 +16513,34 @@ export class Game {
       this.revealSightFromPlayer(entity.cell.cx, entity.cell.cy, sight);
     }
 
+    if (unitsOnly) return;
+
     for (let i = 0; i < this.structures.length; i++) {
       const s = this.structures[i];
       if (!s.alive) continue;
       if (s.house === this.playerHouse) {
         if (!this.playerDiscoveredStructureIds.has(i)) continue;
-        this.revealStructureSightForPlayer(s);
-        this.revealMappedPlayerStructures();
-      } else if (this.allyReveal && this.isAllied(s.house, this.playerHouse)) {
-        this.revealStructureSightForPlayer(s);
-        this.revealMappedPlayerStructures();
+      } else if (!this.isAllied(s.house, this.playerHouse)) {
+        continue;
+      } else if (this.isHouseHumanOrPlayerControl(s.house)) {
+        if (!this.discoveredStructureIds.has(i)) continue;
+      } else if (!this.allyReveal) {
+        continue;
       }
+
+      this.revealStructureSightForPlayer(s);
+      this.revealMappedPlayerStructures();
     }
+  }
+
+  private runPlayerHouseAllToLook(): void {
+    if (!this.playerHouseIsToLook) return;
+    this.playerHouseIsToLook = false;
+
+    // C++ house.cpp:1380 + display.cpp:4444-4462. HouseClass::IsToLook starts
+    // true, and PlayerPtr consumes it on the first HouseClass::AI frame with a
+    // full All_To_Look() pass. This is not a per-frame sight rebuild.
+    this.runPlayerAllToLook(false);
   }
 
   /** C++ DisplayClass::Map_Cell calls Revealed(PlayerPtr) for a techno in each
@@ -16553,13 +16777,31 @@ export class Game {
       (s.type === type || (alt !== undefined && s.type === alt)));
   }
 
+  /** C++ HouseClass::Can_Build uses ActiveBScan for human players. */
+  private hasActivePlayerProductionPrerequisite(type: string): boolean {
+    if (!type) return false;
+    const candidates = new Set([type]);
+    if (type === 'TENT') candidates.add('BARR');
+    if (type === 'BARR') candidates.add('TENT');
+    if (type === 'SYRD') candidates.add('SPEN');
+    if (type === 'SPEN') candidates.add('SYRD');
+    // house.cpp:863 — advanced power also serves as a normal power prerequisite.
+    if (type === 'POWR') candidates.add('APWR');
+
+    return this.structures.some((s, index) =>
+      s.house === this.playerHouse &&
+      candidates.has(s.type) &&
+      this.isStructureActiveForHouseScan(s, index));
+  }
+
   private hasActivePlayerRadarFacility(): boolean {
-    return this.structures.some(s =>
+    return this.structures.some((s, index) =>
       s.alive &&
       s.type === 'DOME' &&
       !isStructureUnderConstruction(s) &&
-      !s.sellProgress &&
-      s.house === this.playerHouse);
+      s.sellProgress === undefined &&
+      s.house === this.playerHouse &&
+      this.isStructureActiveForHouseScan(s, index));
   }
 
   private hasFullPlayerPower(): boolean {
@@ -16622,23 +16864,83 @@ export class Game {
     return _calculateSiloCapacity(this.structures, this.playerHouse, (a, b) => this.isAllied(a, b));
   }
 
+  private calculateSiloCapacityForHouse(house: House): number {
+    let capacity = 0;
+    for (const s of this.structures) {
+      if (!s.alive || s.house !== house) continue;
+      if (isStructureUnderConstruction(s) || s.sellProgress !== undefined) continue;
+      if (s.type === 'PROC') capacity += 2000;
+      else if (s.type === 'SILO') capacity += 1500;
+    }
+    return capacity;
+  }
+
+  private tiberiumCreditsForHouse(house: House): number {
+    return house === this.playerHouse
+      ? this.tiberiumCredits
+      : (this.houseTiberiumCredits.get(house) ?? 0);
+  }
+
+  private setTiberiumCreditsForHouse(house: House, amount: number): void {
+    if (house === this.playerHouse) {
+      this.tiberiumCredits = amount;
+    } else {
+      this.houseTiberiumCredits.set(house, amount);
+    }
+  }
+
+  private fillScenarioSilosFromCredits(): void {
+    // C++ scenario.cpp:631-639 — [Basic] FillSilos=yes moves each house's
+    // cash reserve into Tiberium before the first draw. TS house credit fields
+    // store C++ Available_Money, so this only initializes the split pool used
+    // by silo art; it must not reduce the exposed total.
+    for (const house of Object.values(House)) {
+      const capacity = this.calculateSiloCapacityForHouse(house);
+      if (capacity <= 0) continue;
+      const tiberium = this.tiberiumCreditsForHouse(house);
+      const toMove = capacity - tiberium;
+      if (toMove === 0) continue;
+      this.setTiberiumCreditsForHouse(house, tiberium + toMove);
+    }
+  }
+
+  private computeSiloFillLevelsByHouse(): Map<House, number> {
+    const levels = new Map<House, number>();
+    for (const house of Object.values(House)) {
+      const capacity = this.calculateSiloCapacityForHouse(house);
+      if (capacity <= 0) continue;
+      levels.set(house, Math.max(0, Math.min(4, Math.floor(this.tiberiumCreditsForHouse(house) * 5 / capacity))));
+    }
+    return levels;
+  }
+
   /** Recalculate silo capacity when storage changes.
    *  C++ parity (house.cpp Adjust_Capacity): when capacity decreases and credits exceed
    *  the new capacity, excess credits are LOST (spilled). Both sell (Limbo) and destruction
    *  pass inanger=true in C++, meaning excess tiberium is not refunded.
    *  This creates economic risk — losing storage buildings costs you credits. */
   recalculateSiloCapacity(): void {
-    const oldCap = this.siloCapacity;
     this.siloCapacity = this.calculateSiloCapacity();
-    // C++ parity: Adjust_Capacity(-delta, true) — excess ore (Tiberium) is LOST.
-    // In C++, only the Tiberium (silo-stored) portion is affected; Credits are untouched.
-    // TS single-bucket approximation: stored = min(credits, oldCap) is the ore portion.
-    // Excess ore beyond new capacity is lost (spilled).
-    if (this.credits > this.siloCapacity) {
-      const stored = Math.min(this.credits, oldCap); // Tiberium portion
-      const excess = Math.max(0, stored - this.siloCapacity);
+    // C++ HouseClass::Adjust_Capacity spills only HouseClass::Tiberium.
+    // Initial Credits and refunds are uncapped cash and survive storage loss.
+    const excess = Math.max(0, this.tiberiumCredits - this.siloCapacity);
+    if (excess > 0) {
+      this.tiberiumCredits -= excess;
       this.credits -= excess;
     }
+  }
+
+  private recordPlayerCreditSpend(amount: number): void {
+    if (amount <= 0) return;
+    const oreSpent = Math.min(this.tiberiumCredits, amount);
+    this.tiberiumCredits -= oreSpent;
+  }
+
+  private syncPlayerCreditPools(nextCredits: number): void {
+    if (nextCredits < this.credits) {
+      this.recordPlayerCreditSpend(this.credits - nextCredits);
+    }
+    this.credits = nextCredits;
   }
 
   /** Add credits, capped to silo capacity. Returns amount actually added.
@@ -16651,11 +16953,12 @@ export class Game {
       return amount;
     }
     if (this.siloCapacity <= 0) return 0;
-    const before = this.credits;
-    this.credits = Math.min(this.credits + amount, this.siloCapacity);
-    const added = this.credits - before;
+    const before = this.tiberiumCredits;
+    this.tiberiumCredits = Math.min(this.tiberiumCredits + amount, this.siloCapacity);
+    const added = this.tiberiumCredits - before;
+    this.credits += added;
     // EVA "silos needed" warning — C++ house.cpp threshold: capacity > 500 && free < 300
-    if (this.siloCapacity > 500 && (this.siloCapacity - this.credits) < 300 &&
+    if (this.siloCapacity > 500 && (this.siloCapacity - this.tiberiumCredits) < 300 &&
         this.tick - this.lastSiloWarningTick >= 450) {
       this.lastSiloWarningTick = this.tick;
       this.playEva('eva_silos_needed');
@@ -17412,6 +17715,7 @@ export class Game {
     entity.missionTimer = 0;
 
     entity.logicIndexHint = this.logicIndexHintForNewObject();
+    this.prepareRuntimeEntityForInsertion(entity);
     this.setVehicleOccupancy(entity.cell.cx, entity.cell.cy, entity.id);
     this.markEntityCellOccupierDown(entity);
     this.entities.push(entity);
@@ -17609,6 +17913,7 @@ export class Game {
     // Sidebar data
     this.renderer.sidebarCredits = Math.floor(this.displayCredits);
     this.renderer.sidebarSiloCapacity = this.siloCapacity;
+    this.renderer.siloFillLevelByHouse = this.computeSiloFillLevelsByHouse();
     this.renderer.sidebarPowerProduced = this.powerProduced;
     this.renderer.sidebarPowerConsumed = this.powerConsumed;
     this.renderer.sidebarItems = this.getSidebarItems();
@@ -18474,14 +18779,12 @@ export class Game {
         displayStage = 0;
         break;
     }
-    s.doorFrame = Math.round(displayStage * 7 / 3);
+    s.doorFrame = displayStage;
   }
 
   /** C++ BuildingClass::Mission_Unload uses Open_Door/Close_Door(8, 5).
    *  DoorClass stores stages-1 internally, so the logical control stage runs
-   *  0..4 while Door_Stage renders 0..3. CDTimerClass starts from the current
-   *  frame, so the same TechnoClass::AI pass that calls Open_Door does not
-   *  spend the first tick of the delay. */
+   *  0..4 while Door_Stage renders 0..3. */
   private static readonly WEAP_DOOR_RATE_TICKS = 8;
 
   private openWeapDoor(s: MapStructure): void {
@@ -18492,7 +18795,8 @@ export class Game {
     if (state === CLOSED || state === CLOSING) {
       s.weapDoorState = OPENING;
       s.weapDoorStage = 0;
-      s.weapDoorTimer = Game.WEAP_DOOR_RATE_TICKS + 1;
+      s.weapDoorTimer = Game.WEAP_DOOR_RATE_TICKS;
+      s.weapDoorTimerStartedTick = this.tick;
       this.syncWeapDoorFrame(s);
     }
   }
@@ -18506,7 +18810,8 @@ export class Game {
     if (state === OPEN || state === OPENING) {
       s.weapDoorState = CLOSING;
       s.weapDoorStage = 0;
-      s.weapDoorTimer = Game.WEAP_DOOR_RATE_TICKS + 1;
+      s.weapDoorTimer = Game.WEAP_DOOR_RATE_TICKS;
+      s.weapDoorTimerStartedTick = this.tick;
       this.syncWeapDoorFrame(s);
     }
   }
@@ -18532,6 +18837,11 @@ export class Game {
       return;
     }
 
+    if (s.weapDoorTimerStartedTick === this.tick) {
+      this.syncWeapDoorFrame(s);
+      return;
+    }
+
     const timer = s.weapDoorTimer ?? Game.WEAP_DOOR_RATE_TICKS;
     if (timer > 1) {
       s.weapDoorTimer = timer - 1;
@@ -18543,8 +18853,10 @@ export class Game {
     if (s.weapDoorStage >= 4) {
       s.weapDoorState = state === OPENING ? OPEN : 0;
       s.weapDoorTimer = 0;
+      s.weapDoorTimerStartedTick = undefined;
     } else {
       s.weapDoorTimer = Game.WEAP_DOOR_RATE_TICKS;
+      s.weapDoorTimerStartedTick = this.tick;
     }
     this.syncWeapDoorFrame(s);
   }

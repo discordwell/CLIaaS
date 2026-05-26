@@ -481,6 +481,9 @@ describe('Visual effect sprites', () => {
     ['litning', 8],    // tesla lightning
     ['frag1', 14],     // fragment explosion
     ['art-exp1', 22],  // artillery explosion
+    ['gunfire', 3],    // C++ ANIM_MUZZLE_FLASH
+    ['minigun', 48],   // C++ ANIM_GUN_* directional firing effect
+    ['samfire', 144],  // C++ ANIM_SAM_* directional firing effect
   ];
 
   for (const [sprite, expected] of VFX_SPRITES) {
@@ -1093,7 +1096,7 @@ describe('Counterstrike/Aftermath expansion unit sprites', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 21. Units sharing sprites (GNRL, CHAN, THF → e1; E7 → e7; MECH → medi; etc.)
+// 21. Units sharing sprites (GNRL, CHAN → e1; E7 → e7; THF → thf; MECH → medi; etc.)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('Unit types that share sprites', () => {
@@ -1110,8 +1113,10 @@ describe('Unit types that share sprites', () => {
     expect(UNIT_STATS.E7.image).toBe('e7');
   });
 
-  it('THF (Thief) uses e1 sprite', () => {
-    expect(UNIT_STATS.THF.image).toBe('e1');
+  it('THF (Thief) uses the C++ THF.SHP sprite', () => {
+    // C++ RA idata.cpp: static InfantryTypeClass const E9(..., "THF", ...).
+    expect(UNIT_STATS.THF.image).toBe('thf');
+    expect(manifest.thf, 'thf missing from manifest').toBeDefined();
   });
 
   it('MECH (Mechanic) uses medi sprite', () => {

@@ -261,14 +261,14 @@ describe('Building armor: INI Armor= values (TS uses concrete for all — parity
 
 // ---------------------------------------------------------------------------
 // 4. Building sight range: INI Sight= vs TS STRUCTURE_SIGHT (fog.ts)
-//    TS fog.ts uses STRUCTURE_SIGHT[type] ?? 5 — per-building values from INI.
+//    TS fog.ts uses STRUCTURE_SIGHT[type] ?? 0, matching C++ TechnoTypeClass default.
 // ---------------------------------------------------------------------------
 describe('Building sight: INI Sight= vs TS STRUCTURE_SIGHT', () => {
   for (const type of MILITARY_BUILDINGS) {
     const iniSight = iniInt(type, 'Sight');
     if (iniSight === undefined) continue;
 
-    const tsSight = STRUCTURE_SIGHT[type] ?? 5;
+    const tsSight = STRUCTURE_SIGHT[type] ?? 0;
 
     it(`${type}: INI Sight=${iniSight}, TS STRUCTURE_SIGHT=${tsSight}`, () => {
       expect(tsSight).toBe(iniSight);

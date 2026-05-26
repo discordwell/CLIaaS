@@ -29,7 +29,7 @@ import { type Effect } from './renderer';
 import { type GameMap, MoveResult, Terrain } from './map';
 import { findPath } from './pathfinding';
 import { canTargetNaval } from './aircraft';
-import { combatAnim, entityTargetLeptons, entityTargetPixels } from './combat';
+import { combatAnim, entityTargetLeptons, entityTargetPixels, spawnWeaponFiringAnim } from './combat';
 import { ScenarioRandom } from './random';
 import { isScg01Jeep27DebugEnabled } from './perCellProcess';
 import { type LogicAnim, spawnLogicAnimForSprite } from './logicAnim';
@@ -1680,12 +1680,7 @@ export function updateAttack(ctx: MissionAIContext, entity: Entity): void {
         ctx.effects.push({ type: 'tesla', x: tx, y: ty, frame: 0, maxFrames: 8, size: 12,
           sprite: 'piffpiff', spriteStart: 0, startX: sx, startY: sy, endX: tx, endY: ty, blendMode: 'screen' } as Effect);
       } else {
-        // Muzzle flash at attacker — vehicles use GUNFIRE.SHP with screen blend (C++ isTranslucent)
-        const muzzleSprite = (!entity.stats.isInfantry && activeWeapon.warhead !== 'Fire') ? 'gunfire' : 'piff';
-        const muzzleBlend = (muzzleSprite === 'gunfire') ? 'screen' as const : undefined;
-        ctx.effects.push({ type: 'muzzle', x: sx, y: sy, frame: 0, maxFrames: 4, size: 5,
-          sprite: muzzleSprite, spriteStart: 0, muzzleColor: ctx.warheadMuzzleColor(activeWeapon.warhead),
-          blendMode: muzzleBlend } as Effect);
+        spawnWeaponFiringAnim(ctx, activeWeapon, fireCoord, fireDirection256, entity);
 
         // Projectile travel from attacker to impact point (scattered for inaccurate weapons)
         const projStyle = ctx.weaponProjectileStyle(activeWeapon.name);
@@ -3812,12 +3807,7 @@ export function updateAttackStructure(ctx: MissionAIContext, entity: Entity, s: 
       }
       consumeAmmoAfterSuccessfulFire(entity);
       ctx.playSoundAt(ctx.weaponSound(activeWeapon.name), entity.pos.x, entity.pos.y);
-      // Muzzle + impact effects (color by warhead — C++ parity)
-      ctx.effects.push({
-        type: 'muzzle', x: entity.pos.x, y: entity.pos.y,
-        frame: 0, maxFrames: 4, size: 5, sprite: 'piff', spriteStart: 0,
-        muzzleColor: ctx.warheadMuzzleColor(activeWeapon.warhead),
-      } as Effect);
+      spawnWeaponFiringAnim(ctx, activeWeapon, fireCoord, fireDirection256, entity);
       if (projectileWeapon) {
         const projStyle = ctx.weaponProjectileStyle(activeWeapon.name);
         const projCfg = projectileVisualConfig(activeWeapon.name);
@@ -4019,14 +4009,7 @@ export function updateForceFireGround(ctx: MissionAIContext, entity: Entity): vo
   consumeAmmoAfterSuccessfulFire(entity);
 
   ctx.playSoundAt(ctx.weaponSound(activeWeapon.name), entity.pos.x, entity.pos.y);
-  ctx.effects.push({
-    type: 'muzzle', x: entity.pos.x, y: entity.pos.y,
-    frame: 0, maxFrames: 4, size: 5,
-    sprite: (!entity.stats.isInfantry && activeWeapon.warhead !== 'Fire') ? 'gunfire' : 'piff',
-    spriteStart: 0,
-    muzzleColor: ctx.warheadMuzzleColor(activeWeapon.warhead),
-    blendMode: (!entity.stats.isInfantry && activeWeapon.warhead !== 'Fire') ? 'screen' : undefined,
-  } as Effect);
+  spawnWeaponFiringAnim(ctx, activeWeapon, fireCoord, fireDirection256, entity);
 
   if (projectileWeapon) {
     const projStyle = ctx.weaponProjectileStyle(activeWeapon.name);

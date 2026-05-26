@@ -308,6 +308,29 @@ describe('C++ parity: sidebar append/order lifecycle (building.cpp:2183, sidebar
     expect(items.map(i => i.type)).toEqual(['PROC', 'POWR', 'APWR', 'BARR']);
   });
 
+  it('appends right-strip buildables in active factory building order', () => {
+    // building.cpp:2183 Update_Buildables is called per active player building.
+    // A discovered TENT before WEAP appends infantry before vehicles even though
+    // the right strip later draws both RTTI_INFANTRYTYPE and RTTI_UNITTYPE.
+    const items = buildCppSidebarCandidates(
+      [prod('1TNK'), prod('APC'), prod('E1'), prod('E3'), prod('E6'), prod('MEDI')],
+      [],
+      [{ type: 'TENT' }, { type: 'WEAP' }],
+    );
+    expect(items.map(i => i.type)).toEqual(['E1', 'E3', 'E6', 'MEDI', '1TNK', 'APC']);
+  });
+
+  it('kennel source only appends DOG infantry', () => {
+    // building.cpp:2216-2223 filters dog cameos to STRUCT_KENNEL only; normal
+    // infantry factories append non-dog infantry only.
+    const items = buildCppSidebarCandidates(
+      [prod('E1'), prod('DOG')],
+      [],
+      [{ type: 'KENN' }],
+    );
+    expect(items.map(i => i.type)).toEqual(['DOG']);
+  });
+
   it('vessel candidates follow C++ VesselType enum order', () => {
     // defines.h: VESSEL_SS precedes VESSEL_TRANSPORT. SCU08EA right strip is
     // SUBMARINE then TRANSPORT even though PRODUCTION_ITEMS lists LST earlier.
@@ -315,9 +338,9 @@ describe('C++ parity: sidebar append/order lifecycle (building.cpp:2183, sidebar
     expect(items.map(i => i.type)).toEqual(['SS', 'LST']);
   });
 
-  it('initial right strip includes RTTI_SPECIAL entries before aircraft buildables', () => {
-    // C++ house.cpp adds SPC_SPY_MISSION to Map.Column[1], and sidebar.cpp
-    // draws RTTI_SPECIAL from SpecialWeaponFile[] just like a production cameo.
+  it('special cameos append after ScenarioInit buildables', () => {
+    // scenario.cpp Fill_In_Data calls BuildingClass::Update_Buildables during
+    // ScenarioInit; HouseClass::Super_Weapon_Handler adds RTTI_SPECIAL later.
     const spyState: SuperweaponState = {
       type: SuperweaponType.SPY_PLANE,
       house: 'USSR' as House,
@@ -329,8 +352,9 @@ describe('C++ parity: sidebar append/order lifecycle (building.cpp:2183, sidebar
     const items = buildCppSidebarCandidates(
       [prod('MIG'), prod('YAK')],
       [makeSidebarSpecialItem(spyState)],
+      [{ type: 'AFLD' }],
     );
-    expect(items.map(i => i.type)).toEqual(['SPECIAL:SPY_PLANE', 'MIG', 'YAK']);
+    expect(items.map(i => i.type)).toEqual(['MIG', 'YAK', 'SPECIAL:SPY_PLANE']);
   });
 
   it('keeps existing strip entries in place and appends newly available items', () => {
@@ -339,6 +363,41 @@ describe('C++ parity: sidebar append/order lifecycle (building.cpp:2183, sidebar
     const initial = reconcileCppSidebarItems([], [prod('POWR')], []);
     const afterPower = reconcileCppSidebarItems(initial, [prod('POWR'), prod('PROC')], []);
     expect(afterPower.map(i => i.type)).toEqual(['POWR', 'PROC']);
+  });
+
+  it('does not remove existing cameos just because prerequisites are no longer satisfied', () => {
+    // sidebar.cpp:1885 calls Who_Can_Build_Me(intheory=true, legal=false).
+    // After a cameo is added, Recalc only requires a matching factory to exist;
+    // it does not re-run prerequisite/tech Can_Build checks.
+    const initial = reconcileCppSidebarItems(
+      [],
+      [prod('WEAP'), prod('DOME'), prod('PROC'), prod('POWR')],
+      [],
+      [{ type: 'FACT' }],
+    );
+    const afterPrereqLoss = reconcileCppSidebarItems(
+      initial,
+      [prod('PROC'), prod('POWR')],
+      [],
+      [{ type: 'FACT' }],
+    );
+    expect(afterPrereqLoss.map(i => i.type)).toEqual(['WEAP', 'DOME', 'PROC', 'POWR']);
+  });
+
+  it('removes existing cameos when no matching factory remains', () => {
+    const initial = reconcileCppSidebarItems(
+      [],
+      [prod('WEAP'), prod('E1')],
+      [],
+      [{ type: 'FACT' }, { type: 'TENT' }],
+    );
+    const afterFactoryLoss = reconcileCppSidebarItems(
+      initial,
+      [prod('WEAP'), prod('E1')],
+      [],
+      [{ type: 'FACT' }],
+    );
+    expect(afterFactoryLoss.map(i => i.type)).toEqual(['WEAP']);
   });
 
   it('uses const.cpp SpecialWeaponFile names for special weapon icon assets', () => {

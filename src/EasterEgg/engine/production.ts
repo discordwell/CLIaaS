@@ -11,7 +11,7 @@ import {
   COUNTRY_BONUSES, UNIT_STATS,
   worldToCell, pixelToLepton,
 } from './types';
-import { Entity } from './entity';
+import { Entity, aircraftPoseDir256, setAircraftUnlimboFacing256 } from './entity';
 import { type MapStructure, STRUCTURE_SIZE } from './scenario';
 import { type GameMap } from './map';
 import { findPath } from './pathfinding';
@@ -19,6 +19,11 @@ import { findPath } from './pathfinding';
 // ── Local constants ──────────────────────────────────────────────────────────
 
 const WALL_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK']);
+const NEW_UNITS_GATED_TYPES = new Set([
+  'SHOK', 'MECH',
+  'CTNK', 'TTNK', 'QTNK', 'DTRK', 'STNK',
+  'MSUB', 'CARR',
+]);
 
 // ── Context interface ────────────────────────────────────────────────────────
 
@@ -33,6 +38,8 @@ export interface ProductionContext {
   /** Legacy compatibility field; C++ production is not gated by base discovery. */
   baseDiscovered?: boolean;
   scenarioProductionItems: ProductionItem[];
+  /** C++ global NewUnitsEnabled gate for Counterstrike/Aftermath-only buildables. */
+  newUnitsEnabled?: boolean;
   productionQueue: Map<string, { item: ProductionItem; progress: number; queueCount: number; costPaid: number; powerMult: number }>;
   pendingPlacement: ProductionItem | null;
   wallPlacementPrepaid: boolean;
@@ -148,6 +155,9 @@ export function countPlayerBuildings(
 /** Get buildable items based on current structures + faction + tech prereqs */
 export function getAvailableItems(ctx: ProductionContext): ProductionItem[] {
   return ctx.scenarioProductionItems.filter(item => {
+    // C++ HouseClass::Can_Build rejects CSII-only infantry/unit/vessel types
+    // unless NewUnitsEnabled was enabled by scenario rules or multiplayer setup.
+    if (!ctx.newUnitsEnabled && NEW_UNITS_GATED_TYPES.has(item.type)) return false;
     // BuildingTypeClass production requires an active construction yard/factory.
     // Tech prerequisites such as PROC/ATEK unlock specific buildings, but they
     // do not themselves create the building production factory.
@@ -325,9 +335,18 @@ export function spawnProducedUnit(ctx: ProductionContext, item: ProductionItem):
   let spawnX: number, spawnY: number;
   if (unitStats?.isAircraft) {
     const [padW, padH] = STRUCTURE_SIZE[factory.type] ?? [2, 2];
-    spawnX = (factory.cx + padW / 2) * CELL_SIZE;
-    spawnY = (factory.cy + padH / 2) * CELL_SIZE;
+    if (factory.type === 'HPAD') {
+      spawnX = factory.cx * CELL_SIZE + 24;
+      spawnY = factory.cy * CELL_SIZE + 18;
+    } else if (factory.type === 'AFLD') {
+      spawnX = factory.cx * CELL_SIZE + CELL_SIZE + CELL_SIZE / 2;
+      spawnY = factory.cy * CELL_SIZE + 28;
+    } else {
+      spawnX = (factory.cx + padW / 2) * CELL_SIZE;
+      spawnY = (factory.cy + padH / 2) * CELL_SIZE;
+    }
     const entity = new Entity(unitType, ctx.playerHouse, spawnX, spawnY);
+    setAircraftUnlimboFacing256(entity, aircraftPoseDir256(entity));
     entity.mission = Mission.GUARD;
     entity.aircraftState = 'landed';
     entity.flightAltitude = 0;

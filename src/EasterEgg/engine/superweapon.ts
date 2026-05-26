@@ -6,7 +6,7 @@
 
 import {
   type WorldPos, CELL_SIZE,
-  type House, UnitType, Mission,
+  House, UnitType, Mission,
   SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponState,
   IRON_CURTAIN_DURATION, IRON_CURTAIN_DEMO_TRUCK_DURATION,
   NUKE_DAMAGE, NUKE_BLAST_CELLS, NUKE_FLIGHT_TICKS,
@@ -59,6 +59,8 @@ export interface SuperweaponContext {
   powerProduced: number;
   powerConsumed: number;
   houseTechLevel?: (house: House) => number;
+  /** C++ BuildingTypeClass::Level for a provider structure after scenario INI overrides. */
+  structureTechLevel?: (type: string) => number | undefined;
   /** C++ RulesClass::GPSTechLevel, overridden by scenario [General] GPSTechLevel=. */
   gpsTechLevel?: number;
   airstripSpecialTechLevels?: {
@@ -104,6 +106,10 @@ export interface SuperweaponContext {
   getWarheadMult(warhead: string, armor: string): number;
   /** C++ TechnoClass::Do_Uncloak flags a complete radar redraw from CLOAKED. */
   markCloakRedraw?(entity: Entity): void;
+  /** C++ HouseClass::Recalc_Attributes ActiveBScan gate for provider structures. */
+  isStructureActiveForHouseScan?(structure: MapStructure, index: number): boolean;
+  /** C++ Session.Type == GAME_NORMAL for campaign scenarios by default. */
+  isNormalGame?: boolean;
 
   // Camera info for GPS sweep effect
   cameraX: number;
@@ -146,6 +152,20 @@ function isAirstripSpecialAvailable(ctx: SuperweaponContext, type: SuperweaponTy
 }
 
 function isSuperweaponProviderAvailable(ctx: SuperweaponContext, type: SuperweaponType, house: House): boolean {
+  const isNormalGame = ctx.isNormalGame ?? true;
+  if (type === SuperweaponType.CHRONOSPHERE) {
+    const techLevel = ctx.houseTechLevel?.(house) ?? Number.POSITIVE_INFINITY;
+    // C++ house.cpp:1636-1639 gates Chronosphere availability with
+    // BuildingTypeClass::As_Reference(STRUCT_CHRONOSPHERE).Level. The older
+    // Rule.ChronoTechLevel gate is present but commented out in the source.
+    return techLevel >= (ctx.structureTechLevel?.('PDOX') ?? 12);
+  }
+  if (type === SuperweaponType.IRON_CURTAIN) {
+    return !isNormalGame || house === House.USSR || house === House.Ukraine;
+  }
+  if (type === SuperweaponType.NUKE) {
+    return !isNormalGame || (house !== House.USSR && house !== House.Ukraine);
+  }
   if (type === SuperweaponType.GPS_SATELLITE) {
     const techLevel = ctx.houseTechLevel?.(house) ?? Number.POSITIVE_INFINITY;
     return techLevel >= (ctx.gpsTechLevel ?? DEFAULT_GPS_TECH_LEVEL);
@@ -169,6 +189,7 @@ export function updateSuperweapons(ctx: SuperweaponContext): void {
   for (let i = 0; i < ctx.structures.length; i++) {
     const s = ctx.structures[i];
     if (!s.alive || (s.buildProgress !== undefined && s.buildProgress < 1)) continue;
+    if (ctx.isStructureActiveForHouseScan && !ctx.isStructureActiveForHouseScan(s, i)) continue;
 
     // Check each superweapon def to see if this structure provides it
     for (const def of Object.values(SUPERWEAPON_DEFS)) {

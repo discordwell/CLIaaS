@@ -576,6 +576,26 @@ describe('classifyInteriorTerrain with tilesetMeta (per-icon C++ parity)', () =>
     expect(interiorTilesetMeta.tiles['397,2']?.lt).toBeUndefined();
     expect(map.getTerrain(5, 5)).toBe(Terrain.CLEAR);
   });
+
+  it('classifies INTERIOR MapPack terrain outside the playable rectangle', () => {
+    const map = new GameMap();
+    map.setBounds(40, 38, 43, 41);
+    map.initDefault();
+
+    const templateType = new Uint16Array(MAP_CELLS * MAP_CELLS);
+    const templateIcon = new Uint8Array(MAP_CELLS * MAP_CELLS);
+    const idx = 36 * MAP_CELLS + 82;
+    templateType[idx] = 253;
+
+    map.templateType = templateType;
+    map.templateIcon = templateIcon;
+    expect(map.inBounds(82, 36)).toBe(false);
+    expect(map.getTerrain(82, 36)).toBe(Terrain.ROCK);
+
+    classifyInteriorTerrain(map, templateType, templateIcon, interiorTilesetMeta);
+
+    expect(map.getTerrain(82, 36)).toBe(Terrain.CLEAR);
+  });
 });
 
 // =============================================================================

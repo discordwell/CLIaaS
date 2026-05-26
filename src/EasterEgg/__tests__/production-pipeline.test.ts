@@ -1483,6 +1483,10 @@ describe('Behavioral verification — production.ts exported functions', () => {
     expect(unit.type).toBe('HELI');
     expect(unit.aircraftState).toBe('landed');
     expect(unit.flightAltitude).toBe(0);
+    expect(unit.bodyFacing256).toBe(32);
+    expect(unit.desiredFacing256).toBe(32);
+    expect(unit.turretFacing256).toBe(32);
+    expect(unit.desiredTurretFacing256).toBe(32);
     expect(unit.landedAtStructure).toBeDefined();
     expect(helipad.dockedAircraft).toBe(unit.id);
     expect(ctx.builtAircraftTypes.has('HELI')).toBe(true);

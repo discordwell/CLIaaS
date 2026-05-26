@@ -122,7 +122,7 @@ describe('superweapon charges at full rate with full power (house.cpp:1410-1411)
   });
 
   it('IRON charges 1 tick per update when power is sufficient', () => {
-    const iron = makeStructure('IRON', 10, 10, House.Spain);
+    const iron = makeStructure('IRON', 10, 10, House.USSR);
     const ctx = makeSwContext({
       structures: [iron],
       powerProduced: 300,
@@ -130,13 +130,45 @@ describe('superweapon charges at full rate with full power (house.cpp:1410-1411)
     });
 
     updateSuperweapons(ctx);
-    const key = `${House.Spain}:${SuperweaponType.IRON_CURTAIN}`;
+    const key = `${House.USSR}:${SuperweaponType.IRON_CURTAIN}`;
     const state = ctx.superweapons.get(key);
     expect(state).toBeDefined();
     const tick1 = state!.chargeTick;
 
     updateSuperweapons(ctx);
     expect(state!.chargeTick - tick1).toBe(1);
+  });
+
+  it('normal-game BadGuy IRON does not enable Iron Curtain', () => {
+    // house.cpp:1600-1604 gates SPC_IRON_CURTAIN to ActLike USSR/Ukraine
+    // during GAME_NORMAL. BadGuy owns Soviet tech but is not ActLike USSR.
+    const iron = makeStructure('IRON', 10, 10, House.BadGuy);
+    const ctx = makeSwContext({
+      structures: [iron],
+      playerHouse: House.BadGuy,
+      powerProduced: 300,
+      powerConsumed: 200,
+    });
+
+    updateSuperweapons(ctx);
+
+    expect(ctx.superweapons.has(`${House.BadGuy}:${SuperweaponType.IRON_CURTAIN}`)).toBe(false);
+  });
+
+  it('normal-game USSR MSLO does not enable nuclear missile', () => {
+    // house.cpp:1682-1685 enables SPC_NUCLEAR_BOMB only when ActLike is not
+    // USSR/Ukraine during GAME_NORMAL.
+    const mslo = makeStructure('MSLO', 10, 10, House.USSR);
+    const ctx = makeSwContext({
+      structures: [mslo],
+      playerHouse: House.USSR,
+      powerProduced: 300,
+      powerConsumed: 200,
+    });
+
+    updateSuperweapons(ctx);
+
+    expect(ctx.superweapons.has(`${House.USSR}:${SuperweaponType.NUKE}`)).toBe(false);
   });
 
   it('charging accumulates over multiple updates', () => {
@@ -189,7 +221,7 @@ describe('superweapon charging fully suspends at low power (house.cpp:1410-1411)
   });
 
   it('IRON does not charge when power consumed > produced', () => {
-    const iron = makeStructure('IRON', 10, 10, House.Spain);
+    const iron = makeStructure('IRON', 10, 10, House.USSR);
     const ctx = makeSwContext({
       structures: [iron],
       powerProduced: 100,
@@ -197,7 +229,7 @@ describe('superweapon charging fully suspends at low power (house.cpp:1410-1411)
     });
 
     updateSuperweapons(ctx);
-    const key = `${House.Spain}:${SuperweaponType.IRON_CURTAIN}`;
+    const key = `${House.USSR}:${SuperweaponType.IRON_CURTAIN}`;
     const state = ctx.superweapons.get(key);
     expect(state).toBeDefined();
     const chargeAfterFirst = state!.chargeTick;
@@ -323,7 +355,7 @@ describe('superweapon charging resumes when power restored (super.cpp:102-121)',
 describe('charge progress preserved during outage — not reset (super.cpp:102-121)', () => {
 
   it('charge does not reset to 0 when power goes out', () => {
-    const iron = makeStructure('IRON', 10, 10, House.Spain);
+    const iron = makeStructure('IRON', 10, 10, House.USSR);
     const ctx = makeSwContext({
       structures: [iron],
       powerProduced: 300,
@@ -332,7 +364,7 @@ describe('charge progress preserved during outage — not reset (super.cpp:102-1
 
     // Charge to 40
     for (let i = 0; i < 40; i++) updateSuperweapons(ctx);
-    const key = `${House.Spain}:${SuperweaponType.IRON_CURTAIN}`;
+    const key = `${House.USSR}:${SuperweaponType.IRON_CURTAIN}`;
     const state = ctx.superweapons.get(key)!;
     expect(state.chargeTick).toBe(40);
 
@@ -387,7 +419,7 @@ describe('multiple superweapons all suspend simultaneously (house.cpp:1392-1414)
 
   it('MSLO and IRON both stop charging during shared power outage', () => {
     const mslo = makeStructure('MSLO', 10, 10, House.Spain);
-    const iron = makeStructure('IRON', 14, 10, House.Spain);
+    const iron = makeStructure('IRON', 14, 10, House.USSR);
     const ctx = makeSwContext({
       structures: [mslo, iron],
       powerProduced: 500,
@@ -397,7 +429,7 @@ describe('multiple superweapons all suspend simultaneously (house.cpp:1392-1414)
     // Charge both for 20 ticks
     for (let i = 0; i < 20; i++) updateSuperweapons(ctx);
     const nukeKey = `${House.Spain}:${SuperweaponType.NUKE}`;
-    const icKey = `${House.Spain}:${SuperweaponType.IRON_CURTAIN}`;
+    const icKey = `${House.USSR}:${SuperweaponType.IRON_CURTAIN}`;
     const nukeState = ctx.superweapons.get(nukeKey)!;
     const icState = ctx.superweapons.get(icKey)!;
     expect(nukeState.chargeTick).toBe(20);
@@ -416,7 +448,7 @@ describe('multiple superweapons all suspend simultaneously (house.cpp:1392-1414)
 
   it('all superweapons resume simultaneously when power restored', () => {
     const mslo = makeStructure('MSLO', 10, 10, House.Spain);
-    const iron = makeStructure('IRON', 14, 10, House.Spain);
+    const iron = makeStructure('IRON', 14, 10, House.USSR);
     const ctx = makeSwContext({
       structures: [mslo, iron],
       powerProduced: 500,
@@ -426,7 +458,7 @@ describe('multiple superweapons all suspend simultaneously (house.cpp:1392-1414)
     // Charge both for 15 ticks
     for (let i = 0; i < 15; i++) updateSuperweapons(ctx);
     const nukeKey = `${House.Spain}:${SuperweaponType.NUKE}`;
-    const icKey = `${House.Spain}:${SuperweaponType.IRON_CURTAIN}`;
+    const icKey = `${House.USSR}:${SuperweaponType.IRON_CURTAIN}`;
     const nukeState = ctx.superweapons.get(nukeKey)!;
     const icState = ctx.superweapons.get(icKey)!;
 

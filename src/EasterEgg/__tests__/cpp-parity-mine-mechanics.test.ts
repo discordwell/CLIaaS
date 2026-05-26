@@ -716,6 +716,30 @@ describe('mine detonation: vehicle triggers', () => {
     expect(mine.alive).toBe(false);
     expect(mine.hp).toBe(0);
   });
+
+  it('scenario BuildingClass mine detonation runs Limbo power redraw hook — C++ delete bldng', () => {
+    const vehicle = makeVehicle(House.USSR, 10, 10);
+    const mine = {
+      type: 'MINV',
+      house: House.Spain,
+      cx: 10,
+      cy: 10,
+      hp: 1,
+      maxHp: 1,
+      alive: true,
+      rubble: false,
+    } as any;
+    const limboed: any[] = [];
+    const ctx = makeContext({
+      entities: [vehicle],
+      structures: [mine],
+      markPowerRedrawForStructureLimbo: (structure) => limboed.push(structure),
+    }) as SpecialUnitsContext & { _damaged: any[] };
+
+    triggerMineAtCell(ctx, vehicle);
+
+    expect(limboed).toEqual([mine]);
+  });
 });
 
 // =============================================================================

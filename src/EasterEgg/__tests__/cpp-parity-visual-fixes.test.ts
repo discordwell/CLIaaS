@@ -29,18 +29,16 @@ describe('War Factory door tracking — C++ building.cpp Door_Stage()', () => {
     expect(rendererSrc).not.toContain('const doorFrame = 0; // TODO');
     // Should reference s.doorFrame for the door animation state
     expect(rendererSrc).toContain('s.doorFrame');
-    // Should check sidebarQueue for 'unit' production to drive door state
-    expect(rendererSrc).toContain("sidebarQueue.has('unit')");
+    // Rendering should not advance DoorClass state from sidebar production.
+    expect(rendererSrc).not.toContain("sidebarQueue.has('unit')");
   });
 
-  it('door frame range is 0 (closed) to 7 (open) matching C++ WEAP2.SHP 8 frames', async () => {
-    const rendererSrc = readFileSync(
-      join(__dirname, '../engine/renderer.ts'), 'utf-8'
+  it('door logic uses C++ Door_Stage frames 0..3 rather than stretching across all WEAP2.SHP frames', async () => {
+    const indexSrc = readFileSync(
+      join(__dirname, '../engine/index.ts'), 'utf-8'
     );
-    // C++ building.cpp Door_Stage() returns 0-7
-    // Check that the code clamps to valid range
-    expect(rendererSrc).toContain('Math.min(7,');
-    expect(rendererSrc).toContain('Math.max(0,');
+    expect(indexSrc).toContain('s.doorFrame = displayStage');
+    expect(indexSrc).not.toContain('displayStage * 7 / 3');
   });
 });
 

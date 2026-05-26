@@ -192,6 +192,7 @@ test(`${SCENARIO} region trace ${REGION.minX},${REGION.minY}-${REGION.maxX},${RE
           tick: s.tick,
           rngState: s.rngState,
           rngCalls: s.rngCalls,
+          radarInfo: JSON.parse(M.ccall('agent_get_radar_info', 'string', [], [])),
           alliedHouses: s.alliedHouses ?? [],
           units: localUnits,
           structures: (s.structures ?? []).filter((st: { cx?: number; cy?: number }) => inBox(Number(st.cx), Number(st.cy))),
@@ -423,6 +424,8 @@ test(`${SCENARIO} region trace ${REGION.minX},${REGION.minY}-${REGION.maxX},${RE
               templateType: map?.templateType?.[cellIndex],
               templateIcon: map?.templateIcon?.[cellIndex],
               overlay: map?.overlay?.[cellIndex],
+              visibility: (map as { visibility?: Uint8Array | number[] } | undefined)?.visibility?.[cellIndex],
+              displayVisibility: (map as { displayVisibility?: Uint8Array | number[] } | undefined)?.displayVisibility?.[cellIndex],
               occupancy: map?.getOccupancy?.(cx, cy) ?? 0,
               reservation: map?.getVehicleTrackReservation?.(cx, cy) ?? 0,
             });
@@ -430,6 +433,7 @@ test(`${SCENARIO} region trace ${REGION.minX},${REGION.minY}-${REGION.maxX},${RE
         }
         return {
           tick: game.tick,
+          camera: (game as unknown as { camera?: { x: number; y: number; screenX: number; screenY: number; viewWidth: number; viewHeight: number } }).camera,
           playerHouse: game.playerHouse,
           alliedHouses: state.alliedHouses ?? [],
           rngState: state.rngState,

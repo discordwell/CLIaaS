@@ -7,10 +7,10 @@
 import { CELL_SIZE, GAME_TICKS_PER_SEC, RESFACTOR, LEPTON_SIZE, House, Stance, UnitType, BODY_SHAPE, type ProductionItem, type SidebarItem, CursorType, TEMPLATE_ROAD_MIN, TEMPLATE_ROAD_MAX, SuperweaponType, SUPERWEAPON_DEFS, type SuperweaponDef, type SuperweaponState, CHRONO_SHIFT_VISUAL_TICKS, IC_TARGET_RANGE, type StripType, getStripSide, getFactoryType, isSidebarSpecialItem, leptonToPixel, type Faction, COS_TABLE_256, SIN_TABLE_256, CPP_CORPSE_FRAME_COUNT, CPP_CORPSE_FRAME_TICKS, cppCorpseAnimForInfantryDeath, Mission } from './types';
 import { type Camera } from './camera';
 import { type AssetManager, type DrawFrameOptions, type SpriteSheet, type TilesetMeta, type TranslucentControl } from './assets';
-import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES, dir256ToFacing8 } from './entity';
-import { GameMap, Terrain, TREE_CENTER_OFFSET, TERRAIN_OBJECT_CENTER_OFFSET, type MapTerrainRadarObject } from './map';
+import { Entity, RECOIL_OFFSETS, CloakState, CLOAK_TRANSITION_FRAMES, dir256ToFacing8, dir256ToFacing32 } from './entity';
+import { GameMap, Terrain, TREE_CENTER_OFFSET, TREE_OCCUPY, TREE_OVERLAP, TERRAIN_OBJECT_CENTER_OFFSET, type MapTerrainRadarObject } from './map';
 import { type InputState } from './input';
-import { type MapStructure, STRUCTURE_SIZE, getBibCells, getStructureOccupyCells, structureCenterLeptons, structureUsesHouseRemap } from './scenario';
+import { type MapStructure, STRUCTURE_SIZE, getBibCells, getStructureOccupyCells, isMineStructureType, structureCenterLeptons, structureUsesHouseRemap } from './scenario';
 import { SHADOW_TABLE, cellShadowIndex, shadowTransFadeForRGBA, RA_COLOR_BLACK, RA_COLOR_DKGREY, RA_COLOR_LTGREY, RA_COLOR_WHITE, RA_COLOR_YELLOW, makeFadingTable, makeRemapFadingTable, nearestPaletteIndex } from './shadow';
 import { NonCriticalRandom } from './random';
 import { RA_MESSAGE_DELAY_TICKS } from './tutorialText';
@@ -33,6 +33,41 @@ function dir256ToFacing16(dir: number): number {
 function rotation16(dir: number): number {
   const raw = dir & 0x0f;
   return raw <= 7 ? raw : raw - 16;
+}
+
+enum TechnoVisual {
+  NORMAL = 0,
+  INDISTINCT = 1,
+  DARKEN = 2,
+  SHADOWY = 3,
+  RIPPLE = 4,
+  HIDDEN = 5,
+}
+
+function cppCloakVisualCharacter(entity: Entity): TechnoVisual {
+  if (!entity.stats.isCloakable || entity.cloakState === CloakState.UNCLOAKED) {
+    return TechnoVisual.NORMAL;
+  }
+
+  if (entity.cloakState === CloakState.CLOAKED) {
+    return entity.isPlayerUnit ? TechnoVisual.SHADOWY : TechnoVisual.HIDDEN;
+  }
+
+  let stage = 0;
+  if (entity.cloakState === CloakState.CLOAKING) {
+    stage = CLOAK_TRANSITION_FRAMES - entity.cloakTimer;
+  } else if (entity.cloakState === CloakState.UNCLOAKING) {
+    stage = entity.cloakTimer;
+  }
+  if (stage <= 0) return TechnoVisual.NORMAL;
+
+  const rawStage = Math.trunc((stage * 256) / CLOAK_TRANSITION_FRAMES);
+  if (rawStage < 0x0040) return TechnoVisual.INDISTINCT;
+  if (rawStage < 0x0080) return TechnoVisual.DARKEN;
+  if (rawStage < 0x00c0) return TechnoVisual.SHADOWY;
+  if (entity.isPlayerUnit) return TechnoVisual.SHADOWY;
+  if (rawStage < 0x00ff) return TechnoVisual.RIPPLE;
+  return TechnoVisual.HIDDEN;
 }
 
 function vesselBodyFrame(entity: Entity, fallbackFacing32: number, frameCount: number): number {
@@ -88,6 +123,25 @@ function aircraftShapeRotation(entity: Entity): number {
   return rotation16(secondaryFacing256);
 }
 
+export function cppAntUnitFrame(
+  entity: Pick<Entity, 'bodyFacing256' | 'bodyFacing32' | 'isDriving' | 'attackCooldown' | 'cppUnitIndexHint' | 'id'>,
+  tick: number,
+): number {
+  const facing256 = entity.bodyFacing256 >= 0
+    ? entity.bodyFacing256 & 0xff
+    : (entity.bodyFacing32 * 8) & 0xff;
+  const shapeFacing = ((BODY_SHAPE[dir256ToFacing32(facing256)] ?? 0) + 2) >> 2;
+  const quadrant = shapeFacing & 0x07;
+  const unitHeapId = entity.cppUnitIndexHint ?? Math.max(0, entity.id - 1);
+  if (entity.isDriving) {
+    return 8 + quadrant * 8 + (Math.trunc((tick + unitHeapId) / 2) % 8);
+  }
+  if (entity.attackCooldown > 0) {
+    return 8 + 64 + quadrant * 4 + (Math.trunc((tick + unitHeapId) / 2) % 4);
+  }
+  return quadrant;
+}
+
 function cppEntityRenderSortKey(entity: Entity): number {
   // C++ ObjectClass::operator< compares Sort_Y() as a packed COORDINATE:
   // high word = Y leptons, low word = X leptons. That means equal-Y objects
@@ -102,10 +156,9 @@ function cppEntityRenderSortKey(entity: Entity): number {
 }
 
 function cppEntityRenderLayer(entity: Entity): 'ground' | 'top' {
-  // C++ ObjectClass::In_Which_Layer keeps objects below
-  // FLIGHT_LEVEL-(FLIGHT_LEVEL/3) in LAYER_GROUND. AircraftClass promotes
-  // fixed-wing aircraft to LAYER_TOP as soon as Height is non-zero.
-  if (!entity.stats.isAircraft) return 'ground';
+  // C++ ObjectClass::In_Which_Layer keeps all objects below
+  // FLIGHT_LEVEL-(FLIGHT_LEVEL/3) in LAYER_GROUND. AircraftClass only adds the
+  // fixed-wing special case: any non-zero Height goes to LAYER_TOP.
   const height = entity.objectHeightLeptons();
   if (entity.stats.isFixedWing && height > 0) return 'top';
   const topThreshold = Entity.FLIGHT_LEVEL_LEPTONS - Math.floor(Entity.FLIGHT_LEVEL_LEPTONS / 3);
@@ -170,6 +223,40 @@ const HARVESTER_DUMP_LIST: readonly number[] = [
 ];
 const HARVESTER_LOAD_LIST: readonly number[] = [0, 1, 2, 3, 4, 5, 6, 7, 0];
 const DIR_S_256 = 128;
+const MGG_RADAR_DISH_ADJUST: readonly { dx: number; dy: number }[] = [
+  { dx: 1, dy: 2 },
+  { dx: -1, dy: 1 },
+  { dx: -2, dy: 0 },
+  { dx: -3, dy: 0 },
+  { dx: -3, dy: 1 },
+  { dx: -4, dy: -1 },
+  { dx: -4, dy: -1 },
+  { dx: -5, dy: -2 },
+  { dx: -5, dy: -3 },
+  { dx: -5, dy: -3 },
+  { dx: -3, dy: -3 },
+  { dx: -3, dy: -4 },
+  { dx: -3, dy: -4 },
+  { dx: -3, dy: -5 },
+  { dx: -2, dy: -5 },
+  { dx: -1, dy: -5 },
+  { dx: 0, dy: -5 },
+  { dx: 1, dy: -6 },
+  { dx: 2, dy: -5 },
+  { dx: 3, dy: -5 },
+  { dx: 4, dy: -5 },
+  { dx: 6, dy: -4 },
+  { dx: 6, dy: -3 },
+  { dx: 6, dy: -3 },
+  { dx: 6, dy: -3 },
+  { dx: 5, dy: -1 },
+  { dx: 5, dy: -1 },
+  { dx: 4, dy: 0 },
+  { dx: 3, dy: 0 },
+  { dx: 2, dy: 0 },
+  { dx: 2, dy: 1 },
+  { dx: 1, dy: 2 },
+] as const;
 
 // Radar blip colors: C++ radar.cpp uses ColorRemaps[house->RemapColor].Bar.
 // init.cpp fills Bar from PALETTE.CPS column 6; RGBClass exposes 6-bit VGA as value*4.
@@ -195,6 +282,60 @@ export const HOUSE_MINIMAP_COLOR: Record<string, string> = {
   [House.Multi7]: 'rgb(64,132,116)',   // PCOLOR_BLUE
   [House.Multi8]: 'rgb(152,76,56)',    // PCOLOR_BROWN
 };
+
+export interface EntitySpriteRenderSpec {
+  sheetName: string;
+  remapHouse: string;
+}
+
+/** C++ spy disguise rendering:
+ *  - infantry.cpp:Get_Image_Data returns E1.SHP for spies not owned by PlayerPtr
+ *  - techno.cpp:Techno_Draw_Object remaps those spies through PlayerPtr's remap table */
+export function entitySpriteRenderSpec(
+  entity: Pick<Entity, 'stats' | 'type' | 'house'>,
+  playerHouse: House,
+): EntitySpriteRenderSpec {
+  if (entity.stats.isInfantry && entity.type === UnitType.I_SPY && entity.house !== playerHouse) {
+    return { sheetName: 'e1', remapHouse: playerHouse };
+  }
+  return { sheetName: entity.stats.image, remapHouse: entity.house };
+}
+
+export interface UnitRadarDishRenderSpec {
+  frame: number;
+  dx: number;
+  dy: number;
+}
+
+export function unitRadarDishRenderSpec(
+  entity: Pick<Entity, 'stats' | 'type' | 'bodyFacing256' | 'bodyFacing32'>,
+  tick: number,
+  frameCount: number,
+): UnitRadarDishRenderSpec | null {
+  if (!entity.stats.isRadarEquipped || frameCount <= 32) return null;
+
+  // C++ UnitClass::Draw_It reads global Frame during the pre-Logic render.
+  // Game.step() passes that same pre-Logic frame to the renderer, then advances
+  // game.tick after drawing.
+  const renderFrame = Math.max(0, tick);
+  if (entity.type === UnitType.V_MGG) {
+    const facing256 = entity.bodyFacing256 >= 0
+      ? entity.bodyFacing256 & 0xff
+      : (entity.bodyFacing32 * 8) & 0xff;
+    const adjust = MGG_RADAR_DISH_ADJUST[dir256ToFacing32(facing256)] ?? { dx: 0, dy: 0 };
+    return {
+      frame: (32 + (renderFrame & 7)) % frameCount,
+      dx: adjust.dx,
+      dy: adjust.dy,
+    };
+  }
+
+  return {
+    frame: (32 + (renderFrame % 32)) % frameCount,
+    dx: 0,
+    dy: entity.type === UnitType.V_TTNK ? 0 : -5,
+  };
+}
 
 // C++ TACTION_TEXT_TRIGGER: PCOLOR_GREEN with TPF_6PT_GRAD|TPF_USE_GRAD_PAL.
 // init.cpp fills FontRemap[10..15] from PALETTE.CPS row PCOLOR_GREEN columns 2..7.
@@ -343,6 +484,7 @@ function paletteKey(r: number, g: number, b: number): number {
 }
 
 const RA_COLOR_LTGREEN = 4;
+const CPP_SUPERWEAPON_ANIMATION_STAGES = 54;
 const CPP_GROUND_ANIM_SORT_Y_OFFSET_LEPTONS = Math.round(14 * LEPTON_SIZE / CELL_SIZE);
 const CPP_MAGIC_TRANSLUCENT_CONTROLS: readonly TranslucentControl[] = [
   { sourceColorIndex: 32, destColorIndex: 32, frac: 110 },
@@ -364,11 +506,77 @@ function pixelToNearestLepton(pixel: number): number {
   return Math.round(pixel * LEPTON_SIZE / CELL_SIZE);
 }
 
-function cppGroundAnimSortKey(anim: LogicAnim): { y: number; x: number } {
+function cppFixedMulInt(numerator: number, denominator: number, multiplier: number): number {
+  if (denominator === 0) return 0;
+  const raw = Math.trunc((Math.max(0, numerator) * 256) / denominator);
+  return Math.trunc((raw * multiplier + 128) / 256);
+}
+
+function cppSuperweaponClockFrame(chargeTick: number, rechargeTicks: number): number {
+  const stage = Math.min(
+    cppFixedMulInt(chargeTick, rechargeTicks, CPP_SUPERWEAPON_ANIMATION_STAGES),
+    CPP_SUPERWEAPON_ANIMATION_STAGES - 1,
+  );
+  return stage + 1;
+}
+
+function cppGroundAnimSortKey(
+  anim: LogicAnim,
+  entityById?: Map<number, Entity>,
+  structures?: MapStructure[],
+): { y: number; x: number } {
+  if (anim.attachedEntityId !== undefined) {
+    const entity = entityById?.get(anim.attachedEntityId);
+    if (entity) {
+      return {
+        y: Math.trunc(cppEntityRenderSortKey(entity) / 0x10000) + 1,
+        x: entity.leptonX,
+      };
+    }
+  }
+  if (anim.attachedStructureIndex !== undefined && anim.attachedStructureOffsetLX !== undefined) {
+    const structure = structures?.[anim.attachedStructureIndex];
+    if (structure) {
+      const sort = cppStructureRenderSortKey(structure);
+      return { y: sort.y + 1, x: sort.x };
+    }
+  }
   return {
     y: pixelToNearestLepton(anim.y) + CPP_GROUND_ANIM_SORT_Y_OFFSET_LEPTONS,
     x: pixelToNearestLepton(anim.x),
   };
+}
+
+function logicAnimRenderPosition(
+  anim: LogicAnim,
+  entityById?: Map<number, Entity>,
+): { x: number; y: number } {
+  if (
+    anim.attachedEntityId !== undefined &&
+    anim.attachedEntityOffsetLX !== undefined &&
+    anim.attachedEntityOffsetLY !== undefined
+  ) {
+    const entity = entityById?.get(anim.attachedEntityId);
+    if (entity) {
+      const target = entity.targetCoordLeptons();
+      return {
+        x: (target.lx + anim.attachedEntityOffsetLX) * CELL_SIZE / LEPTON_SIZE,
+        y: (target.ly + anim.attachedEntityOffsetLY) * CELL_SIZE / LEPTON_SIZE,
+      };
+    }
+  }
+  return { x: anim.x, y: anim.y };
+}
+
+function logicAnimRenderLayer(anim: LogicAnim, entityById?: Map<number, Entity>): 'ground' | 'air' {
+  if (anim.attachedEntityId !== undefined) {
+    const entity = entityById?.get(anim.attachedEntityId);
+    if (entity) return cppEntityRenderLayer(entity) === 'ground' ? 'ground' : 'air';
+  }
+  if (anim.attachedStructureIndex !== undefined && anim.attachedStructureOffsetLX !== undefined) {
+    return 'ground';
+  }
+  return logicAnimRenderSpec(anim.type).groundLayer ? 'ground' : 'air';
 }
 
 interface TerrainObjectSprite {
@@ -394,6 +602,13 @@ type GroundLayerEntry =
       sortY: number;
       order: number;
       anim: LogicAnim;
+    }
+  | {
+      kind: 'fallingParachute';
+      sortX: number;
+      sortY: number;
+      order: number;
+      entity: Entity;
     }
   | {
       kind: 'structure';
@@ -483,6 +698,8 @@ type BuildingFrameTableEntry = {
   damageFrame: number;
   idleAnimCount: number;
   idleAnimRate?: number;
+  activeFrame?: number;
+  activeDamageFrame?: number;
   activeAnimCount?: number;
   activeAnimRate?: number;
 };
@@ -497,7 +714,7 @@ export const BUILDING_FRAME_TABLE: Record<string, BuildingFrameTableEntry> = {
   tent: { idleFrame: 0, damageFrame: 10, idleAnimCount: 10 },  // 20 frames: door animation (C++ BSTATE_IDLE 0,10,3)
   silo: { idleFrame: 0, damageFrame: 5, idleAnimCount: 0 },    // 10 frames: fill level (static, NOT animation)
   proc: { idleFrame: 0, damageFrame: 16, idleAnimCount: 0 },   // 32 frames: conveyor states
-  fix:  { idleFrame: 0, damageFrame: 12, idleAnimCount: 0 },   // 24 frames: repair bay states
+  fix:  { idleFrame: 0, damageFrame: 7, idleAnimCount: 0 },    // bdata.cpp: active Count=7; damaged idle adds largest anim span
   dome: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // Static in C++: omitted from bdata.cpp _anims table
   powr: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // Static in C++: omitted from bdata.cpp _anims table, so default Count=1
   hbox: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // 2 frames: pillbox
@@ -514,7 +731,16 @@ export const BUILDING_FRAME_TABLE: Record<string, BuildingFrameTableEntry> = {
   tsla: { idleFrame: 0, damageFrame: 10, idleAnimCount: 10 },  // 20 frames: sparking animation
   gap:  { idleFrame: 0, damageFrame: 32, idleAnimCount: 32 },  // 64 frames: shroud sweep
   iron: { idleFrame: 0, damageFrame: 11, idleAnimCount: 11 },  // 22 frames: power glow
-  pdox: { idleFrame: 0, damageFrame: 29, idleAnimCount: 29 },  // 58 frames: energy effect
+  pdox: {
+    idleFrame: 0,
+    damageFrame: 29,
+    idleAnimCount: 4,
+    idleAnimRate: 3,
+    activeFrame: 4,
+    activeDamageFrame: 33,
+    activeAnimCount: 16,
+    activeAnimRate: 3,
+  },  // C++ bdata.cpp: Chronosphere BSTATE_IDLE 0,4,3; BSTATE_ACTIVE 4,16,3
   atek: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // Static in C++: omitted from bdata.cpp _anims table, so default Count=1
   stek: { idleFrame: 0, damageFrame: 1, idleAnimCount: 0 },    // Static in C++: omitted from bdata.cpp _anims table, so default Count=1
   mslo: { idleFrame: 0, damageFrame: 4, idleAnimCount: 4 },    // Missile silo
@@ -562,8 +788,19 @@ function buildingAnimationFrame(
 ): number {
   const availFromBase = Math.max(1, totalFrames - baseFrame);
   const safeAnimCount = Math.max(1, Math.min(animCount, availFromBase));
-  return baseFrame + (Math.floor(tick / Math.max(1, rate)) % safeAnimCount);
+  // C++ BuildingClass::Begin_Mode calls Set_Stage(Start) during scenario init;
+  // StageClass::Graphic_Logic then keeps that first stage visible for a full
+  // Rate interval after the first rendered gameplay frame.
+  const stageTick = Math.max(0, tick - 2);
+  return baseFrame + (Math.floor(stageTick / Math.max(1, rate)) % safeAnimCount);
 }
+
+const THEATER_STRUCTURE_SHEETS = new Set<string>([
+  'hbox',
+  'mslo',
+  ...Array.from({ length: 18 }, (_, index) => `v${(index + 1).toString().padStart(2, '0')}`),
+  ...Array.from({ length: 18 }, (_, index) => `v${(index + 20).toString().padStart(2, '0')}`),
+]);
 
 // Wall types that use auto-connection sprites
 const WALL_SPRITE_TYPES = new Set(['SBAG', 'FENC', 'BARB', 'BRIK', 'CYCL', 'WOOD']);
@@ -579,6 +816,8 @@ const WALL_OVERLAY_SHEETS: Record<string, string> = {
 const OVERLAY_WOOD_CRATE = 21;
 const OVERLAY_STEEL_CRATE = 22;
 const OVERLAY_WATER_CRATE = 24;
+const OVERLAY_V12 = 13;
+const OVERLAY_V18 = 19;
 
 function overlayCrateSheet(overlayId: number): string {
   switch (overlayId) {
@@ -587,6 +826,18 @@ function overlayCrateSheet(overlayId: number): string {
     case OVERLAY_WATER_CRATE: return 'wwcrate';
     default: return '';
   }
+}
+
+function structureTurretBodyShapeFrame(s: MapStructure): number {
+  const facing32 = s.turretFacing256 !== undefined
+    ? dir256ToFacing32(s.turretFacing256)
+    : ((s.turretDir ?? 0) * 4) % 32;
+  return BODY_SHAPE[facing32] ?? 0;
+}
+
+function overlayRockSheet(overlayId: number): string {
+  if (overlayId < OVERLAY_V12 || overlayId > OVERLAY_V18) return '';
+  return `v${overlayId - OVERLAY_V12 + 12}`;
 }
 
 function overlayWallType(overlayId: number): string {
@@ -678,7 +929,11 @@ export class Renderer {
   private height: number;
   private pal: number[][] | null = null;
   private palTheatre = ''; // which theatre the current palette is for
-  private paletteAdjustmentCache: { palette: number[][]; map: Map<number, [number, number, number]> } | null = null;
+  private paletteAdjustmentCache: {
+    palette: number[][];
+    map: Map<number, [number, number, number]>;
+    adjustedPalette: number[][];
+  } | null = null;
   screenShake = 0;      // remaining shake ticks
   /** C++ WASM agent harness returns immediately from Shake_The_Screen. */
   suppressScreenShake = false;
@@ -722,6 +977,8 @@ export class Renderer {
   // Sidebar data (set by game each frame)
   sidebarCredits = 0;  // animated display credits
   sidebarSiloCapacity = 0; // silo storage capacity for credits display
+  /** C++ BuildingClass::Shape_Number uses owner House->Tiberium / House->Capacity for SILO frames. */
+  siloFillLevelByHouse: Map<House, number> = new Map();
   sidebarPowerProduced = 0;
   sidebarPowerConsumed = 0;
   sidebarItems: SidebarItem[] = [];
@@ -917,18 +1174,23 @@ export class Renderer {
       powerDirty = true;
     }
 
-    // Trigger flash when drain exceeds power
-    if (consumed > produced && produced > 0 && this.powerFlashTimer === 0) {
-      this.powerFlashTimer = 15; // C++ TICKS_PER_SECOND = 15 (defines.h:3031)
-      powerDirty = true;
-    }
-
     if (oldPower !== this.powerHeight || oldDrain !== this.drainHeight) {
       powerDirty = true;
     }
     if (powerDirty) {
       this.powerChromeDirty = true;
     }
+  }
+
+  /** C++ PowerClass::Flash_Power(): pulse the power bar for one game second. */
+  flashPowerBar(): void {
+    this.powerFlashTimer = GAME_TICKS_PER_SEC;
+    this.powerChromeDirty = true;
+  }
+
+  /** C++ BuildingClass::Limbo flags PowerClass redraw for player-owned buildings. */
+  markPowerChromeDirty(): void {
+    this.powerChromeDirty = true;
   }
 
   markSidebarChromeDirty(complete = false): void {
@@ -941,6 +1203,13 @@ export class Renderer {
       this.playerFaction,
       items.map(item => item.type).join(','),
     ].join('|');
+    if (this.sidebarChromeSignature === null) {
+      // Init_Clear already scheduled the startup sidebar redraw. The first
+      // signature observation is just cache priming; treating it as a later
+      // StripClass content change invents an extra retained-frame redraw.
+      this.sidebarChromeSignature = chromeSignature;
+      return;
+    }
     if (chromeSignature !== this.sidebarChromeSignature) {
       this.sidebarChromeSignature = chromeSignature;
       this.markSidebarChromeDirty();
@@ -955,6 +1224,9 @@ export class Renderer {
   advanceSidebarChromeCache(): void {
     if (this.sidebarChromeDirty) {
       this.sidebarChromeFrame = this.sidebarChromeCompleteDirty ? 0 : 1;
+      // C++ SidebarClass::Draw_It calls PowerClass::Draw_It first, then paints
+      // SIDE*.SHP when the sidebar itself is dirty. A sidebar redraw therefore
+      // covers the power chrome unless a later power-only redraw runs.
       this.powerChromeAboveSidebar = false;
     } else if (this.powerChromeDirty) {
       this.powerChromeAboveSidebar = true;
@@ -970,13 +1242,29 @@ export class Renderer {
   }
 
   /** C++ theater-specific SHPs use the same logical name with a theater suffix.
-   * The extractor stores snow variants as *_snow and falls back to base art. */
+   * The extractor stores snow variants as *_snow and falls back to base art for
+   * callers that explicitly use non-theater-specific imagery. */
   private theatreSheetName(assets: AssetManager, baseName: string): string {
     if (this.theatre === 'SNOW') {
       const snowName = `${baseName}_snow`;
       if (assets.hasSheet(snowName)) return snowName;
     }
     return baseName;
+  }
+
+  /** Resolve assets loaded by C++ type-class Init(theater) routines.
+   * These do not fall back: if SC1.INT / CORPSE1.INT / etc. is absent, C++
+   * leaves ImageData null and Draw_It renders nothing. */
+  private exactTheatreSheetName(assets: AssetManager, baseName: string): string | null {
+    if (this.theatre === 'SNOW') {
+      const snowName = `${baseName}_snow`;
+      return assets.hasSheet(snowName) ? snowName : null;
+    }
+    if (this.theatre === 'INTERIOR') {
+      const interiorName = `${baseName}_interior`;
+      return assets.hasSheet(interiorName) ? interiorName : null;
+    }
+    return assets.hasSheet(baseName) ? baseName : null;
   }
 
   /** Get an RGB string from the current theatre palette, with optional brightness offset */
@@ -1062,7 +1350,7 @@ export class Renderer {
     this.renderCrates(camera, map, tick);
     this.renderTargetLines(camera, entities, selectedIds);
     this.renderWaypoints(camera, entities, selectedIds);
-    this.renderLogicAnims(camera, assets, 'air');
+    this.renderLogicAnims(camera, assets, 'air', entities);
     this.renderEntities(
       camera,
       map,
@@ -1195,7 +1483,7 @@ export class Renderer {
         this.renderCorpses(camera, map, assets, tick);
         this.renderGroundLayer(camera, map, entities, structures, assets, selectedIds, tick);
         this.renderCrates(camera, map, tick);
-        this.renderLogicAnims(camera, assets, 'air');
+        this.renderLogicAnims(camera, assets, 'air', entities);
         this.renderEntities(
           camera,
           map,
@@ -1222,9 +1510,19 @@ export class Renderer {
       this.paletteAdjustmentCache = {
         palette: this.pal,
         map: buildCppDefaultPaletteAdjustmentMap(this.pal),
+        adjustedPalette: this.pal.map((color) => {
+          const adjusted = cppDefaultAdjustedPaletteColor(color[0] ?? 0, color[1] ?? 0, color[2] ?? 0);
+          return [adjusted[0], adjusted[1], adjusted[2], color[3] ?? 255];
+        }),
       };
     }
     return this.paletteAdjustmentCache.map;
+  }
+
+  private getAdjustedGamePalette(): number[][] | null {
+    if (!this.pal) return null;
+    this.getGamePaletteAdjustment();
+    return this.paletteAdjustmentCache?.adjustedPalette ?? null;
   }
 
   finalizeFramePalette(): void {
@@ -2049,7 +2347,60 @@ export class Renderer {
     const deferredTerrainObjects: TerrainObjectSprite[] = [];
 
     const queuedTreeOrigins = new Set<number>();
+    const renderCoordInTacticalEdgeZone = (
+      screenX: number,
+      screenY: number,
+    ): boolean => {
+      // C++ DisplayClass::Coord_To_Pixel accepts render origins inside the
+      // tactical rectangle plus a two-cell EDGE_ZONE. It does not clip by the
+      // eventual SHP rectangle, so very wide clumps whose origin is farther
+      // offscreen are not drawn even if their pixels would overlap the view.
+      const edge = CELL_SIZE * 2;
+      return screenX >= camera.screenX - edge &&
+        screenX <= camera.screenX + camera.viewWidth + edge &&
+        screenY >= camera.screenY - edge &&
+        screenY <= camera.screenY + camera.viewHeight + edge;
+    };
+    const terrainTreeRenderVisibility = (treeType: string, cx: number, cy: number): number => {
+      // C++ CellClass::Redraw_Objects marks both Cell_Occupier and Overlapper
+      // TerrainClass objects. The origin cell can draw once mapped, but non-
+      // origin footprint/overlap cells only discover the sprite once the display
+      // shroud has promoted them to fully visible. After discovery, mapped
+      // shadow cells can redraw the object like C++'s retained tactical layer.
+      let visibility = this.renderVisibility(map, cx, cy);
+      if (visibility === 2) return 2;
+      let hasMappedCell = visibility > 0;
+      const seen = new Set<number>([cy * 128 + cx]);
+      for (const [dx, dy] of [...(TREE_OCCUPY[treeType] ?? []), ...(TREE_OVERLAP[treeType] ?? [])]) {
+        const tx = cx + dx;
+        const ty = cy + dy;
+        const idx = ty * 128 + tx;
+        if (seen.has(idx)) continue;
+        seen.add(idx);
+        const cellVisibility = this.renderVisibility(map, tx, ty);
+        if (cellVisibility === 2) return 2;
+        if (cellVisibility > 0) hasMappedCell = true;
+      }
+      if (visibility === 0 && hasMappedCell) return 1;
+      return visibility;
+    };
+    const terrainObjectRenderVisibility = (terrainObject: { cx: number; cy: number; occupyCells?: number[] }): number => {
+      let visibility = this.renderVisibility(map, terrainObject.cx, terrainObject.cy);
+      if (visibility === 2) return 2;
+      let hasMappedCell = visibility > 0;
+      const seen = new Set<number>([terrainObject.cy * 128 + terrainObject.cx]);
+      for (const idx of terrainObject.occupyCells ?? []) {
+        if (seen.has(idx)) continue;
+        seen.add(idx);
+        const cellVisibility = this.renderVisibility(map, idx % 128, Math.floor(idx / 128));
+        if (cellVisibility === 2) return 2;
+        if (cellVisibility > 0) hasMappedCell = true;
+      }
+      if (visibility === 0 && hasMappedCell) return 1;
+      return visibility;
+    };
     const queueTreeSprite = (treeType: string, cx: number, cy: number, x: number, y: number): void => {
+      if (terrainTreeRenderVisibility(treeType, cx, cy) === 0) return;
       const sheetName = this.theatreSheetName(assets, treeType);
       if (!assets.hasSheet(sheetName)) return;
       const [sortPx, sortPy] = TREE_CENTER_OFFSET[treeType] ?? [CELL_SIZE / 2, CELL_SIZE];
@@ -2067,23 +2418,25 @@ export class Renderer {
     const queueTreeObjectSprite = (tree: { type: string; cx: number; cy: number }): void => {
       const idx = tree.cy * 128 + tree.cx;
       if (queuedTreeOrigins.has(idx)) return;
+      if (terrainTreeRenderVisibility(tree.type, tree.cx, tree.cy) === 0) return;
+      const sheetName = this.theatreSheetName(assets, tree.type);
+      if (!assets.hasSheet(sheetName)) return;
       const drawX = tree.cx * CELL_SIZE;
       const drawY = tree.cy * CELL_SIZE;
       const screen = camera.worldToScreen(drawX, drawY);
-      if (screen.x < -CELL_SIZE * 4 || screen.x > this.width + CELL_SIZE * 4 ||
-          screen.y < -CELL_SIZE * 4 || screen.y > this.height + CELL_SIZE * 4) return;
+      if (!renderCoordInTacticalEdgeZone(screen.x, screen.y)) return;
       queueTreeSprite(tree.type, tree.cx, tree.cy, Math.round(screen.x), Math.round(screen.y));
     };
 
-    const queueTerrainObjectSprite = (terrainObject: { type: string; cx: number; cy: number; logicIndexHint?: number }): void => {
+    const queueTerrainObjectSprite = (terrainObject: { type: string; cx: number; cy: number; logicIndexHint?: number; occupyCells?: number[] }): void => {
+      if (terrainObjectRenderVisibility(terrainObject) === 0) return;
       const sheetName = this.theatreSheetName(assets, terrainObject.type);
       if (!assets.hasSheet(sheetName)) return;
       const [sortPx, sortPy] = TERRAIN_OBJECT_CENTER_OFFSET[terrainObject.type] ?? [CELL_SIZE / 2, CELL_SIZE];
       const drawX = terrainObject.cx * CELL_SIZE;
       const drawY = terrainObject.cy * CELL_SIZE;
       const screen = camera.worldToScreen(drawX, drawY);
-      if (screen.x < -CELL_SIZE * 4 || screen.x > this.width + CELL_SIZE * 4 ||
-          screen.y < -CELL_SIZE * 4 || screen.y > this.height + CELL_SIZE * 4) return;
+      if (!renderCoordInTacticalEdgeZone(screen.x, screen.y)) return;
       deferredTerrainObjects.push({
         name: sheetName,
         x: Math.round(screen.x),
@@ -2412,7 +2765,11 @@ export class Renderer {
     }
   }
 
-  private collectGroundLayerEntries(entities: Entity[], structures: MapStructure[]): GroundLayerEntry[] {
+  private collectGroundLayerEntries(
+    entities: Entity[],
+    structures: MapStructure[],
+    entityById = new Map(entities.map(entity => [entity.id, entity] as const)),
+  ): GroundLayerEntry[] {
     const entries: GroundLayerEntry[] = [];
 
     for (const terrain of this.pendingTerrainObjectSprites) {
@@ -2427,15 +2784,25 @@ export class Renderer {
 
     for (const anim of this.logicAnims) {
       if (anim.delay > 0) continue;
-      const spec = logicAnimRenderSpec(anim.type);
-      if (!spec.groundLayer) continue;
-      const sort = cppGroundAnimSortKey(anim);
+      if (logicAnimRenderLayer(anim, entityById) !== 'ground') continue;
+      const sort = cppGroundAnimSortKey(anim, entityById, structures);
       entries.push({
         kind: 'anim',
         sortX: sort.x,
         sortY: sort.y,
         order: anim.logicIndexHint ?? 0,
         anim,
+      });
+    }
+
+    for (const entity of entities) {
+      if (!entity.fallParachuteAnimActive) continue;
+      entries.push({
+        kind: 'fallingParachute',
+        sortX: entity.leptonX,
+        sortY: Math.trunc(cppEntityRenderSortKey(entity) / 0x10000) + 1,
+        order: entity.fallParachuteAnimLogicIndexHint ?? entity.logicIndexHint ?? entity.id,
+        entity,
       });
     }
 
@@ -2481,6 +2848,8 @@ export class Renderer {
         this.renderTerrainObjectSprite(assets, entry.terrain);
       } else if (entry.kind === 'anim') {
         this.renderLogicAnim(camera, assets, entry.anim);
+      } else if (entry.kind === 'fallingParachute') {
+        this.renderFallingParachute(camera, assets, entry.entity);
       }
     }
   }
@@ -2502,13 +2871,17 @@ export class Renderer {
       dockedGroundEntities.set(docked.id, docked);
     }
 
-    for (const entry of this.collectGroundLayerEntries(entities, structures)) {
+    const entityById = new Map(entities.map(entity => [entity.id, entity] as const));
+    for (const entry of this.collectGroundLayerEntries(entities, structures, entityById)) {
       switch (entry.kind) {
         case 'terrain':
           this.renderTerrainObjectSprite(assets, entry.terrain);
           break;
         case 'anim':
-          this.renderLogicAnim(camera, assets, entry.anim);
+          this.renderLogicAnim(camera, assets, entry.anim, entityById);
+          break;
+        case 'fallingParachute':
+          this.renderFallingParachute(camera, assets, entry.entity);
           break;
         case 'structure':
           this.renderStructures(camera, map, [entry.structure], assets, tick, [entry.structureIndex], dockedGroundEntities);
@@ -2525,12 +2898,57 @@ export class Renderer {
     return map.getDisplayVisibility(cx, cy);
   }
 
+  private structureRenderVisibility(map: GameMap, structure: MapStructure): number {
+    // C++ CellClass::Draw_It can redraw a BuildingClass through any mapped
+    // Cell_Occupier footprint cell, even when the building's origin cell is
+    // still unmapped at a shroud edge.
+    let visibility = this.renderVisibility(map, structure.cx, structure.cy);
+    if (visibility === 2) return 2;
+    const seen = new Set<number>([structure.cy * 128 + structure.cx]);
+    for (const cell of getStructureOccupyCells(structure.type, structure.cx, structure.cy)) {
+      const idx = cell.cy * 128 + cell.cx;
+      if (seen.has(idx)) continue;
+      seen.add(idx);
+      visibility = Math.max(visibility, this.renderVisibility(map, cell.cx, cell.cy));
+      if (visibility === 2) return 2;
+    }
+    return visibility;
+  }
+
+  private fadingShadeFrac(): number {
+    return this.theatre === 'SNOW' ? 75 : 130;
+  }
+
   private unitShadowOptions(options?: DrawFrameOptions): DrawFrameOptions | undefined {
     if (!this.pal) return options;
-    const frac = this.theatre === 'SNOW' ? 75 : 130;
+    const frac = this.fadingShadeFrac();
     return {
       ...options,
       ghostShadow: { palette: this.pal, frac },
+    };
+  }
+
+  private technoShadowOptions(entity: Entity, options?: DrawFrameOptions): DrawFrameOptions | undefined {
+    if (!this.pal) return options;
+    if (entity.objectHeightLeptons() > 0) {
+      // C++ display.cpp builds UnitShadowAir, then overwrites its first
+      // translucent row with PCOLOR_GOLD's identity remap table. Airborne
+      // LTGREEN shadow-control pixels therefore leave the destination alone.
+      return {
+        ...options,
+        ghostShadow: { palette: this.pal, frac: 0, passthrough: true },
+      };
+    }
+    return this.unitShadowOptions(options);
+  }
+
+  private defaultFadingShadeOptions(options?: DrawFrameOptions): DrawFrameOptions | undefined {
+    const shadowOptions = this.unitShadowOptions(options);
+    if (!this.pal) return shadowOptions;
+    const frac = this.fadingShadeFrac();
+    return {
+      ...shadowOptions,
+      sourceFading: { palette: this.pal, frac },
     };
   }
 
@@ -2543,8 +2961,8 @@ export class Renderer {
       const screen = camera.worldToScreen(s.cx * CELL_SIZE, s.cy * CELL_SIZE);
       if (screen.x < -CELL_SIZE || screen.x > this.width + CELL_SIZE ||
           screen.y < -CELL_SIZE || screen.y > this.height + CELL_SIZE) continue;
-      const sheetName = this.theatreSheetName(assets, s.type.toLowerCase());
-      if (assets.hasSheet(sheetName)) {
+      const sheetName = this.exactTheatreSheetName(assets, s.type.toLowerCase());
+      if (sheetName) {
         // C++ SmudgeTypeClass::Draw_It draws the theatre-specific smudge at
         // the cell icon's upper-left. Crater data selects larger damage frames.
         assets.drawFrame(ctx, sheetName, s.data ?? 0, screen.x, screen.y);
@@ -2589,6 +3007,14 @@ export class Renderer {
           const crateSheet = overlayCrateSheet(ovl);
           if (crateSheet) {
             const sheetName = assets.hasSheet(crateSheet) ? crateSheet : 'wcrate';
+            if (assets.hasSheet(sheetName)) {
+              assets.drawFrame(ctx, sheetName, 0, drawX, drawY, overlayOptions);
+            }
+            continue;
+          }
+          const rockSheet = overlayRockSheet(ovl);
+          if (rockSheet) {
+            const sheetName = this.theatreSheetName(assets, rockSheet);
             if (assets.hasSheet(sheetName)) {
               assets.drawFrame(ctx, sheetName, 0, drawX, drawY, overlayOptions);
             }
@@ -2683,7 +3109,11 @@ export class Renderer {
         // deletes the object. There is no persistent TS-style rubble decal.
         if (s.debrisDropped || s.debrisCountdown === undefined) continue;
       }
-      const vis = this.renderVisibility(map, s.cx, s.cy);
+      // C++ bdata.cpp marks AP/AV mines as invisible technos. TechnoClass::
+      // Visual_Character() renders invisible objects only for IsOwnedByPlayer
+      // (exact PlayerPtr ownership, not allied-house visibility).
+      if (isMineStructureType(s.type) && s.house !== this.playerHouse) continue;
+      const vis = this.structureRenderVisibility(map, s);
       if (vis === 0) continue; // fully shrouded
 
       const screen = camera.worldToScreen(s.cx * CELL_SIZE, s.cy * CELL_SIZE);
@@ -2693,27 +3123,30 @@ export class Renderer {
       // Construction/sell animation: clip building sprite progressively
       const isConstructing = s.buildProgress !== undefined && s.buildProgress < 1;
       const isSelling = s.sellProgress !== undefined;
-      const sheet = assets.getSheet(s.image);
-      if (sheet) {
+      const bodySheetName = THEATER_STRUCTURE_SHEETS.has(s.image)
+        ? this.exactTheatreSheetName(assets, s.image)
+        : s.image;
+      const sheet = bodySheetName ? assets.getSheet(bodySheetName) : undefined;
+      if (bodySheetName && sheet) {
         // Determine frame: damaged buildings use second half of frames
         const totalFrames = sheet.meta.frameCount;
         const damaged = s.hp <= s.maxHp * 0.5; // at or below 50% health (C++ uses <=)
         let frame = 0;
         // GUN turret: 128 frames = [32 normal][32 firing][32 damaged][32 damaged firing]
-        // turretDir is now 32-step (0-31) — use directly with BODY_SHAPE
+        // C++ Shape_Number uses BodyShape[Dir_To_32(PrimaryFacing.Current())].
         if (s.type === 'GUN' && s.turretDir !== undefined) {
-          const facingFrame = BODY_SHAPE[s.turretDir % 32];
+          const facingFrame = structureTurretBodyShapeFrame(s);
           const baseFrame = damaged ? 64 : 0;
           const firingOffset = (s.firingFlash && s.firingFlash > 0) ? 32 : 0;
           frame = baseFrame + firingOffset + facingFrame;
         // SAM launcher: 68 frames = [2 closed + 32 rotation][34 damaged]
         } else if (s.type === 'SAM' && s.turretDir !== undefined) {
           const baseFrame = damaged ? 34 : 0;
-          const facingFrame = BODY_SHAPE[s.turretDir % 32];
+          const facingFrame = structureTurretBodyShapeFrame(s);
           frame = baseFrame + 2 + facingFrame;
         // AGUN turret: same 128-frame layout as GUN (32 normal, 32 firing, 32 damaged, 32 damaged-firing)
         } else if (s.type === 'AGUN' && s.turretDir !== undefined) {
-          const facingFrame = BODY_SHAPE[s.turretDir % 32];
+          const facingFrame = structureTurretBodyShapeFrame(s);
           const baseFrame = damaged ? 64 : 0;
           const firingOffset = (s.firingFlash && s.firingFlash > 0) ? 32 : 0;
           frame = baseFrame + firingOffset + facingFrame;
@@ -2723,6 +3156,12 @@ export class Renderer {
           // IsCharged overrides the stage.
           const stage = s.isCharged ? 3 : s.isCharging ? (s.chargeStage ?? 0) : 0;
           frame = (damaged ? 10 : 0) + Math.max(0, Math.min(9, stage));
+        } else if (s.type === 'SILO') {
+          // C++ building.cpp:660-671: storage structures draw the owning
+          // house's aggregate Tiberium/Capacity fill level, then add the
+          // damaged-frame offset.
+          const level = Math.max(0, Math.min(4, this.siloFillLevelByHouse.get(s.house) ?? 0));
+          frame = level + (damaged ? 5 : 0);
         // Wall auto-connection: NESW bitmask selects from 16 connection patterns
         } else if (WALL_SPRITE_TYPES.has(s.type)) {
           const wt = map.getWallType(s.cx, s.cy) || s.type;
@@ -2741,7 +3180,9 @@ export class Renderer {
           if (tableEntry) {
             const activeAnimCount = usesActiveBuildingAnimation(s) ? (tableEntry.activeAnimCount ?? 0) : 0;
             if (activeAnimCount > 0) {
-              const baseFrame = damaged ? tableEntry.damageFrame : tableEntry.idleFrame;
+              const baseFrame = damaged
+                ? (tableEntry.activeDamageFrame ?? tableEntry.damageFrame)
+                : (tableEntry.activeFrame ?? tableEntry.idleFrame);
               frame = buildingAnimationFrame(
                 baseFrame,
                 activeAnimCount,
@@ -2775,15 +3216,23 @@ export class Renderer {
         // Construction/Sell: use dedicated *make buildup sheet if available (C++ RA parity).
         // In C++ RA, Get_Image_Data() switches to BuildupData (*make.shp) during BSTATE_CONSTRUCTION.
         // Sell plays the make frames in reverse. Fall back to cycling normal frames if no make sheet.
-        let useSheet = s.image;
+        let useSheet = bodySheetName;
         let useFrame = frame;
         let useTotalFrames = totalFrames;
+        let usingMakeSheet = false;
         if (isSelling || isConstructing) {
-          const makeSheetName = s.image + 'make';
+          const preferredMakeSheetName = bodySheetName.endsWith('_snow')
+            ? `${s.image}make_snow`
+            : `${s.image}make`;
+          const fallbackMakeSheetName = `${s.image}make`;
+          const makeSheetName = assets.hasSheet(preferredMakeSheetName)
+            ? preferredMakeSheetName
+            : fallbackMakeSheetName;
           const makeSheet = assets.getSheet(makeSheetName);
           if (makeSheet) {
             // Use the dedicated buildup sheet
             useSheet = makeSheetName;
+            usingMakeSheet = true;
             useTotalFrames = makeSheet.meta.frameCount;
             const maxFrame = useTotalFrames - 1;
             if (isConstructing) {
@@ -2807,7 +3256,7 @@ export class Renderer {
         // Clamp frame to valid range
         useFrame = Math.min(useFrame, useTotalFrames - 1);
         // Resolve draw dimensions once (make sheet may differ from normal sheet)
-        const drawMeta = (useSheet !== s.image ? assets.getSheet(useSheet)?.meta : null) ?? sheet.meta;
+        const drawMeta = (useSheet !== bodySheetName ? assets.getSheet(useSheet)?.meta : null) ?? sheet.meta;
         const dfw = drawMeta.frameWidth;
         const dfh = drawMeta.frameHeight;
         // Building foundation bib: concrete pad under buildings (C++ bib.cpp).
@@ -2839,7 +3288,7 @@ export class Renderer {
         }
         // C++ draws mapped structures at full brightness; Redraw_Shadow's
         // SHADOW.SHP overlay supplies fog dimming after objects are drawn.
-        const hasMakeSheet = useSheet !== s.image; // true when dedicated buildup sprite exists
+        const hasMakeSheet = usingMakeSheet; // true when dedicated buildup sprite exists
         // Construction: make sheet plays frames naturally. Missing make sheet = bug.
         if (isConstructing && !hasMakeSheet) {
           // MISSING MAKE SHEET — draw ugly pink/magenta box so it's obvious
@@ -2871,7 +3320,13 @@ export class Renderer {
           ? assets.getRemappedSheet(useSheet, s.house)
           : null;
         const drawCenter = structureDrawCenter(s, screenX, screenY);
-        const buildingDrawOptions = this.unitShadowOptions({ centerX: true, centerY: true });
+        const buildingDrawOptions = (!bldgRemapped && isMineStructureType(s.type))
+          // C++ Techno_Draw_Object always sets SHAPE_FADING|SHAPE_GHOST. MINP/MINV
+          // are IsRemappable but REMAP_NONE, so HouseClass::Remap_Table returns
+          // null and CC_Draw_Shape substitutes DisplayClass::FadingShade for the
+          // body pixels while UnitShadow still handles shadow pixels.
+          ? this.defaultFadingShadeOptions({ centerX: true, centerY: true })
+          : this.unitShadowOptions({ centerX: true, centerY: true });
         if (bldgRemapped) {
           assets.drawFrameFrom(ctx, bldgRemapped, useSheet, useFrame % useTotalFrames,
             drawCenter.x, drawCenter.y, buildingDrawOptions);
@@ -2886,23 +3341,24 @@ export class Renderer {
             this.renderEntities(camera, map, [docked], assets, this._selectedIds, tick);
           }
         }
-        // WEAP2 door overlay — C++ building.cpp:500-503 Techno_Draw_Object(WarFactoryOverlay, Door_Stage())
-        // WEAP2.SHP = 8 frames (0=closed..7=open), drawn on top of WEAP base sprite.
-        // Door opens (0→7) when the 'unit' production queue is active, closes (7→0) when idle.
+        // WEAP2 door overlay — C++ building.cpp:500-503
+        // Techno_Draw_Object(WarFactoryOverlay, Door_Stage()).
+        // Door_Stage is owned by BuildingClass/DoorClass logic; rendering must
+        // not advance it from sidebar production state.
         if (s.image === 'weap' && assets.hasSheet('weap2') && !isConstructing && !isSelling) {
-          // Drive door state from production queue: open while producing vehicles
-          const isProducingUnit = this.sidebarQueue.has('unit');
-          if (s.doorFrame === undefined) s.doorFrame = 0;
-          if (isProducingUnit) {
-            // Animate door opening: increment by 1 per tick up to 7
-            if (s.doorFrame < 7) s.doorFrame = Math.min(7, s.doorFrame + 1);
+          const doorFrame = Math.max(0, Math.min(7, s.doorFrame ?? 0));
+          const doorRemapped = structureUsesHouseRemap(s.type)
+            ? assets.getRemappedSheet('weap2', s.house)
+            : null;
+          if (doorRemapped) {
+            assets.drawFrameFrom(ctx, doorRemapped, 'weap2', doorFrame, drawCenter.x, drawCenter.y, {
+              centerX: true, centerY: true,
+            });
           } else {
-            // Animate door closing: decrement by 1 per tick down to 0
-            if (s.doorFrame > 0) s.doorFrame = Math.max(0, s.doorFrame - 1);
+            assets.drawFrame(ctx, 'weap2', doorFrame, drawCenter.x, drawCenter.y, {
+              centerX: true, centerY: true,
+            });
           }
-          assets.drawFrame(ctx, 'weap2', s.doorFrame, drawCenter.x, drawCenter.y, {
-            centerX: true, centerY: true,
-          });
         }
         // Blushing target/electric flash — C++ flasher.cpp:83-95 + house.cpp:2308
         // (blush → Map.FadingLight). Ordinary damage does not set FlashCount.
@@ -2921,23 +3377,13 @@ export class Renderer {
           ctx.fillRect(screenX - 2, shrinkY - 1, dfw + 4, 2);
           ctx.restore();
         }
+      } else if (bodySheetName === null) {
+        // C++ BuildingTypeClass::Init leaves IsTheater structures with null
+        // ImageData if the active theater has no body art.
+        continue;
       } else {
         // Missing sprite stub: magenta checkerboard + label (matches missing tile pattern)
         this.renderMissingSpriteStub(ctx, screenX, screenY, CELL_SIZE, CELL_SIZE, s.type);
-      }
-
-      // Power brownout dimming — multiply blend preserves hue (C++ FadingShade remap)
-      if (this.sidebarPowerConsumed > this.sidebarPowerProduced * 1.5 && this.sidebarPowerProduced > 0) {
-        const defenseTypes = ['HBOX', 'GUN', 'TSLA', 'PBOX'];
-        if (defenseTypes.includes(s.type)) {
-          const pulse = 0.6 + 0.1 * Math.sin(tick * 0.15);
-          const shade = Math.floor(pulse * 255);
-          ctx.globalCompositeOperation = 'multiply';
-          ctx.fillStyle = `rgb(${shade},${shade},${shade})`;
-          const [bw, bh] = STRUCTURE_SIZE[s.type] ?? [2, 2];
-          ctx.fillRect(screenX, screenY, bw * CELL_SIZE, bh * CELL_SIZE);
-          ctx.globalCompositeOperation = 'source-over';
-        }
       }
 
       // Health bar on selected structures (visible only)
@@ -3039,10 +3485,52 @@ export class Renderer {
     frame: number,
     x: number,
     y: number,
+    visual: TechnoVisual,
   ): void {
     if (!assets.getSheet(sheetName)) return;
+    this.drawVesselTechnoFrame(ctx, assets, entity, sheetName, frame, x, y, visual, {
+      centerX: true,
+      centerY: true,
+    });
+  }
+
+  private drawVesselTechnoFrame(
+    ctx: CanvasRenderingContext2D,
+    assets: AssetManager,
+    entity: Entity,
+    sheetName: string,
+    frame: number,
+    x: number,
+    y: number,
+    visual: TechnoVisual,
+    options: DrawFrameOptions,
+  ): void {
+    if (visual === TechnoVisual.HIDDEN) return;
+
+    if (visual === TechnoVisual.SHADOWY || visual === TechnoVisual.RIPPLE) {
+      if (this.pal) {
+        assets.drawFrameSpecialGhost(ctx, sheetName, frame, x, y, this.pal, options);
+      } else {
+        assets.drawFrame(ctx, sheetName, frame, x, y, options);
+      }
+      return;
+    }
+
     const remapped = assets.getRemappedSheet(sheetName, entity.house);
-    const drawOptions = this.unitShadowOptions({ centerX: true, centerY: true });
+    if (visual === TechnoVisual.INDISTINCT || visual === TechnoVisual.DARKEN) {
+      if (remapped) {
+        // C++ vessel cloak branch passes `remap` as the SHAPE_FADING table
+        // for VISUAL_INDISTINCT/DARKEN. With no SHAPE_GHOST flag, Map.FadingShade
+        // is ignored and this is a single source-index house remap pass.
+        assets.drawFrameFrom(ctx, remapped, sheetName, frame, x, y, options);
+      } else {
+        assets.drawFrameFaded(ctx, sheetName, frame, x, y,
+          this.pal, RA_COLOR_BLACK, this.fadingShadeFrac(), options);
+      }
+      return;
+    }
+
+    const drawOptions = this.unitShadowOptions(options);
     if (remapped) {
       assets.drawFrameFrom(ctx, remapped, sheetName, frame, x, y, drawOptions);
     } else {
@@ -3055,6 +3543,7 @@ export class Renderer {
     assets: AssetManager,
     entity: Entity,
     screen: { x: number; y: number },
+    visual: TechnoVisual,
   ): void {
     if (!entity.hasTurret) return;
 
@@ -3072,20 +3561,20 @@ export class Renderer {
     switch (entity.type) {
       case UnitType.V_PT: {
         const offset = normalMovePointOffset(bodyTurretDir, 14);
-        this.drawVesselTurretFrame(ctx, assets, entity, 'mgun', turretFrame, screen.x + offset.dx, screen.y + offset.dy + 1);
+        this.drawVesselTurretFrame(ctx, assets, entity, 'mgun', turretFrame, screen.x + offset.dx, screen.y + offset.dy + 1, visual);
         break;
       }
       case UnitType.V_DD: {
         const offset = normalMovePointOffset(bodyTurretDir + DIR_S_256, 8);
-        this.drawVesselTurretFrame(ctx, assets, entity, 'ssam', turretFrame, screen.x + offset.dx, screen.y + offset.dy - 4);
+        this.drawVesselTurretFrame(ctx, assets, entity, 'ssam', turretFrame, screen.x + offset.dx, screen.y + offset.dy - 4, visual);
         break;
       }
       case UnitType.V_CA: {
         const front = normalMovePointOffset(bodyTurretDir, 22);
-        this.drawVesselTurretFrame(ctx, assets, entity, 'turr', turretFrame, screen.x + front.dx, screen.y + front.dy - 4);
+        this.drawVesselTurretFrame(ctx, assets, entity, 'turr', turretFrame, screen.x + front.dx, screen.y + front.dy - 4, visual);
         const rearDir = (dir256ToFacing16(primaryFacing256 + DIR_S_256) * 16) & 0xff;
         const rear = normalMovePointOffset(rearDir, 22);
-        this.drawVesselTurretFrame(ctx, assets, entity, 'turr', turretFrame, screen.x + rear.dx, screen.y + rear.dy - 4);
+        this.drawVesselTurretFrame(ctx, assets, entity, 'turr', turretFrame, screen.x + rear.dx, screen.y + rear.dy - 4, visual);
         break;
       }
     }
@@ -3117,11 +3606,6 @@ export class Renderer {
       // Logic slot is gone. Dying infantry and sunk vessels still occupy the
       // original active paths through Entity.occupiesCppLogic().
       if (!entity.occupiesCppLogic()) continue;
-      // C++ vessel.cpp:958-973 removes destroyed vessels from the rendered map
-      // path with Mark(MARK_UP) before delete this. TS may retain the object to
-      // preserve logic/RNG side effects, but the dead vessel sprite is gone.
-      if (!entity.alive && entity.stats.isVessel) continue;
-
       const ecx = Math.floor(entity.pos.x / CELL_SIZE);
       const ecy = Math.floor(entity.pos.y / CELL_SIZE);
 
@@ -3138,10 +3622,12 @@ export class Renderer {
 
       // Sub-cell offset is now baked into entity.leptonX/Y (Phase 4 lepton parity),
       // so pos.x/pos.y already reflect the sub-cell position. No extra offset needed.
-      // Air units: apply flight altitude offset (renders higher, shadow at ground level)
-      const altY = entity.isAirUnit ? entity.flightAltitude : 0;
+      // C++ techno.cpp:4392-4396 applies ObjectClass::Height to every techno
+      // draw, including paradropped infantry, not just AircraftClass objects.
+      const altY = leptonToPixel(entity.objectHeightLeptons());
       const screen = camera.worldToScreen(renderX, renderY);
-      const sheet = assets.getSheet(entity.stats.image);
+      const spriteSpec = entitySpriteRenderSpec(entity, this.playerHouse);
+      const sheet = assets.getSheet(spriteSpec.sheetName);
       const spriteW = sheet ? sheet.meta.frameWidth : (entity.stats.isInfantry ? 50 : 24);
       const spriteH = sheet ? sheet.meta.frameHeight : (entity.stats.isInfantry ? 39 : 24);
 
@@ -3156,8 +3642,16 @@ export class Renderer {
 
       // Submarine/phase cloak rendering
       let drawPlayerCloakShadowy = false;
-      if (entity.alive && entity.stats.isCloakable) {
-        if (entity.cloakState === CloakState.CLOAKED) {
+      const vesselVisual = entity.stats.isVessel
+        ? cppCloakVisualCharacter(entity)
+        : TechnoVisual.NORMAL;
+      if (entity.stats.isCloakable) {
+        if (entity.stats.isVessel) {
+          // C++ techno.cpp:4667-4724 has a vessel-specific cloak branch.
+          // It never uses alpha blending; transition states are rendered by
+          // SHAPE_FADING or the SpecialGhost predator/fading table.
+          if (vesselVisual === TechnoVisual.HIDDEN) continue;
+        } else if (entity.cloakState === CloakState.CLOAKED) {
           if (entity.isPlayerUnit) {
             // C++ techno.cpp:4316 + 4444 — player-owned fully cloaked
             // objects draw as VISUAL_SHADOWY via SHAPE_PREDATOR|SHAPE_FADING.
@@ -3287,6 +3781,8 @@ export class Renderer {
               frame = (32 + q * 8 + HARVESTER_LOAD_LIST[stage]) % sheet.meta.frameCount;
             }
           }
+        } else if (entity.isAnt) {
+          frame = cppAntUnitFrame(entity, tick) % sheet.meta.frameCount;
         } else {
           frame = entity.spriteFrame % sheet.meta.frameCount;
         }
@@ -3298,14 +3794,14 @@ export class Renderer {
           recoilDx = ro.dx;
           recoilDy = ro.dy;
         }
-        // Use house-remapped sheet if available (ants use native brown/olive sprites, no remap)
-        const remapped = entity.isAnt ? null : assets.getRemappedSheet(entity.stats.image, entity.house);
+        const remapped = assets.getRemappedSheet(spriteSpec.sheetName, spriteSpec.remapHouse);
         const aircraftRotation = entity.stats.isAircraft ? aircraftShapeRotation(entity) : 0;
-        const bodyDrawOptions = this.unitShadowOptions({
+        const bodyBaseOptions: DrawFrameOptions = {
           centerX: true,
           centerY: true,
           ...(aircraftRotation !== 0 ? { rotation256: aircraftRotation } : {}),
-        });
+        };
+        const bodyDrawOptions = this.technoShadowOptions(entity, bodyBaseOptions);
         const specialGhost = (assets as AssetManager & {
           drawFrameSpecialGhost?: (
             ctx: CanvasRenderingContext2D,
@@ -3323,25 +3819,39 @@ export class Renderer {
           specialGhost.call(assets, ctx, entity.stats.image, frame,
             screen.x + 1, screen.y + altY + 2, this.pal, { centerX: true, centerY: true });
         }
-        if (drawPlayerCloakShadowy && this.pal && typeof specialGhost === 'function') {
-          specialGhost.call(assets, ctx, entity.stats.image, frame,
+        if (entity.stats.isVessel) {
+          this.drawVesselTechnoFrame(ctx, assets, entity, spriteSpec.sheetName, frame,
+            screen.x, screen.y, vesselVisual, bodyBaseOptions);
+        } else if (drawPlayerCloakShadowy && this.pal && typeof specialGhost === 'function') {
+          specialGhost.call(assets, ctx, spriteSpec.sheetName, frame,
             screen.x, screen.y, this.pal, bodyDrawOptions);
         } else if (remapped) {
-          assets.drawFrameFrom(ctx, remapped, entity.stats.image, frame,
+          assets.drawFrameFrom(ctx, remapped, spriteSpec.sheetName, frame,
             screen.x, screen.y, bodyDrawOptions);
         } else {
-          assets.drawFrame(ctx, entity.stats.image, frame,
+          assets.drawFrame(ctx, spriteSpec.sheetName, frame,
             screen.x, screen.y, bodyDrawOptions);
         }
+        const radarDish = unitRadarDishRenderSpec(entity, tick, sheet.meta.frameCount);
+        if (radarDish) {
+          const radarDishOptions = this.technoShadowOptions(entity, { centerX: true, centerY: true });
+          if (remapped) {
+            assets.drawFrameFrom(ctx, remapped, spriteSpec.sheetName, radarDish.frame,
+              screen.x + radarDish.dx, screen.y + radarDish.dy, radarDishOptions);
+          } else {
+            assets.drawFrame(ctx, spriteSpec.sheetName, radarDish.frame,
+              screen.x + radarDish.dx, screen.y + radarDish.dy, radarDishOptions);
+          }
+        }
         if (entity.stats.isVessel) {
-          this.renderVesselTurrets(ctx, assets, entity, screen);
+          this.renderVesselTurrets(ctx, assets, entity, screen, vesselVisual);
         // Draw turret layer for turreted vehicles (frames 32-63)
         } else if (entity.hasTurret && sheet.meta.frameCount >= 64) {
           const interpTurret = lerpFacing32(entity.prevTurretFacing32, entity.turretFacing32, alpha);
           const turretFrame = (32 + (BODY_SHAPE[interpTurret] ?? 0)) % sheet.meta.frameCount;
           // JEEP turret y-offset (C++ udata.cpp Turret_Adjust)
           const turretOffY = entity.type === UnitType.V_JEEP ? -4 : 0;
-          const turretDrawOptions = this.unitShadowOptions({ centerX: true, centerY: true });
+          const turretDrawOptions = this.technoShadowOptions(entity, { centerX: true, centerY: true });
           if (remapped) {
             assets.drawFrameFrom(ctx, remapped, entity.stats.image, turretFrame,
               screen.x + recoilDx, screen.y + recoilDy + turretOffY, turretDrawOptions);
@@ -3400,21 +3910,22 @@ export class Renderer {
         }
         // C++ uses palette index remapping for house colors — handled by
         // getRemappedSheet() above. No fallback tint overlay needed.
-        // Predator shimmer during cloak/uncloak transitions (C++ SHAPE_PREDATOR pixel-offset sampling)
-        if (entity.stats.isCloakable &&
+        // Predator shimmer during non-vessel cloak/uncloak transitions
+        // (vessels use Techno_Draw_Object's separate vessel visual branch).
+        if (entity.stats.isCloakable && !entity.stats.isVessel &&
             (entity.cloakState === CloakState.CLOAKING || entity.cloakState === CloakState.UNCLOAKING)) {
           const shimmerOffset = ((tick % 4) < 2) ? 1 : -1;
           ctx.globalAlpha = preShadowAlpha * 0.3;
           const shimmerFrame = entity.spriteFrame % sheet.meta.frameCount;
           if (remapped) {
-            assets.drawFrameFrom(ctx, remapped, entity.stats.image, shimmerFrame,
+            assets.drawFrameFrom(ctx, remapped, spriteSpec.sheetName, shimmerFrame,
               screen.x + shimmerOffset, screen.y, { centerX: true, centerY: true });
-            assets.drawFrameFrom(ctx, remapped, entity.stats.image, shimmerFrame,
+            assets.drawFrameFrom(ctx, remapped, spriteSpec.sheetName, shimmerFrame,
               screen.x - shimmerOffset, screen.y + 1, { centerX: true, centerY: true });
           } else {
-            assets.drawFrame(ctx, entity.stats.image, shimmerFrame,
+            assets.drawFrame(ctx, spriteSpec.sheetName, shimmerFrame,
               screen.x + shimmerOffset, screen.y, { centerX: true, centerY: true });
-            assets.drawFrame(ctx, entity.stats.image, shimmerFrame,
+            assets.drawFrame(ctx, spriteSpec.sheetName, shimmerFrame,
               screen.x - shimmerOffset, screen.y + 1, { centerX: true, centerY: true });
           }
           ctx.globalAlpha = preShadowAlpha;
@@ -3458,28 +3969,30 @@ export class Renderer {
       // remap table that makes the entire unit/building glow red. We use the 'IronCurtain'
       // house key in remap-colors.json for pixel-accurate red-shift matching C++.
       if (entity.alive && entity.ironCurtainTick > 0) {
-        const icRemapped = sheet ? assets.getRemappedSheet(entity.stats.image, 'IronCurtain') : null;
+        const icRemapped = sheet ? assets.getRemappedSheet(spriteSpec.sheetName, 'IronCurtain') : null;
         if (icRemapped && sheet) {
           // Recompute the current body frame (mirrors logic from the sprite draw block above)
           let icFrame: number;
           if (!entity.stats.isInfantry && !entity.isAnt) {
             const interpBody = lerpFacing32(entity.prevBodyFacing32, entity.bodyFacing32, alpha);
             icFrame = (BODY_SHAPE[interpBody] ?? 0) % sheet.meta.frameCount;
+          } else if (entity.isAnt) {
+            icFrame = cppAntUnitFrame(entity, tick) % sheet.meta.frameCount;
           } else {
-            // Infantry/Ants: use entity.spriteFrame which handles all animation states
+            // Infantry: use entity.spriteFrame which handles all Doing states.
             icFrame = entity.spriteFrame % sheet.meta.frameCount;
           }
           // Redraw the unit body with FadingRed remap over the normal house-colored sprite.
           // C++ draws ONE pass with the red remap — we overdraw since the normal sprite
           // is already rendered above. Use source-over compositing (opaque redraw).
-          assets.drawFrameFrom(ctx, icRemapped, entity.stats.image, icFrame,
+          assets.drawFrameFrom(ctx, icRemapped, spriteSpec.sheetName, icFrame,
             screen.x, screen.y, { centerX: true, centerY: true });
           // If turreted, also redraw turret with red remap
           if (entity.hasTurret && sheet.meta.frameCount >= 64) {
             const interpTurret = lerpFacing32(entity.prevTurretFacing32, entity.turretFacing32, alpha);
             const turretFrame = (32 + (BODY_SHAPE[interpTurret] ?? 0)) % sheet.meta.frameCount;
             const turretOffY = entity.type === UnitType.V_JEEP ? -4 : 0;
-            assets.drawFrameFrom(ctx, icRemapped, entity.stats.image, turretFrame,
+            assets.drawFrameFrom(ctx, icRemapped, spriteSpec.sheetName, turretFrame,
               screen.x, screen.y + turretOffY, { centerX: true, centerY: true });
           }
         } else {
@@ -3715,33 +4228,62 @@ export class Renderer {
 
   // ─── Effects ─────────────────────────────────────────────
 
-  private renderLogicAnim(camera: Camera, assets: AssetManager, anim: LogicAnim): void {
+  private renderLogicAnim(
+    camera: Camera,
+    assets: AssetManager,
+    anim: LogicAnim,
+    entityById?: Map<number, Entity>,
+  ): void {
     const spec = logicAnimRenderSpec(anim.type);
     const sheet = assets.getSheet(spec.sprite);
     if (!sheet) return;
-    const screen = camera.worldToScreen(anim.x, anim.y);
+    const pos = logicAnimRenderPosition(anim, entityById);
+    const screen = camera.worldToScreen(pos.x, pos.y);
     const margin = Math.max(sheet.meta.frameWidth, sheet.meta.frameHeight);
     if (screen.x < -margin || screen.y < -margin || screen.x > this.width + margin || screen.y > this.height + margin) {
       return;
     }
-    const frame = Math.max(0, Math.min(anim.stage, sheet.meta.frameCount - 1));
+    const frame = Math.max(0, Math.min((anim.startFrame ?? 0) + anim.stage, sheet.meta.frameCount - 1));
     assets.drawFrame(this.ctx, spec.sprite, frame, screen.x, screen.y, {
       centerX: true,
       centerY: true,
     });
   }
 
-  private renderLogicAnims(camera: Camera, assets: AssetManager, layer: 'ground' | 'air'): void {
+  private renderFallingParachute(camera: Camera, assets: AssetManager, entity: Entity): void {
+    const sheet = assets.getSheet('parach');
+    if (!sheet) return;
+
+    // C++ object.cpp:1866 creates ANIM_PARACHUTE at Center_Coord moved north by
+    // 0x0030 + Height, then AnimClass::Attach_To stores that as an offset from
+    // Target_Coord. While attached, Center_Coord is therefore Target_Coord - 0x30.
+    const target = entity.targetCoordLeptons();
+    const x = target.lx * CELL_SIZE / LEPTON_SIZE;
+    const y = (target.ly - 0x30) * CELL_SIZE / LEPTON_SIZE;
+    const screen = camera.worldToScreen(x, y);
+    const margin = Math.max(sheet.meta.frameWidth, sheet.meta.frameHeight);
+    if (screen.x < -margin || screen.y < -margin || screen.x > this.width + margin || screen.y > this.height + margin) {
+      return;
+    }
+
+    const frame = Math.max(0, Math.min(entity.fallParachuteAnimStage, sheet.meta.frameCount - 1));
+    assets.drawFrame(this.ctx, 'parach', frame, screen.x, screen.y, {
+      centerX: true,
+      centerY: true,
+    });
+  }
+
+  private renderLogicAnims(camera: Camera, assets: AssetManager, layer: 'ground' | 'air', entities: Entity[] = []): void {
+    const entityById = new Map(entities.map(entity => [entity.id, entity] as const));
     const anims = this.logicAnims.filter(anim => {
       if (anim.delay > 0) return false;
-      const spec = logicAnimRenderSpec(anim.type);
-      return spec.groundLayer === (layer === 'ground');
+      return logicAnimRenderLayer(anim, entityById) === layer;
     });
 
     const sorted = layer === 'ground'
       ? [...anims].sort((a, b) => {
-          const ak = cppGroundAnimSortKey(a);
-          const bk = cppGroundAnimSortKey(b);
+          const ak = cppGroundAnimSortKey(a, entityById);
+          const bk = cppGroundAnimSortKey(b, entityById);
           const dy = ak.y - bk.y;
           if (dy !== 0) return dy;
           const dx = ak.x - bk.x;
@@ -3751,7 +4293,7 @@ export class Renderer {
       : anims;
 
     for (const anim of sorted) {
-      this.renderLogicAnim(camera, assets, anim);
+      this.renderLogicAnim(camera, assets, anim, entityById);
     }
   }
 
@@ -4178,6 +4720,8 @@ export class Renderer {
     }
     const cached = this.shadowTransTableCache.tables.get(frac);
     if (cached) return cached;
+    // C++ DisplayClass::ShadowTrans is built through Build_Translucent_Table,
+    // which calls SDLLIB Build_Fading_Table for each SHADOW.SHP control color.
     const table = makeFadingTable(this.pal, RA_COLOR_BLACK, frac);
     this.shadowTransTableCache.tables.set(frac, table);
     return table;
@@ -5227,7 +5771,8 @@ export class Renderer {
   static readonly SCROLL_BTN_Y_OFFSET = 97 * RESFACTOR - 1; // C++ Init_IO: Y + UP_Y_OFFSET*RESFACTOR, then Y--
 
   // Power bar (C++ power.h)
-  static readonly POWER_Y = 88 * RESFACTOR;          // absolute Y
+  static readonly POWER_Y = 88 * RESFACTOR;          // PowerBarShape draw Y (C++ literal 88*RESFACTOR)
+  static readonly POWER_LOGIC_Y = (7 + 70 + 13) * RESFACTOR; // C++ PowerClass::POWER_Y in hires
   static readonly POWER_HEIGHT = 110;                  // C++ POWER_HEIGHT (200-(7+70+13)) power.h:81-94 — resolution independent
   static readonly POWER_BAR_RENDERED_HEIGHT = (RESFACTOR as number) === 1 ? 76 : 153; // LORES: raw 76px, HIRES: (76×2+1) rescaled
   static readonly POWER_BAR_W = 5 * RESFACTOR;
@@ -5235,7 +5780,7 @@ export class Renderer {
   static readonly POWER_FILL_X_OFFSET = 5 * RESFACTOR; // C++ Fill_Rect starts at 245*RESFACTOR
   static readonly POWER_MARKER_X_OFFSET = 1 * RESFACTOR; // C++ PowerShape at (POWER_X*RESFACTOR)+RESFACTOR
   static readonly POWER_MARKER_Y_OFFSET = 0; // C++ power.cpp:241 has no extra y bias.
-  static readonly POWER_RAW_BOTTOM = Renderer.POWER_Y + (Renderer.POWER_HEIGHT - 1) * RESFACTOR; // C++ power.cpp:199
+  static readonly POWER_RAW_BOTTOM = Renderer.POWER_LOGIC_Y + (Renderer.POWER_HEIGHT - 1) * RESFACTOR; // C++ power.cpp:209
   static readonly POWER_FILL_BOTTOM = 175 * RESFACTOR + 1; // C++ power.cpp:230
 
   // Sidebar background shape Y positions (absolute, for house-specific art)
@@ -5373,19 +5918,6 @@ export class Renderer {
     this.renderButtonRow(this.width - this.sidebarW, this.sidebarW, assets);
   }
 
-  /** Whether C++ would have a visible drain marker after sidebar dirty paints. */
-  private shouldRenderPowerMarker(): boolean {
-    return this.sidebarPowerProduced !== 0 ||
-      this.sidebarPowerConsumed !== 0 ||
-      this.powerHeight !== 0 ||
-      this.drainHeight !== 0 ||
-      this.desiredPowerHeight !== 0 ||
-      this.desiredDrainHeight !== 0 ||
-      this.powerBounce !== 0 ||
-      this.drainBounce !== 0 ||
-      this.powerFlashTimer !== 0;
-  }
-
   /** Whether the C++ back buffer has PowerClass chrome above SIDE*.SHP chrome. */
   private shouldRedrawPowerBarAfterSidebar(): boolean {
     return this.powerChromeAboveSidebar;
@@ -5471,9 +6003,9 @@ export class Renderer {
     // Draw drain marker shape at drain height
     const markerSheet = assets.getSheet('power_marker');
     const markerY = bottom - (drawDrainHeight + 2 * RESFACTOR) + Renderer.POWER_MARKER_Y_OFFSET;
-    if (markerSheet && this.shouldRenderPowerMarker()) {
+    if (markerSheet) {
       assets.drawFrame(ctx, 'power_marker', 0, markerX, markerY);
-    } else if (!markerSheet && this.shouldRenderPowerMarker()) {
+    } else {
       // Fallback: white divider line at drain level
       ctx.strokeStyle = '#fff';
       ctx.lineWidth = 1;
@@ -5543,10 +6075,12 @@ export class Renderer {
             this.drawBitmapText(assets, 'READY', cameoX + camW / 2, iy + camH / 2 - 4, '#0f0', '6pt', { align: 'center' });
           }
         } else {
-          const progress = def.rechargeTicks > 0 ? swState.chargeTick / def.rechargeTicks : 0;
           const clockSheet = assets.getSheet('clock');
           if (clockSheet) {
-            const clockFrame = Math.min(Math.floor(progress * (clockSheet.meta.frameCount - 1)) + 1, clockSheet.meta.frameCount - 1);
+            const clockFrame = Math.min(
+              cppSuperweaponClockFrame(swState.chargeTick, def.rechargeTicks),
+              clockSheet.meta.frameCount - 1,
+            );
             this.drawSidebarClockOverlay(assets, clockFrame, cameoX, iy);
           }
         }
@@ -5630,7 +6164,12 @@ export class Renderer {
         y,
         this.pal,
         [{ sourceColorIndex: greenIndex, destColorIndex: RA_COLOR_BLACK, frac: 100 }],
-        { conquerFading: true },
+        {
+          conquerFading: true,
+          // RA/sidebar.cpp builds ClockTranslucentTable's fade row from GamePalette
+          // after DisplayClass::Init_Theater has applied Options.Fixup_Palette.
+          fadingTablePalette: this.getAdjustedGamePalette(),
+        },
       );
       return;
     }

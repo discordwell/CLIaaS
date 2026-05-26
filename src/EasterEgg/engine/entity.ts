@@ -1209,6 +1209,10 @@ export class Entity {
    *  Used to keep bullets/anims and later-spawned infantry in the same relative
    *  order when TS has to batch parts of the Logic array. */
   logicIndexHint?: number;
+  /** C++ UnitClass heap block ID, returned by Units.ID(this).
+   *  UnitClass::Shape_Number uses this as part of the ant walk/attack animation
+   *  phase, independently from the Logic vector index. */
+  cppUnitIndexHint?: number;
   /** C++ CellClass::Cell_Occupier linked-list order.
    *  CellClass::Occupy_Down prepends non-building objects, so the highest serial
    *  is the first object Evaluate_Cell sees in a shared cell. */
@@ -1690,6 +1694,7 @@ export class Entity {
 
   /** C++ TechnoClass::In_Range(COORDINATE, weapon) variant used by PCP path-shorten. */
   inRangeCoord(lx: number, ly: number): boolean {
+    if (!this.isLocked) return false;
     if (this.weapon) {
       const fc = this.fireCoordForWeapon(this.weapon);
       if (leptonDist(fc.lx, fc.ly, lx, ly) <= this.weapon.range * LEPTON_SIZE) return true;
@@ -1714,6 +1719,7 @@ export class Entity {
   }
 
   inRangeWithCoord(lx: number, ly: number, weapon: WeaponStats): boolean {
+    if (!this.isLocked) return false;
     const fc = this.fireCoordForWeapon(weapon);
     return leptonDist(fc.lx, fc.ly, lx, ly) <= weapon.range * LEPTON_SIZE;
   }
@@ -2360,6 +2366,46 @@ export class Entity {
     const movedL = Math.abs(finalLX) + Math.abs(finalLY);
     return Math.abs(dxL) + Math.abs(dyL) <= movedL + 5;
   }
+}
+
+export function aircraftPoseDir256(entity: Pick<Entity, 'type' | 'isFixedWing'>): number {
+  // C++ AircraftClass::Pose_Dir: TRAN faces north, fixed-wing aircraft face
+  // east down the runway, and helicopters parked on pads face northeast.
+  if (entity.type === UnitType.V_TRAN) return 0;
+  if (entity.isFixedWing) return 64;
+  return 32;
+}
+
+export function setObjectUnlimboFacing256(entity: Entity, dir256: number): void {
+  // TechnoClass::Unlimbo assigns PrimaryFacing to dir. FacingClass assignment
+  // sets current and desired together.
+  const dir = dir256 & 0xff;
+  const facing8 = dir256ToFacing8(dir);
+  const facing32 = dir256ToFacing32(dir);
+
+  entity.facing256 = dir;
+  entity.desiredFacing256 = dir;
+  entity.bodyFacing256 = dir;
+  entity.facing = facing8;
+  entity.desiredFacing = facing8;
+  entity.bodyFacing32 = facing32;
+  entity.prevBodyFacing32 = facing32;
+}
+
+export function setAircraftUnlimboFacing256(entity: Entity, dir256: number): void {
+  // AircraftClass::Unlimbo assigns SecondaryFacing to the same dir after the
+  // TechnoClass primary-facing setup.
+  setObjectUnlimboFacing256(entity, dir256);
+  const dir = dir256 & 0xff;
+  const facing8 = dir256ToFacing8(dir);
+  const facing32 = dir256ToFacing32(dir);
+
+  entity.turretFacing256 = dir;
+  entity.desiredTurretFacing256 = dir;
+  entity.turretFacing = facing8;
+  entity.desiredTurretFacing = facing8;
+  entity.turretFacing32 = facing32;
+  entity.prevTurretFacing32 = facing32;
 }
 
 export function clearFallingParachuteAnim(entity: Entity): void {

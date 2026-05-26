@@ -50,7 +50,32 @@ function generateMakeAssets(): [string, string, string][] {
   );
   // Theater-specific construction TEM files
   entries.push(['TEMPERAT.MIX', 'HBOXMAKE.TEM', 'hboxmake']);
+  entries.push(['SNOW.MIX', 'HBOXMAKE.SNO', 'hboxmake_snow']);
   entries.push(['TEMPERAT.MIX', 'MSLOMAKE.TEM', 'mslomake']);
+  entries.push(['SNOW.MIX', 'MSLOMAKE.SNO', 'mslomake_snow']);
+  return entries;
+}
+
+/** BuildingTypeClass::Init loads body/buildup art from the active theater for IsTheater buildings. */
+function generateTheaterStructureAssets(): [string, string, string][] {
+  const entries: [string, string, string][] = [
+    ['SNOW.MIX', 'HBOX.SNO', 'hbox_snow'],
+    ['SNOW.MIX', 'MSLO.SNO', 'mslo_snow'],
+  ];
+  const civilianTypes = [
+    ...Array.from({ length: 18 }, (_, index) => index + 1),
+    ...Array.from({ length: 18 }, (_, index) => index + 20),
+  ];
+  for (const typeNum of civilianTypes) {
+    const typeId = `V${typeNum.toString().padStart(2, '0')}`;
+    const outputName = typeId.toLowerCase();
+    if (typeNum >= 20) {
+      entries.push(['TEMPERAT.MIX', `${typeId}.TEM`, outputName]);
+    }
+    if (typeNum <= 11 || typeNum >= 20) {
+      entries.push(['SNOW.MIX', `${typeId}.SNO`, `${outputName}_snow`]);
+    }
+  }
   return entries;
 }
 
@@ -224,6 +249,7 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['CONQUER.MIX', 'LITNING.SHP', 'litning'],       // Lightning effect (Tesla)
   ['CONQUER.MIX', 'DOGBULLT.SHP', 'dogbullt'],     // Dog leap attack (C++ anim.cpp ANIM_DOGBITE, 32 frames)
   ['CONQUER.MIX', 'SPUTNIK.SHP', 'sputnik'],       // GPS satellite launch (C++ ANIM_SPUTNIK)
+  ['CONQUER.MIX', 'PARACH.SHP', 'parach'],         // Infantry parachute (C++ ANIM_PARACHUTE)
   ['CONQUER.MIX', 'PARABOMB.SHP', 'parabomb'],     // Parachute bomb (C++ ANIM_PARA_BOMB)
   ['CONQUER.MIX', 'CHRONBOX.SHP', 'chronbox'],     // Chronosphere warp box effect (C++ ANIM_CHRONO_BOX)
   ['CONQUER.MIX', 'WEAP2.SHP', 'weap2'],           // War Factory door overlay (C++ bdata.cpp WarFactoryOverlay, 8 frames)
@@ -251,6 +277,7 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['CONQUER.MIX', 'H2O_EXP3.SHP', 'h2o_exp3'],   // Water explosion 3
   ['CONQUER.MIX', 'FLAK.SHP', 'flak'],           // Anti-aircraft flak burst
   ['CONQUER.MIX', 'GUNFIRE.SHP', 'gunfire'],     // Muzzle flash sprite
+  ['CONQUER.MIX', 'MINIGUN.SHP', 'minigun'],     // C++ ANIM_GUN_* firing effect
   // Buildings — production (CONQUER.MIX)
   ['CONQUER.MIX', 'FACT.SHP', 'fact'],    // Construction Yard
   ['CONQUER.MIX', 'POWR.SHP', 'powr'],    // Power Plant
@@ -307,6 +334,13 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['TEMPERAT.MIX', 'V16.TEM', 'v16'],    // Well
   ['TEMPERAT.MIX', 'V17.TEM', 'v17'],    // Steel drum
   ['TEMPERAT.MIX', 'V18.TEM', 'v18'],    // Sandbags
+  ['SNOW.MIX', 'V12.SNO', 'v12_snow'],
+  ['SNOW.MIX', 'V13.SNO', 'v13_snow'],
+  ['SNOW.MIX', 'V14.SNO', 'v14_snow'],
+  ['SNOW.MIX', 'V15.SNO', 'v15_snow'],
+  ['SNOW.MIX', 'V16.SNO', 'v16_snow'],
+  ['SNOW.MIX', 'V17.SNO', 'v17_snow'],
+  ['SNOW.MIX', 'V18.SNO', 'v18_snow'],
   // Walls / fences
   ['CONQUER.MIX', 'FENC.SHP', 'fenc'],    // Chain-link fence
   ['CONQUER.MIX', 'BRIK.SHP', 'brik'],    // Concrete wall
@@ -411,6 +445,9 @@ const SPRITE_ASSETS_MANUAL: [string, string, string][] = [
   ['SNOW.MIX', 'TC04.SNO', 'tc04_snow'],
   ['TEMPERAT.MIX', 'TC05.TEM', 'tc05'],
   ['SNOW.MIX', 'TC05.SNO', 'tc05_snow'],
+  // Ore mine TerrainClass object (RA tdata.cpp TERRAIN_MINE)
+  ['TEMPERAT.MIX', 'MINE.TEM', 'mine'],
+  ['SNOW.MIX', 'MINE.SNO', 'mine_snow'],
   // Interior TerrainClass objects (RA tdata.cpp TERRAIN_BOXES01..09)
   ['INTERIOR.MIX', 'BOXES01.INT', 'boxes01'],
   ['INTERIOR.MIX', 'BOXES02.INT', 'boxes02'],
@@ -431,6 +468,7 @@ const SPRITE_ASSETS: [string, string, string][] = [
   ...generateSpecialWeaponIconAssets(),
   ...generateSmudgeAssets(),
   ...generateCorpseAssets(),
+  ...generateTheaterStructureAssets(),
 ];
 
 function log(msg: string): void {

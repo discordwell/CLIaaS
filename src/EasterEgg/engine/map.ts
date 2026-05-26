@@ -1206,7 +1206,7 @@ export class GameMap {
 
     this.displayVisibility[idx] = 1;
     if (this.displayCellShadow(cx, cy) === -1) {
-      this.displayVisibility[idx] = 2;
+      this.setDisplayVisible(cx, cy);
     }
 
     const facingOrder: Array<[number, number]> = [
@@ -1225,7 +1225,7 @@ export class GameMap {
         if (this.displayVisibility[nIdx] === 0) {
           this.mapDisplayCell(nx, ny);
         } else {
-          this.displayVisibility[nIdx] = 2;
+          this.setDisplayVisible(nx, ny);
         }
       } else if (shadow !== -2 && this.displayVisibility[nIdx] === 0) {
         this.mapDisplayCell(nx, ny);
@@ -1281,14 +1281,51 @@ export class GameMap {
     this.visibleCells.length = 0;
   }
 
-  /** Creep shadow: downgrade all visible/fog cells back to shroud (darkness).
-   *  Used by SCA04EA tunnel mission — map reshrouds periodically until power is restored. */
+  private shroudDisplayCell(cx: number, cy: number): void {
+    if (!this.inDisplayBounds(cx, cy)) return;
+    const idx = cy * MAP_CELLS + cx;
+    if (this.displayVisibility[idx] === 0) return;
+
+    this.displayVisibility[idx] = 0;
+    this.visibility[idx] = 0;
+
+    const facingOrder: Array<[number, number]> = [
+      [0, -1], [1, -1], [1, 0], [1, 1],
+      [0, 1], [-1, 1], [-1, 0], [-1, -1],
+    ];
+    for (const [dx, dy] of facingOrder) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (!this.inDisplayBounds(nx, ny)) continue;
+      const nIdx = ny * MAP_CELLS + nx;
+      if (this.displayVisibility[nIdx] === 0) continue;
+      this.displayVisibility[nIdx] = 1;
+      if (this.visibility[nIdx] !== 0) this.visibility[nIdx] = 1;
+    }
+  }
+
+  /** C++ DisplayClass::Encroach_Shadow. Only mapped shadow-edge cells
+   *  (IsMapped && !IsVisible) are shrouded; fully visible cells survive. */
   creepShadow(): void {
-    this.shroudAll();
+    const toShroud: number[] = [];
+    for (let cy = this.boundsY; cy < this.boundsY + this.boundsH; cy++) {
+      for (let cx = this.boundsX; cx < this.boundsX + this.boundsW; cx++) {
+        const idx = cy * MAP_CELLS + cx;
+        if (this.displayVisibility[idx] === 1) toShroud.push(idx);
+      }
+    }
+
+    for (const idx of toShroud) {
+      this.shroudDisplayCell(idx % MAP_CELLS, Math.floor(idx / MAP_CELLS));
+    }
   }
 
   /** Update fog of war: downgrade visible to fog, then reveal around units */
-  updateFogOfWar(units: Array<{ x: number; y: number; sight: number }>): void {
+  updateFogOfWar(
+    units: Array<{ x: number; y: number; sight: number }>,
+    options: { mapDisplay?: boolean } = {},
+  ): void {
+    const mapDisplay = options.mapDisplay ?? true;
     // Downgrade only previously visible cells to fog (O(visible) instead of O(16384))
     for (const idx of this.visibleCells) {
       if (this.visibility[idx] === 2) this.visibility[idx] = 1;
@@ -1312,7 +1349,7 @@ export class GameMap {
             this.visibility[idx] = 2;
             this.visibleCells.push(idx);
           }
-          this.mapDisplayCell(rx, ry);
+          if (mapDisplay) this.mapDisplayCell(rx, ry);
         }
       }
     }

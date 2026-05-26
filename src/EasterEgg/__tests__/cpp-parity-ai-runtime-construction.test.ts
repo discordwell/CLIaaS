@@ -553,9 +553,11 @@ describe('runtime AI construction path', () => {
     expect(access.logicIndexHintForNewObject()).toBe(1);
   });
 
-  it('combat logic-index hints keep corpse AnimClass slots for the full six-frame decay', () => {
-    // Live WASM SCG12EA tick trace: CORPSE3 created at tick 41 remains active
-    // through elapsed 179 (stage 5) and disappears once elapsed reaches 180.
+  it('combat logic-index hints release corpse AnimClass slots after the first normalized corpse stage', () => {
+    // Live WASM SCG10EB tick trace: CORPSE1 created at tick 50 is still active
+    // through elapsed 29 and disappears once elapsed reaches 30. Although the
+    // extracted corpse sheets contain multiple frames, the C++ AnimClass
+    // lifetime in this path is one normalized Delay=15 stage at GameSpeed=3.
     const game = new Game(createCanvas());
     game.corpses.push({
       x: 100,
@@ -570,9 +572,9 @@ describe('runtime AI construction path', () => {
     });
 
     const access = game as unknown as { logicIndexHintForNewObject(): number };
-    game.tick = 179;
+    game.tick = 29;
     expect(access.logicIndexHintForNewObject()).toBe(1);
-    game.tick = 180;
+    game.tick = 30;
     expect(access.logicIndexHintForNewObject()).toBe(0);
   });
 
@@ -764,16 +766,32 @@ describe('runtime AI construction path', () => {
       14,
     );
 
-    const access = game as unknown as { tickWeapDoorAI(s: MapStructure): void };
-    for (let i = 0; i < 7; i++) access.tickWeapDoorAI(weap);
+    const access = game as unknown as {
+      tick: number;
+      tickWeapDoorAI(s: MapStructure): void;
+    };
+    // DoorClass::AI runs after Mission_Unload in this same TechnoClass::AI pass,
+    // but CDTimerClass was armed on the current frame, so it does not spend a
+    // countdown tick yet.
+    access.tickWeapDoorAI(weap);
+    expect(weap.weapDoorState).toBe(1);
+    expect(weap.weapDoorStage).toBe(0);
+    expect(weap.weapDoorTimer).toBe(8);
+
+    for (let frame = 1; frame <= 7; frame++) {
+      access.tick = frame;
+      access.tickWeapDoorAI(weap);
+    }
     expect(weap.weapDoorState).toBe(1);
     expect(weap.weapDoorStage).toBe(0);
     expect(weap.weapDoorTimer).toBe(1);
 
+    access.tick = 8;
     access.tickWeapDoorAI(weap);
     expect(weap.weapDoorState).toBe(1);
     expect(weap.weapDoorStage).toBe(1);
     expect(weap.weapDoorTimer).toBe(8);
+    expect(weap.doorFrame).toBe(1);
   });
 
   it('WEAP Mission_Unload CLEAR_BIB advances to OPEN when the factory exit is clear', () => {

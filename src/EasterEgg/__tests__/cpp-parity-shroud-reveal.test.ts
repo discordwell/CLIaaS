@@ -200,7 +200,7 @@ describe('AllyReveal — allied structures reveal fog (C++ house.cpp:2158)', () 
     updateFogOfWar(ctx);
 
     // The allied structure should have revealed cells around it
-    const sight = STRUCTURE_SIGHT['FACT'] ?? 5;
+    const sight = STRUCTURE_SIGHT['FACT'] ?? 0;
     expect(map.getVisibility(structCx, structCy)).toBe(2);
     // Check a cell within sight range is visible
     expect(map.getVisibility(structCx + 1, structCy)).toBe(2);
@@ -339,37 +339,27 @@ describe('ShroudRate — periodic reshroud mechanics (C++ logic.cpp:256-258)', (
 // ==========================================================================
 
 describe('Encroach_Shadow vs creepShadow (display.cpp:4109-4136)', () => {
-  /**
-   * MISMATCH: C++ Encroach_Shadow only targets fog cells (IsMapped && !IsVisible),
-   * NOT already-visible cells. It downgrades fog→shroud but leaves currently
-   * visible cells (within unit sight ranges) alone.
-   *
-   * TS creepShadow() calls shroudAll() which resets ALL cells to shroud (0),
-   * including currently visible cells. The subsequent updateFogOfWar() call
-   * will re-reveal around units, but the intermediate state is more aggressive
-   * than C++.
-   *
-   * C++ flow: Encroach_Shadow targets fog edges → Shroud_Cell on each →
-   *           All_To_Look() re-reveals around units.
-   * TS flow: creepShadow() → shroudAll() → next tick updateFogOfWar() reveals.
-   */
-  it('C++ Encroach_Shadow only shrouds fog cells, not visible cells', () => {
+  it('shrouds mapped display-edge cells, not fully visible cells', () => {
     // C++ display.cpp:4115: if (cellptr->IsVisible || !cellptr->IsMapped) continue;
-    // This means: skip visible cells (in unit sight range) and skip already-shrouded cells.
-    // Only fog cells (IsMapped=true, IsVisible=false) get marked IsToShroud=true.
+    // Map_Cell's IsVisible flag means the cell is no longer a display shroud
+    // edge. Edge cells can still be inside a unit sight radius and get shrouded
+    // until All_To_Look maps them again.
     const map = new GameMap();
 
-    // Set up: cell at (60,60) is visible (2), cell at (70,70) is fog (1)
-    map.setVisibility(60, 60, 2);
-    map.setVisibility(70, 70, 1);
+    map.updateFogOfWar([{
+      x: 64 * CELL_SIZE + CELL_SIZE / 2,
+      y: 64 * CELL_SIZE + CELL_SIZE / 2,
+      sight: 5,
+    }]);
 
-    // C++ would only target (70,70) — the fog cell — not (60,60) the visible cell.
-    // Verify TS creepShadow resets BOTH (documenting the mismatch).
+    expect(map.getDisplayVisibility(64, 64)).toBe(2);
+    expect(map.getDisplayVisibility(69, 64)).toBe(1);
     map.creepShadow();
 
-    // TS creepShadow resets everything to 0 — more aggressive than C++
-    expect(map.getVisibility(60, 60)).toBe(0); // C++ would keep this visible
-    expect(map.getVisibility(70, 70)).toBe(0); // C++ would also shroud this
+    expect(map.getDisplayVisibility(64, 64)).toBe(2);
+    expect(map.getVisibility(64, 64)).toBe(2);
+    expect(map.getDisplayVisibility(69, 64)).toBe(0);
+    expect(map.getVisibility(69, 64)).toBe(0);
   });
 
   it('C++ Encroach_Shadow then calls All_To_Look to re-reveal (display.cpp:4133)', () => {
@@ -377,25 +367,26 @@ describe('Encroach_Shadow vs creepShadow (display.cpp:4109-4136)', () => {
     // around all player units/structures. The net effect is that only cells
     // outside current sight ranges are reshrouded.
     const map = new GameMap();
-    const entity = makeEntity('E1', House.Spain, 64 * CELL_SIZE, 64 * CELL_SIZE, 5);
+    const look = [{
+      x: 64 * CELL_SIZE + CELL_SIZE / 2,
+      y: 64 * CELL_SIZE + CELL_SIZE / 2,
+      sight: 5,
+    }];
 
-    const ctx = makeFogContext({
-      map,
-      entities: [entity],
-    });
-
-    // First pass: reveal around unit
-    updateFogOfWar(ctx);
+    // First explicit Look/Sight_From pass: C++ Map_Cell writes display shroud.
+    map.updateFogOfWar(look);
     expect(map.getVisibility(64, 64)).toBe(2);
     expect(map.getVisibility(65, 65)).toBe(2);
 
-    // Simulate Encroach_Shadow → TS creepShadow nukes everything
+    // Simulate Encroach_Shadow. The display-edge cell is reshrouded.
+    expect(map.getDisplayVisibility(69, 64)).toBe(1);
     map.creepShadow();
-    expect(map.getVisibility(64, 64)).toBe(0); // Temporarily shrouded
+    expect(map.getVisibility(69, 64)).toBe(0);
 
-    // Then All_To_Look equivalent — re-reveal around units
-    updateFogOfWar(ctx);
+    // Then All_To_Look equivalent — explicit Look re-reveals around units.
+    map.updateFogOfWar(look);
     expect(map.getVisibility(64, 64)).toBe(2); // Restored by unit sight
+    expect(map.getVisibility(69, 64)).toBe(2);
   });
 });
 

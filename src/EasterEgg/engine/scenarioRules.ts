@@ -11,6 +11,7 @@ import {
   WARHEAD_PROPS,
   WARHEAD_VS_ARMOR,
   type WarheadType,
+  type WeaponFiringAnim,
   type WeaponStats,
   WEAPON_STATS,
 } from './types';
@@ -68,6 +69,20 @@ function parseIniBool(raw: string | undefined): boolean | undefined {
   if (normalized === 'yes' || normalized === 'true' || normalized === '1') return true;
   if (normalized === 'no' || normalized === 'false' || normalized === '0') return false;
   return undefined;
+}
+
+function parseWeaponFiringAnim(raw: string | undefined): WeaponFiringAnim | undefined {
+  switch ((raw ?? '').trim().toLowerCase()) {
+    case 'gunfire':
+    case 'muzzle_flash':
+      return 'gunfire';
+    case 'minigun':
+      return 'minigun';
+    case 'samfire':
+      return 'samfire';
+    default:
+      return undefined;
+  }
 }
 
 function iniSpeedToMph(rawSpeed: number): number {
@@ -315,6 +330,11 @@ export function buildScenarioRuleOverrides(
     if (section.has('Projectile')) applyProjectileOverride(base, section.get('Projectile'), rawSections);
     if (section.has('Warhead')) base.warhead = section.get('Warhead')! as WarheadType;
     if (section.has('Burst')) base.burst = Number.parseInt(section.get('Burst')!, 10);
+    if (section.has('Anim')) {
+      const anim = parseWeaponFiringAnim(section.get('Anim'));
+      if (anim) base.firingAnim = anim;
+      else delete base.firingAnim;
+    }
     if (section.has('Supress')) {
       const isSupressed = parseIniBool(section.get('Supress'));
       if (isSupressed !== undefined) base.isSupressed = isSupressed;

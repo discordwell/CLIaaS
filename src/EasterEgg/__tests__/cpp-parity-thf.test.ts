@@ -113,6 +113,10 @@ describe('THF stats verification (idata.cpp / rules.ini)', () => {
     expect(stats.isInfantry).toBe(true);
   });
 
+  it('uses the THF.SHP image declared in C++ idata.cpp', () => {
+    expect(stats.image).toBe('thf');
+  });
+
   it('crushable is true (infantry.cpp -- all infantry are crushable)', () => {
     expect(stats.crushable).toBe(true);
   });
