@@ -2,6 +2,7 @@ import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createHmac } from 'crypto';
+import { timingSafeStringEqual } from '@/lib/security/timing-safe';
 import { processLinearWebhook } from '@/lib/integrations/engineering-sync';
 import * as linkStore from '@/lib/integrations/link-store';
 
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
       const rawBody = await request.text();
       const signature = request.headers.get('linear-signature') ?? '';
       const expected = createHmac('sha256', webhookSecret).update(rawBody).digest('hex');
-      if (signature !== expected) {
+      if (!timingSafeStringEqual(signature, expected)) {
         return NextResponse.json({ error: 'Invalid webhook signature' }, { status: 401 });
       }
       const payload = JSON.parse(rawBody) as Record<string, unknown>;

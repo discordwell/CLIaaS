@@ -5,6 +5,7 @@
 
 import { createHmac, timingSafeEqual } from 'crypto';
 import { createLogger } from '@/lib/logger';
+import { timingSafeStringEqual } from '@/lib/security/timing-safe';
 
 const logger = createLogger('meta');
 
@@ -54,7 +55,7 @@ export function verifyWebhook(
   const config = getMetaConfig();
   const verifyToken = config?.verifyToken ?? 'demo-verify-token';
 
-  if (mode === 'subscribe' && token === verifyToken) {
+  if (mode === 'subscribe' && timingSafeStringEqual(token, verifyToken)) {
     return challenge;
   }
 

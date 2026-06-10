@@ -2,6 +2,7 @@ import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextRequest, NextResponse } from "next/server";
 import { syncZendeskTicketById } from "@/lib/zendesk/sync";
 import { parseJsonBody } from '@/lib/parse-json-body';
+import { timingSafeStringEqual } from '@/lib/security/timing-safe';
 
 function extractTicketId(payload: Record<string, unknown>): string | null {
   const direct = payload.ticket_id ?? payload.ticketId ?? payload.id;
@@ -26,8 +27,8 @@ function checkSecret(request: NextRequest): boolean {
     request.headers.get("x-webhook-secret") ||
     request.headers.get("authorization");
   if (!header) return false;
-  if (header.startsWith("Bearer ")) return header.slice("Bearer ".length) === secret;
-  return header === secret;
+  if (header.startsWith("Bearer ")) return timingSafeStringEqual(header.slice("Bearer ".length), secret);
+  return timingSafeStringEqual(header, secret);
 }
 
 export async function POST(request: NextRequest) {

@@ -3,6 +3,8 @@
  * Provides methods for sending messages, configuring webhooks, and verifying requests.
  */
 
+import { timingSafeStringEqual } from '@/lib/security/timing-safe';
+
 const TELEGRAM_API = 'https://api.telegram.org/bot';
 
 export async function sendMessage(botToken: string, chatId: string, text: string): Promise<unknown> {
@@ -30,5 +32,5 @@ export async function getMe(botToken: string): Promise<unknown> {
 
 export function verifyWebhookSecret(request: Request, secret: string): boolean {
   const header = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
-  return header === secret;
+  return timingSafeStringEqual(header, secret);
 }

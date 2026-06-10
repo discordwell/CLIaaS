@@ -28,7 +28,7 @@
 - When making design decisions, think about what senior management would choose and act accordingly.
 
 ## MCP Server
-- MCP server entry point: `cli/mcp/server.ts` (stdio transport, 60 tools, 6 resources, 4 prompts)
+- MCP server entry point: `cli/mcp/server.ts` (stdio transport, 219 tools, 6 resources, 4 prompts)
 - Auto-discovery: `.mcp.json` in project root
 - See `AGENTS.md` for the full tool catalog, domain model, and workflow recipes
 - CLI commands: `cliaas mcp install`, `cliaas mcp setup`, `cliaas mcp test`

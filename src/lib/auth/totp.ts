@@ -6,6 +6,7 @@
  */
 
 import { randomBytes, createHmac, createCipheriv, createDecipheriv } from 'crypto';
+import { timingSafeStringEqual } from '@/lib/security/timing-safe';
 
 const TOTP_PERIOD = 30; // seconds
 const TOTP_DIGITS = 6;
@@ -104,12 +105,7 @@ export function verifyTotp(secret: string, code: string, time?: number): boolean
 
 /** Constant-time string comparison to prevent timing attacks. */
 export function timingSafeEqual(a: string, b: string): boolean {
-  const maxLen = Math.max(a.length, b.length);
-  let result = a.length ^ b.length; // non-zero if lengths differ
-  for (let i = 0; i < maxLen; i++) {
-    result |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
-  }
-  return result === 0;
+  return timingSafeStringEqual(a, b);
 }
 
 // ---- Backup Codes ----

@@ -9,19 +9,19 @@
 | Metric | Value |
 |--------|-------|
 | Pages | 96 (Next.js App Router) |
-| API Routes | 194 |
+| API Routes | 382 |
 | Components | 24 shared React components |
 | Library modules | 83 (`src/lib/`) |
 | CLI files | 84 (`cli/`) |
-| CLI commands | 44 registered command groups |
+| CLI commands | 59 registered command groups |
 | Connectors | 10 helpdesk integrations |
 | Engineering integrations | 2 (Jira Cloud, Linear) |
 | CRM integrations | 2 (Salesforce, HubSpot) |
-| MCP tools | 110 (across 21 modules) |
+| MCP tools | 219 (across 36 modules) |
 | MCP resources | 6 |
 | MCP prompts | 4 workflow prompts |
-| DB tables | 90 (Drizzle/PostgreSQL, RLS-enabled) |
-| Tests | 95 files, ~9,200 LOC |
+| DB tables | 157 (Drizzle/PostgreSQL, RLS-enabled) |
+| Tests | 308 files, ~61,000 LOC (excl. Easter Egg) |
 | Source LOC | ~61,000 (excl. Easter Egg + tests) |
 | Dependencies | 24 prod + 19 dev |
 
@@ -38,8 +38,8 @@
          ▼                ▼                   ▼
 ┌─────────────────┐ ┌──────────────┐ ┌──────────────────┐
 │  Next.js App    │ │  Commander   │ │  MCP Server      │
-│  38 pages       │ │  37 commands │ │  60 tools        │
-│  148 API routes │ │  10 connect. │ │  6 resources     │
+│  96 pages       │ │  59 commands │ │  219 tools       │
+│  382 API routes │ │  10 connect. │ │  6 resources     │
 │                 │ │  3 providers │ │  4 prompts       │
 └────────┬────────┘ └──────┬───────┘ └────────┬─────────┘
          │                 │                   │
@@ -56,7 +56,7 @@
          ▼                  ▼                  ▼
 ┌─────────────────┐ ┌──────────────┐ ┌──────────────────┐
 │  PostgreSQL     │ │  JSONL Files │ │  External APIs   │
-│  73 tables      │ │  (demo mode) │ │  Twilio, Meta,   │
+│  157 tables     │ │  (demo mode) │ │  Twilio, Meta,   │
 │  pgvector RAG   │ │  /cliaas-data│ │  Twitter, SMTP   │
 └─────────────────┘ └──────────────┘ └──────────────────┘
 ```
@@ -74,7 +74,7 @@ CLIaaS operates in two persistence modes:
 - Used for: demos, CLI operations, development
 
 ### PostgreSQL Mode (full features)
-- 53 tables via Drizzle ORM (`src/db/schema.ts`)
+- 157 tables via Drizzle ORM (`src/db/schema.ts`)
 - Multi-tenant: `tenants` → `workspaces` → all domain tables
 - pgvector extension for RAG embeddings (`vector(1536)`)
 - Connection pool: singleton via `global.__cliaasPool` (dev) or `new Pool` (prod)
@@ -120,7 +120,7 @@ Each domain has a dedicated store in `src/lib/`:
 
 ---
 
-## Database Schema (90 tables)
+## Database Schema (157 tables)
 
 ### Core Multi-Tenancy (3)
 `tenants` → `workspaces` → `users`
@@ -442,6 +442,7 @@ BullMQ + Redis for reliable background processing with graceful fallback to inli
 - Rate limiting: `src/lib/security/rate-limiter.ts`
 - Security headers: `src/lib/security/headers.ts`
 - Audit logging: `src/lib/security/audit-log.ts`
+- Timing-safe secret comparison: `src/lib/security/timing-safe.ts` — `timingSafeStringEqual()` shared by TOTP, Telegram/Meta webhook verification, Zendesk sync webhook, and Linear HMAC signature checks
 - SSRF prevention in webhooks: URL validation, private IP blocking
 - Path traversal protection in sandbox IDs
 
