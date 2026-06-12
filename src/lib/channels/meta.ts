@@ -53,9 +53,14 @@ export function verifyWebhook(
   challenge: string,
 ): string | null {
   const config = getMetaConfig();
-  const verifyToken = config?.verifyToken ?? 'demo-verify-token';
+  if (!config) {
+    // Meta not configured: fail closed in production rather than honoring the public
+    // 'demo-verify-token'. Keep the demo token only outside production for local setup.
+    if (process.env.NODE_ENV === 'production') return null;
+    return mode === 'subscribe' && timingSafeStringEqual(token, 'demo-verify-token') ? challenge : null;
+  }
 
-  if (mode === 'subscribe' && timingSafeStringEqual(token, verifyToken)) {
+  if (mode === 'subscribe' && timingSafeStringEqual(token, config.verifyToken)) {
     return challenge;
   }
 

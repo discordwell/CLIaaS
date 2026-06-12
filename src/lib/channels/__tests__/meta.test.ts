@@ -78,4 +78,15 @@ describe('meta', () => {
     const result = verifyWebhook('subscribe', 'wrong-token', 'challenge-123');
     expect(result).toBeNull();
   });
+
+  it('verifyWebhook fails closed in production when Meta is unconfigured', () => {
+    process.env.NODE_ENV = 'production';
+    // No META_* env (deleted in beforeEach): must NOT honor the public demo token.
+    expect(verifyWebhook('subscribe', 'demo-verify-token', 'challenge-123')).toBeNull();
+  });
+
+  it('verifyWebhook still honors the demo token outside production (local setup)', () => {
+    process.env.NODE_ENV = 'development';
+    expect(verifyWebhook('subscribe', 'demo-verify-token', 'challenge-123')).toBe('challenge-123');
+  });
 });

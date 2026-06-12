@@ -21,7 +21,11 @@ function extractTicketId(payload: Record<string, unknown>): string | null {
 
 function checkSecret(request: NextRequest): boolean {
   const secret = process.env.ZENDESK_WEBHOOK_SECRET;
-  if (!secret) return true;
+  if (!secret) {
+    // No secret configured: fail closed in production (never accept an unsigned webhook
+    // on a live deployment); allow in dev/test so the endpoint stays testable locally.
+    return process.env.NODE_ENV !== "production";
+  }
   const header =
     request.headers.get("x-zendesk-webhook-secret") ||
     request.headers.get("x-webhook-secret") ||
