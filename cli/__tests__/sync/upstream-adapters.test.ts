@@ -176,6 +176,35 @@ describe('Groove adapter', () => {
   });
 });
 
+describe('HelpCrunch adapter', () => {
+  const adapter = getUpstreamAdapter('helpcrunch', { apiKey: 'hc' })!;
+
+  it('supports update and reply', () => {
+    expect(adapter.supportsUpdate).toBe(true);
+    expect(adapter.supportsReply).toBe(true);
+  });
+
+  it('maps solved/closed to HelpCrunch "Closed" (5), not "Opened"', async () => {
+    const { helpcrunchUpdateChat } = await import('../../connectors/helpcrunch.js');
+    (helpcrunchUpdateChat as ReturnType<typeof vi.fn>).mockClear();
+    // Regression: closed used to map to 2 ("Opened"), re-opening a closed chat.
+    await adapter.updateTicket('7', { status: 'closed' });
+    expect(helpcrunchUpdateChat).toHaveBeenCalledWith({ apiKey: 'hc' }, 7, { status: 5 });
+    await adapter.updateTicket('8', { status: 'solved' });
+    expect(helpcrunchUpdateChat).toHaveBeenCalledWith({ apiKey: 'hc' }, 8, { status: 5 });
+  });
+
+  it('maps open/pending/on_hold to valid HelpCrunch status codes', async () => {
+    const { helpcrunchUpdateChat } = await import('../../connectors/helpcrunch.js');
+    await adapter.updateTicket('10', { status: 'open' });
+    expect(helpcrunchUpdateChat).toHaveBeenCalledWith({ apiKey: 'hc' }, 10, { status: 2 });
+    await adapter.updateTicket('11', { status: 'pending' });
+    expect(helpcrunchUpdateChat).toHaveBeenCalledWith({ apiKey: 'hc' }, 11, { status: 3 });
+    await adapter.updateTicket('12', { status: 'on_hold' });
+    expect(helpcrunchUpdateChat).toHaveBeenCalledWith({ apiKey: 'hc' }, 12, { status: 4 });
+  });
+});
+
 describe('Intercom adapter', () => {
   const adapter = getUpstreamAdapter('intercom', { token: 'ic-tok' })!;
 

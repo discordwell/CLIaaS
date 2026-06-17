@@ -87,6 +87,7 @@ function evaluateCondition(condition: Condition, ticket: TicketContext): boolean
     case 'changed_to':
       if (condition.field === 'status') return ticket.status === String(targetVal) && ticket.previousStatus !== ticket.status;
       if (condition.field === 'priority') return ticket.priority === String(targetVal) && ticket.previousPriority !== ticket.priority;
+      if (condition.field === 'assignee') return ticket.assignee === String(targetVal) && ticket.previousAssignee !== ticket.assignee;
       return false;
 
     case 'in':

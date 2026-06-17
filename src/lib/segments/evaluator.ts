@@ -51,6 +51,40 @@ function getFieldValue(customer: EvaluableCustomer, field: string): unknown {
   return customer[field];
 }
 
+/**
+ * Ordered comparison (gt/gte/lt/lte).
+ * A missing field never satisfies an ordered comparison. When the query value is
+ * numeric, the field is coerced to a number (so values stored as strings like "20"
+ * compare numerically rather than lexicographically). Otherwise a string comparison
+ * is used, which preserves correct ordering for ISO-8601 date fields.
+ */
+function compareOrdered(
+  operator: 'gt' | 'gte' | 'lt' | 'lte',
+  fieldValue: unknown,
+  value: unknown,
+): boolean {
+  if (fieldValue === undefined || fieldValue === null) return false;
+
+  let a: number | string;
+  let b: number | string;
+  if (typeof value === 'number') {
+    const n = typeof fieldValue === 'number' ? fieldValue : Number(fieldValue);
+    if (Number.isNaN(n)) return false;
+    a = n;
+    b = value;
+  } else {
+    a = String(fieldValue);
+    b = String(value);
+  }
+
+  switch (operator) {
+    case 'gt': return a > b;
+    case 'gte': return a >= b;
+    case 'lt': return a < b;
+    case 'lte': return a <= b;
+  }
+}
+
 function evaluateCondition(customer: EvaluableCustomer, condition: SegmentCondition): boolean {
   const { field, operator, value } = condition;
   const fieldValue = getFieldValue(customer, field);
@@ -61,21 +95,10 @@ function evaluateCondition(customer: EvaluableCustomer, condition: SegmentCondit
     case 'neq':
       return fieldValue !== value;
     case 'gt':
-      return typeof fieldValue === 'number' && typeof value === 'number'
-        ? fieldValue > value
-        : String(fieldValue) > String(value);
     case 'gte':
-      return typeof fieldValue === 'number' && typeof value === 'number'
-        ? fieldValue >= value
-        : String(fieldValue) >= String(value);
     case 'lt':
-      return typeof fieldValue === 'number' && typeof value === 'number'
-        ? fieldValue < value
-        : String(fieldValue) < String(value);
     case 'lte':
-      return typeof fieldValue === 'number' && typeof value === 'number'
-        ? fieldValue <= value
-        : String(fieldValue) <= String(value);
+      return compareOrdered(operator, fieldValue, value);
     case 'contains': {
       if (Array.isArray(fieldValue)) {
         return fieldValue.includes(value);

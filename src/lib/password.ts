@@ -17,5 +17,10 @@ export async function verifyPassword(
   if (!salt || !key) return false;
   const buf = (await scryptAsync(password, salt, 64)) as Buffer;
   const keyBuf = Buffer.from(key, 'hex');
+  // A malformed or legacy stored hash can decode to a different byte length, and
+  // timingSafeEqual throws RangeError unless both buffers are the same length. Fail
+  // closed instead of throwing on the login path. The length is fixed by the KDF and
+  // is not secret-dependent, so this early return leaks nothing useful to an attacker.
+  if (keyBuf.length !== buf.length) return false;
   return timingSafeEqual(buf, keyBuf);
 }

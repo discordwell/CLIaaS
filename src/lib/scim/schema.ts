@@ -167,8 +167,37 @@ export function applyGroupPatchOps(
         group.members = newMembers;
       }
     }
-    if (op.op === 'remove' && op.path === 'members') {
-      group.members = [];
+    if (op.op === 'remove') {
+      // SCIM clients express single-member removal in several ways (RFC 7644 §3.5.2):
+      //   { op:'remove', path:'members', value:[{ value:'u-2' }] }   (Okta)
+      //   { op:'remove', path:'members', value:{ value:'u-2' } }     (some IdPs)
+      //   { op:'remove', path:'members[value eq "u-2"]' }            (Azure AD)
+      // Only a bare `path:'members'` with no filter removes ALL members — anything
+      // else must remove only the named member(s) so deprovisioning one user does
+      // not silently wipe the entire group.
+      const pathMatch = typeof op.path === 'string'
+        ? op.path.match(/^members\[\s*value\s+eq\s+"([^"]+)"\s*\]$/i)
+        : null;
+      if (op.path === 'members' || pathMatch) {
+        const removeIds = new Set<string>();
+        let filtered = pathMatch != null;
+        if (pathMatch) removeIds.add(pathMatch[1]);
+        if (Array.isArray(op.value)) {
+          filtered = true;
+          for (const m of op.value as Array<{ value?: string }>) {
+            if (m?.value) removeIds.add(m.value);
+          }
+        } else if (op.value && typeof op.value === 'object' && 'value' in (op.value as object)) {
+          filtered = true;
+          const v = (op.value as { value?: string }).value;
+          if (v) removeIds.add(v);
+        }
+        if (filtered) {
+          group.members = (group.members ?? []).filter((m) => !removeIds.has(m.id));
+        } else {
+          group.members = [];
+        }
+      }
     }
   }
   group.updatedAt = new Date().toISOString();

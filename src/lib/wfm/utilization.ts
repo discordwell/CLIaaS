@@ -17,6 +17,11 @@ export function calculateUtilization(
   if (filters?.from) { const t = new Date(filters.from).getTime(); fe = fe.filter(e => new Date(e.startTime).getTime() >= t); fs = fs.filter(e => new Date(e.startedAt).getTime() >= t); }
   if (filters?.to) { const t = new Date(filters.to).getTime(); fe = fe.filter(e => new Date(e.startTime).getTime() <= t); fs = fs.filter(e => new Date(e.startedAt).getTime() <= t); }
 
+  // Status changes must be in chronological order: the duration of an "online"
+  // interval is bounded by the *immediately following* status change. Callers and
+  // the DB layer may supply the log newest-first, so sort ascending here.
+  fs.sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
+
   const nm = new Map<string, string>();
   for (const s of schedules) nm.set(s.userId, s.userName);
   for (const e of fs) nm.set(e.userId, e.userName);

@@ -7,13 +7,18 @@ import type {
   UpstreamCreateResult,
 } from '../upstream-adapter.js';
 
-/** Map CLIaaS status → HelpCrunch numeric status. */
+/**
+ * Map CLIaaS status → HelpCrunch numeric status.
+ * HelpCrunch codes (see connectors/helpcrunch.ts mapChatStatus):
+ *   1=New, 2=Opened, 3=Pending, 4=On-hold, 5=Closed, 6=No-comm, 7=Empty.
+ * `open` maps to 2 (Opened), which round-trips since import maps both 1 and 2 → 'open'.
+ */
 const STATUS_MAP: Record<string, number> = {
-  open: 0,     // new/open
-  pending: 1,  // in progress
-  on_hold: 1,  // in progress (closest match)
-  solved: 2,   // closed
-  closed: 2,   // closed
+  open: 2,     // Opened
+  pending: 3,  // Pending
+  on_hold: 4,  // On-hold
+  solved: 5,   // Closed
+  closed: 5,   // Closed
 };
 
 export function createHelpcrunchAdapter(auth: Record<string, string>): ConnectorWriteAdapter {
@@ -27,7 +32,7 @@ export function createHelpcrunchAdapter(auth: Record<string, string>): Connector
     async updateTicket(externalId: string, updates: UpstreamTicketUpdate): Promise<void> {
       const { helpcrunchUpdateChat } = await import('../../connectors/helpcrunch.js');
       const mapped: Record<string, unknown> = {};
-      if (updates.status) mapped.status = STATUS_MAP[updates.status] ?? 0;
+      if (updates.status) mapped.status = STATUS_MAP[updates.status] ?? 2;
       await helpcrunchUpdateChat(hcAuth, Number(externalId), mapped);
     },
 

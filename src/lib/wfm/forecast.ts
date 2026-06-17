@@ -12,9 +12,16 @@ export function generateForecast(
   const daysAhead = options?.daysAhead ?? 7;
   const alpha = 0.3;
 
+  // The EMA below weights later samples most heavily, so each bucket's samples
+  // must be in chronological order for the forecast to reflect recent volume.
+  // Callers and the DB layer may supply snapshots newest-first, so sort ascending.
+  const ordered = [...snapshots].sort(
+    (a, b) => new Date(a.snapshotHour).getTime() - new Date(b.snapshotHour).getTime(),
+  );
+
   // Group by (dayOfWeek, hour)
   const buckets = new Map<string, number[]>();
-  for (const snap of snapshots) {
+  for (const snap of ordered) {
     const d = new Date(snap.snapshotHour);
     const dow = d.getUTCDay();
     const hour = d.getUTCHours();

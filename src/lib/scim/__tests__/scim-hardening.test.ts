@@ -157,6 +157,44 @@ describe('applyGroupPatchOps', () => {
     applyGroupPatchOps(group, patch);
     expect(group.members).toEqual([]);
   });
+
+  const threeMemberGroup = () => ({
+    name: 'Support',
+    updatedAt: '',
+    members: [
+      { id: 'u-1', name: 'Alice' },
+      { id: 'u-2', name: 'Bob' },
+      { id: 'u-3', name: 'Carol' },
+    ],
+  });
+
+  it('removes only the named member for the array value form (Okta)', () => {
+    // A value-filtered remove op must not wipe the whole group (regression: members = []).
+    const group = threeMemberGroup();
+    applyGroupPatchOps(group, {
+      schemas: [SCIM_SCHEMAS.group],
+      Operations: [{ op: 'remove', path: 'members', value: [{ value: 'u-2' }] }],
+    });
+    expect(group.members!.map((m) => m.id)).toEqual(['u-1', 'u-3']);
+  });
+
+  it('removes only the named member for the single-object value form', () => {
+    const group = threeMemberGroup();
+    applyGroupPatchOps(group, {
+      schemas: [SCIM_SCHEMAS.group],
+      Operations: [{ op: 'remove', path: 'members', value: { value: 'u-2' } }],
+    });
+    expect(group.members!.map((m) => m.id)).toEqual(['u-1', 'u-3']);
+  });
+
+  it('removes only the named member for the path-filter form (Azure AD)', () => {
+    const group = threeMemberGroup();
+    applyGroupPatchOps(group, {
+      schemas: [SCIM_SCHEMAS.group],
+      Operations: [{ op: 'remove', path: 'members[value eq "u-2"]' }],
+    });
+    expect(group.members!.map((m) => m.id)).toEqual(['u-1', 'u-3']);
+  });
 });
 
 // ---- Store tests ----

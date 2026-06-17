@@ -346,6 +346,9 @@ export async function checkTicketSLA(input: CheckTicketInput): Promise<SLACheckR
       frCalendarElapsed = e.calendarElapsed;
       frBusinessElapsed = e.businessElapsed;
       frStatus = frElapsedMin > frTargetMin ? 'breached' : 'ok';
+      if (frStatus === 'breached') {
+        frBreachedAt = frDueAt ?? new Date(createdAt.getTime() + frTargetMs).toISOString();
+      }
     } else {
       const e = computeElapsed(createdAt, now);
       frElapsedMin = e.elapsed;

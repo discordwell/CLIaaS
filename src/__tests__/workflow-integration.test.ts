@@ -201,6 +201,16 @@ describe('Automation Conditions', () => {
     expect(evaluateConditions(conds, baseTicket())).toBe(false);
   });
 
+  it('changed_to fires for assignee reassignment (parity with the changed operator)', () => {
+    const conds: RuleConditions = { all: [{ field: 'assignee', operator: 'changed_to', value: 'alice' }] };
+    // Reassigned bob -> alice: matches.
+    expect(evaluateConditions(conds, baseTicket({ assignee: 'alice', previousAssignee: 'bob' }))).toBe(true);
+    // Already alice (no change): does not match.
+    expect(evaluateConditions(conds, baseTicket({ assignee: 'alice', previousAssignee: 'alice' }))).toBe(false);
+    // Changed, but not to alice: does not match.
+    expect(evaluateConditions(conds, baseTicket({ assignee: 'bob', previousAssignee: 'carol' }))).toBe(false);
+  });
+
   // ---- Combined conditions (AND / OR logic) ----
 
   it('AND logic: all conditions must match', () => {

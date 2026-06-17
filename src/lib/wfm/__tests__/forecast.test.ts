@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generateForecast, calculateStaffing } from '../forecast';
-import type { VolumeSnapshot, AgentSchedule } from '../types';
+import type { VolumeSnapshot, AgentSchedule, ForecastPoint } from '../types';
 
 function makeSyntheticSnapshots(weeks: number): VolumeSnapshot[] {
   const snapshots: VolumeSnapshot[] = [];
@@ -69,6 +69,36 @@ describe('generateForecast', () => {
     for (const point of forecast) {
       expect(point.predictedVolume).toBe(0);
     }
+  });
+
+  it('produces an order-independent EMA that weights recent volume', () => {
+    // Five weekly samples for the same (dayOfWeek, hour) bucket with a recent spike.
+    // EMA must reflect the most recent value regardless of the row order supplied.
+    const week = 7 * 86400000;
+    const base = new Date('2026-02-02T10:00:00.000Z'); // Monday, 10:00 UTC
+    const dow = base.getUTCDay();
+    const values = [5, 5, 5, 5, 100];
+    const ascending: VolumeSnapshot[] = values.map((v, i) => ({
+      id: `vs-${i}`,
+      snapshotHour: new Date(base.getTime() + i * week).toISOString(),
+      channel: 'all',
+      ticketsCreated: v,
+      ticketsResolved: 0,
+    }));
+    const descending = [...ascending].reverse();
+
+    const pickMon10 = (pts: ForecastPoint[]) =>
+      pts.find(p => p.dayOfWeek === dow && p.hour.slice(11, 13) === '10');
+
+    const asc = pickMon10(generateForecast(ascending, { daysAhead: 7 }));
+    const desc = pickMon10(generateForecast(descending, { daysAhead: 7 }));
+
+    expect(asc).toBeDefined();
+    expect(desc).toBeDefined();
+    // EMA (alpha=0.3) over [5,5,5,5,100] = 33.5 — the recent spike dominates.
+    expect(asc!.predictedVolume).toBe(33.5);
+    // Reversing the input rows must not change the forecast.
+    expect(desc!.predictedVolume).toBe(asc!.predictedVolume);
   });
 
   it('handles single week of data', () => {

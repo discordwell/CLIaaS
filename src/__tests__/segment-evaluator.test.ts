@@ -35,6 +35,29 @@ describe('evaluateCustomer', () => {
     expect(evaluateCustomer(customers[3], { conditions: [{ field: 'ticketCount', operator: 'lte', value: 0 }] })).toBe(true);
   });
 
+  it('ordered operators do not match a missing field', () => {
+    // Eve (customers[4]) has no totalSpend. A missing field must never satisfy an
+    // ordered comparison. (Regression: the old lexicographic fallback evaluated
+    // String(undefined) > String(100) === "undefined" > "100" === true.)
+    expect(evaluateCustomer(customers[4], { conditions: [{ field: 'totalSpend', operator: 'gt', value: 100 }] })).toBe(false);
+    expect(evaluateCustomer(customers[4], { conditions: [{ field: 'totalSpend', operator: 'gte', value: 0 }] })).toBe(false);
+    expect(evaluateCustomer(customers[4], { conditions: [{ field: 'totalSpend', operator: 'lt', value: 100 }] })).toBe(false);
+  });
+
+  it('ordered operators coerce numeric strings instead of comparing lexicographically', () => {
+    // A numeric query value compares numerically even when the stored field is a string
+    // (e.g. imported JSON). Lexicographically "20" > "9" is false; numerically 20 > 9 is true.
+    const c: EvaluableCustomer = { id: 'x', tags: [], ticketCount: '20' as unknown as number };
+    expect(evaluateCustomer(c, { conditions: [{ field: 'ticketCount', operator: 'gt', value: 9 }] })).toBe(true);
+    expect(evaluateCustomer(c, { conditions: [{ field: 'ticketCount', operator: 'lt', value: 9 }] })).toBe(false);
+  });
+
+  it('ordered operators still compare ISO date strings lexicographically', () => {
+    const c: EvaluableCustomer = { id: 'x', tags: [], signupDate: '2025-06-01' };
+    expect(evaluateCustomer(c, { conditions: [{ field: 'signupDate', operator: 'gt', value: '2024-01-01' }] })).toBe(true);
+    expect(evaluateCustomer(c, { conditions: [{ field: 'signupDate', operator: 'lt', value: '2024-01-01' }] })).toBe(false);
+  });
+
   it('contains operator checks array membership', () => {
     const query: SegmentQuery = { conditions: [{ field: 'tags', operator: 'contains', value: 'vip' }] };
     expect(evaluateCustomer(customers[0], query)).toBe(true);

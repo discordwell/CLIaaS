@@ -109,4 +109,25 @@ describe('SLA with business hours', () => {
       }
     }
   });
+
+  it('sets breachedAt for a solved ticket that missed first response with no reply recorded', async () => {
+    const { checkTicketSLA } = await import('@/lib/sla');
+
+    // Urgent demo policy: first-response target 15 min. Ticket created and solved 60
+    // minutes later, with no agent reply recorded. (Regression: this branch reported
+    // status 'breached' but left breachedAt undefined, unlike the sibling branches.)
+    const results = await checkTicketSLA({
+      ticket: makeTicket({
+        status: 'solved',
+        createdAt: '2026-03-09T09:00:00Z',
+        updatedAt: '2026-03-09T10:00:00Z',
+      }),
+      firstReplyAt: null,
+    });
+
+    const urgent = results.find(r => r.policyId === 'sla-urgent');
+    expect(urgent).toBeDefined();
+    expect(urgent!.firstResponse.status).toBe('breached');
+    expect(urgent!.firstResponse.breachedAt).toBeDefined();
+  });
 });

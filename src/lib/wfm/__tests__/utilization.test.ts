@@ -82,6 +82,24 @@ describe('calculateUtilization', () => {
     expect(records).toHaveLength(0);
   });
 
+  it('bounds each online interval by the next status change regardless of input order', () => {
+    // Two online intervals (09:00-10:00 and 15:00-16:00) => 120 available minutes.
+    // The status log is supplied newest-first (as the DB layer returns it). Before
+    // the chronological-sort fix, Array.find matched the first *array* element later
+    // than each entry, stretching the 09:00 online interval all the way to 16:00.
+    const t = (h: number) => `2026-03-09T${String(h).padStart(2, '0')}:00:00.000Z`;
+    const statusLog: AgentStatusEntry[] = [
+      { id: 'a4', userId: 'user-1', userName: 'Alice', status: 'away', startedAt: t(16) },
+      { id: 'a3', userId: 'user-1', userName: 'Alice', status: 'online', startedAt: t(15) },
+      { id: 'a2', userId: 'user-1', userName: 'Alice', status: 'away', startedAt: t(10) },
+      { id: 'a1', userId: 'user-1', userName: 'Alice', status: 'online', startedAt: t(9) },
+    ];
+
+    const records = calculateUtilization([], statusLog, []);
+    expect(records).toHaveLength(1);
+    expect(records[0].availableMinutes).toBe(120);
+  });
+
   it('filters by userId', () => {
     const timeEntries: TimeEntry[] = [
       { id: 'te-1', ticketId: 't-1', userId: 'user-1', userName: 'Alice', startTime: oneHourAgo.toISOString(), endTime: null, durationMinutes: 10, billable: false, notes: '' },

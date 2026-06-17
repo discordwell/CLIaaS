@@ -1,5 +1,24 @@
 # Session Summaries
 
+## 2026-06-17T08:35Z — Correctness & data-integrity sweep: 8 verified bug fixes (WFM/SLA, automation, SCIM, password, HelpCrunch), each with a regression test
+
+Audited non-EasterEgg business logic with parallel bug-hunting agents, independently re-verified every finding in the actual code, and fixed 8 contained correctness bugs. Each fix has a test proven to fail before / pass after (verified by `git stash`ing the source fixes and re-running):
+
+- **Segment evaluator** (`src/lib/segments/evaluator.ts`): `gt/gte/lt/lte` fell back to `String(a) > String(b)`, so a missing field matched `> 100` (`"undefined" > "100"` is `true`) and numeric strings sorted lexicographically (`"20" < "9"`). New `compareOrdered`: missing field never matches; a numeric query value coerces the field (NaN→false); non-numeric query keeps ISO-date string comparison.
+- **Automation `changed_to`** (`src/lib/automation/conditions.ts`): handled only `status`/`priority`, so `assignee changed_to X` rules silently never fired. Added the `assignee` branch (parity with `changed`).
+- **SLA** (`src/lib/sla.ts`): a solved/closed ticket that breached first-response with no reply recorded reported `status:'breached'` but left `breachedAt` undefined (sibling branches set it). Now set.
+- **WFM utilization** (`src/lib/wfm/utilization.ts`): online-interval end used `Array.find` (first *array* element after the entry) not the chronological successor; with the DB layer returning status logs newest-first, the first online interval stretched to the last event (~4× inflated available minutes). Now sorts the log ascending.
+- **WFM forecast** (`src/lib/wfm/forecast.ts`): EMA folded samples in input order, so the newest-first DB feed weighted the oldest sample most. Now sorts snapshots chronologically before the EMA.
+- **SCIM group PATCH** (`src/lib/scim/schema.ts`): a single-member remove wiped the entire group. Now removes only the named member(s), handling all three wire forms — array value (Okta), single-object value, and `members[value eq "id"]` path filter (Azure AD); a bare `path:'members'` with no filter still clears all.
+- **Password verify** (`src/lib/password.ts`): a malformed/legacy stored hash whose key decoded to ≠64 bytes threw `RangeError` from `timingSafeEqual` on the login path. Now length-guards and fails closed.
+- **HelpCrunch upstream** (`cli/sync/upstream-adapters/helpcrunch.ts`): status map sent `solved/closed → 2` ("Opened"), re-opening closed chats, and `open → 0` (invalid code). Corrected to real codes (Opened=2, Pending=3, On-hold=4, Closed=5), round-tripping `mapChatStatus`.
+
+**Process:** 4 parallel bug-hunting agents (WFM/SLA, automation, connectors, security) → independent re-verification in source → fix + test → adversarial code-review subagent on the diff (it surfaced the SCIM single-object/path-filter gaps; fixed before commit).
+
+**Verification:** typecheck clean · lint 0 errors (no new warnings) · 8 affected test files = 185 tests pass · broad non-EasterEgg vitest 306 files / 4,040 pass, 0 fail. EasterEgg untouched. Committed in 4 themed commits; not pushed (orchestrator handles push).
+
+**NOT fixed — flagged, out of scope (too risky to drive-by on a prod auth path):** `src/lib/auth/saml.ts` RSA-verifies `<SignedInfo>` but never binds it to the assertion (DigestValue is never computed/compared) and skips Conditions/Audience/Issuer checks — a potential SAML assertion-forgery / replay path. A correct fix needs XML-DSig digest + canonicalization (or `xml-crypto`) plus new signed fixtures; warrants a dedicated, reviewed effort.
+
 ## 2026-06-11T08:30Z — Quality gate restored: lint 3,439→0 errors, 5 broken Next 16 pages fixed, lint wired into CI
 
 **Background:** previous session flagged `pnpm lint` failing repo-wide (3,814 problems), which silently broke `pnpm check` (it starts with lint) — and CI never ran lint at all.
@@ -360,28 +379,6 @@ Both candidates need verification and may regress existing scenarios. The 1-tick
 **Functionally equivalent for fire timing** (both fire 14 ticks after dispatch), but the DISPLAYED value differs — and crucially, when an entity's INITIAL mt is set differently (e.g. from init RNG ordering), the offset propagates.
 
 **SCG13 t101 structural fix would be:** audit init-time RNG ordering to make TS's per-entity jitter values match WASM's at scenario load. This requires per-call instrumentation + comparison. Not a quick fix.
-
-## 2026-04-30T07:50Z — DriveClass mid-cycle Mission_Move dispatch (SCG07EA t17 + SCG11EA t28 structural fix)
-
-**Structural fix landed in 2 commits:**
-- `abca2aa1` — vessel-only first cut
-- `c64004f9` — broadened to all DriveClass entities (vehicles + vessels)
-
-**What:** added in-loop `dispatchMission` call within `runDriveClassAI`'s double-cycle. After each iter's `updateMove`, when post-state matches PCP_END Commence pop signature (`mission===MOVE && missionTimer===0 && missionQueue===null`), fires Mission_Move dispatch. The Timer→14+jitter transition prevents re-trigger this iter.
-
-**Mechanism:** C++ vehicles (unit.cpp:404+472, unit.cpp:1756 PCP_END) and vessels (vessel.cpp:592+659) both run multiple Commence calls per AI tick. Each pop sets Timer=0; when MissionClass::AI dispatches afterward, Mission_Move fires `Random_Pick(0,2)` jitter (foot.cpp:536, tag 60010). WASM observations:
-- SCG07EA t17: vessel[182] 2×, vessel[183] 3×
-- SCG11EA t28: MCV-157 fires Mission_Move 2×
-
-**Files changed:**
-- `src/EasterEgg/engine/index.ts:5156-5188` — added gated dispatch within runDriveClassAI loop
-- `src/EasterEgg/__tests__/cpp-parity-vessel-double-commence-dispatch.test.ts` — new test (3 cases)
-
-**Test status:** 51,379 vitest pass (+3 new tests). No regressions in SCG04/SCG06/SCG07/SCG11/SCG13 parity tests.
-
-**Verification pending:** playwright `test-first-divergence.ts` needs deploy to confirm SCG07EA t17 / SCG11EA t28 first-divergence advances.
-
-**Caveat:** Fix only applies when `runDriveClassAI` runs (STAGE B did NOT dispatch — Timer != 0 entering STAGE B). The case where STAGE B's Mission.MOVE handler runs AND PCP_END pops queue mid-handler isn't yet covered. The C++ mechanism for that double-fire (MCV-157 has Timer==0 entering tick 28 from prior PCP_END) remains unexplained — see `cpp-parity-scg11ea-tick-28-proxy.test.ts` notes. Logically MissionClass::AI dispatches once per `obj->AI()` call per logic.cpp:306, so the multi-fire path is non-obvious.
 
 # Key Findings
 
