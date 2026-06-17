@@ -80,13 +80,13 @@ describe('meta', () => {
   });
 
   it('verifyWebhook fails closed in production when Meta is unconfigured', () => {
-    process.env.NODE_ENV = 'production';
+    (process.env as Record<string, string | undefined>).NODE_ENV = 'production';
     // No META_* env (deleted in beforeEach): must NOT honor the public demo token.
     expect(verifyWebhook('subscribe', 'demo-verify-token', 'challenge-123')).toBeNull();
   });
 
   it('verifyWebhook still honors the demo token outside production (local setup)', () => {
-    process.env.NODE_ENV = 'development';
+    (process.env as Record<string, string | undefined>).NODE_ENV = 'development';
     expect(verifyWebhook('subscribe', 'demo-verify-token', 'challenge-123')).toBe('challenge-123');
   });
 });

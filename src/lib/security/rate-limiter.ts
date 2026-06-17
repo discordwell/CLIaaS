@@ -19,7 +19,6 @@ interface RateLimitConfig {
 // ---- Global singleton ----
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasRateLimiter: Map<string, RateLimitBucket> | undefined;
 }
 

@@ -27,7 +27,6 @@ export interface PipelineConfig extends AIAgentConfig {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasAIPipelineConfig: PipelineConfig | undefined;
 }
 

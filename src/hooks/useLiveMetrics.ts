@@ -37,7 +37,7 @@ export function useLiveMetrics(): UseLiveMetricsResult {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
 
-  const connect = useCallback(() => {
+  const connect = useCallback(function connectStream() {
     // Don't reconnect if unmounted
     if (!mountedRef.current) return;
 
@@ -86,7 +86,7 @@ export function useLiveMetrics(): UseLiveMetricsResult {
 
       reconnectTimerRef.current = setTimeout(() => {
         reconnectTimerRef.current = null;
-        connect();
+        connectStream();
       }, delay);
     };
   }, []);

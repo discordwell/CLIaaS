@@ -52,7 +52,7 @@ export async function getListings(opts?: {
       conditions.push(eq(schema.marketplaceListings.featured, opts.featured));
     }
 
-    let query = db.select().from(schema.marketplaceListings)
+    const query = db.select().from(schema.marketplaceListings)
       .where(conditions.length > 1 ? and(...conditions) : conditions[0])
       .orderBy(schema.marketplaceListings.installCount);
 

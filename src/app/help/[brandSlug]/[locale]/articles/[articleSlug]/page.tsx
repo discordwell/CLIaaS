@@ -134,7 +134,7 @@ export default async function ArticleDetailPage({
 }) {
   const { brandSlug, locale, articleSlug } = await params;
 
-  let brand = await getDbBrand(brandSlug);
+  const brand = await getDbBrand(brandSlug);
   let brandName = brand?.name ?? "";
   let brandTitle =
     ((brand as Record<string, unknown>)?.help_center_title as string) ?? "";

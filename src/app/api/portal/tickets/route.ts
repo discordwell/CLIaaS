@@ -92,7 +92,7 @@ export async function GET(request: NextRequest) {
             .offset(offset);
 
           // For org scope, resolve requester emails
-          let requesterEmailMap: Record<string, string> = {};
+          const requesterEmailMap: Record<string, string> = {};
           if (scope === 'org') {
             const requesterIds = [...new Set(rows.map((r) => r.requesterId).filter(Boolean))] as string[];
             if (requesterIds.length > 0) {

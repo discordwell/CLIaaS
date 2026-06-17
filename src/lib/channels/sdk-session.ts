@@ -35,11 +35,8 @@ function persistSessions(store: Map<string, SDKSession>): void {
 // ---- Global singleton storage ----
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasSdkSessions: Map<string, SDKSession> | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasSdkSessionsLoaded: boolean | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasSdkByToken: Map<string, string> | undefined;
 }
 

@@ -5,6 +5,7 @@
 
 import { readJsonlFile, writeJsonlFile } from '../jsonl-store';
 import { eventBus } from '../realtime/events';
+import { getBusinessHours, isWithinBusinessHours } from '../wfm/business-hours';
 import type { AgentAvailabilityStatus } from './types';
 
 interface AvailabilityEntry {
@@ -81,17 +82,13 @@ class AvailabilityTracker {
     // If groupId is provided, check if the group's business hours are currently active
     if (groupId) {
       try {
-        const bhMod = require('../wfm/business-hours') as {
-          getBusinessHours: (id?: string) => Array<{ id: string; isDefault?: boolean }>;
-          isWithinBusinessHours: (config: unknown) => boolean;
-        };
-        const configs = bhMod.getBusinessHours();
+        const configs = getBusinessHours();
         const defaultConfig = configs.find(c => c.isDefault);
-        if (defaultConfig && !bhMod.isWithinBusinessHours(defaultConfig)) {
+        if (defaultConfig && !isWithinBusinessHours(defaultConfig)) {
           return false;
         }
       } catch {
-        // Business hours module not available — don't block routing
+        // Business hours lookup failed — don't block routing
       }
     }
 

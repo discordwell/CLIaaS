@@ -94,7 +94,7 @@ export default async function BrandHelpCenterPage({
   const { brandSlug } = await params;
 
   // Try DB first, then JSONL fallback
-  let brand = await getDbBrand(brandSlug);
+  const brand = await getDbBrand(brandSlug);
   let brandName = brand?.name ?? "";
   let brandTitle = (brand as Record<string, unknown>)?.help_center_title as string | undefined;
   let defaultLocale = ((brand as Record<string, unknown>)?.default_locale as string) ?? "en";

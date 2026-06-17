@@ -36,6 +36,10 @@ vi.mock('../../../cli/mcp/tools/scopes', () => ({
 import { getListing } from '@/lib/plugins/marketplace-store';
 import { getInstallationByPluginId } from '@/lib/plugins/store';
 
+type ToolHandler = (
+  args: Record<string, unknown>,
+) => Promise<{ content: Array<{ type: string; text: string }> }>;
+
 describe('MCP plugin tools - JSON.parse error handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -53,9 +57,9 @@ describe('MCP plugin tools - JSON.parse error handling', () => {
     const { registerPluginTools } = await import('../../../cli/mcp/tools/plugins');
 
     // Create a mock server that captures tool handlers
-    const handlers = new Map<string, Function>();
+    const handlers = new Map<string, ToolHandler>();
     const mockServer = {
-      tool: (name: string, _desc: string, _schema: unknown, handler: Function) => {
+      tool: (name: string, _desc: string, _schema: unknown, handler: ToolHandler) => {
         handlers.set(name, handler);
       },
     };
@@ -78,9 +82,9 @@ describe('MCP plugin tools - JSON.parse error handling', () => {
 
     const { registerPluginTools } = await import('../../../cli/mcp/tools/plugins');
 
-    const handlers = new Map<string, Function>();
+    const handlers = new Map<string, ToolHandler>();
     const mockServer = {
-      tool: (name: string, _desc: string, _schema: unknown, handler: Function) => {
+      tool: (name: string, _desc: string, _schema: unknown, handler: ToolHandler) => {
         handlers.set(name, handler);
       },
     };

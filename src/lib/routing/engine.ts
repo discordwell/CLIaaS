@@ -314,7 +314,7 @@ export async function routeTicket(
   }
 
   // Step 1c: Check WFM schedule to exclude off-schedule agents
-  let wfmExcludedUserIds: Set<string> = new Set();
+  const wfmExcludedUserIds: Set<string> = new Set();
   try {
     const wfmSchedules = await import('../wfm/schedules');
     const { getScheduledActivity } = wfmSchedules;

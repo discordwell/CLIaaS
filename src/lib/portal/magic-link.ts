@@ -16,7 +16,6 @@ export interface MagicLinkToken {
 const TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasPortalTokens: Map<string, MagicLinkToken> | undefined;
 }
 

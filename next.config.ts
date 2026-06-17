@@ -8,7 +8,10 @@ const nextConfig: NextConfig = {
   // Keep native Node modules out of Turbopack bundling (they use binary addons / C++ bindings)
   serverExternalPackages: ['ioredis', 'bullmq'],
   typescript: {
-    // CLI connector types checked separately via tsc --noEmit
+    // Type safety is enforced by `pnpm typecheck` (CI) instead of the build so
+    // VPS deploys can't be blocked by type noise outside the app. Note the
+    // generated `.next/types` page-props assertions only exist after a build;
+    // src/__tests__/next16-app-router-params.test.ts guards that contract.
     ignoreBuildErrors: true,
   },
   turbopack: {

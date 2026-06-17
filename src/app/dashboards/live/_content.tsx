@@ -70,7 +70,7 @@ export default function LiveDashboardContent() {
   }, []);
 
   // SSE connection
-  const connect = useCallback(() => {
+  const connect = useCallback(function connectLive() {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
     }
@@ -98,7 +98,7 @@ export default function LiveDashboardContent() {
       if (!sseFailedRef.current) {
         // First failure — try reconnecting via SSE
         sseFailedRef.current = true;
-        reconnectTimerRef.current = setTimeout(connect, RECONNECT_DELAY);
+        reconnectTimerRef.current = setTimeout(connectLive, RECONNECT_DELAY);
       } else {
         // Repeated failure — fall back to polling
         startPolling();

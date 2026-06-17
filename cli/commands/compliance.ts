@@ -4,6 +4,7 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import type { MaskingStyle, PiiSensitivityRule, PiiType } from '@/lib/compliance/pii-detector.js';
 import { output, outputError, isJsonMode } from '../output.js';
 
 export function registerComplianceCommands(program: Command): void {
@@ -276,16 +277,16 @@ export function registerComplianceCommands(program: Command): void {
           if (conn) wsId = await getDefaultWorkspaceId(conn.db, conn.schema);
 
           const currentRules = await getSensitivityRules(wsId);
-          const rule = currentRules.find(r => r.piiType === piiType) || {
-            piiType: piiType as import('@/lib/compliance/pii-detector.js').PiiType,
+          const rule: PiiSensitivityRule = currentRules.find(r => r.piiType === piiType) || {
+            piiType: piiType as PiiType,
             enabled: true,
             autoRedact: false,
-            maskingStyle: 'full' as const,
+            maskingStyle: 'full',
           };
 
-          if (field === 'enabled') (rule as any).enabled = value === 'true';
-          else if (field === 'autoRedact') (rule as any).autoRedact = value === 'true';
-          else if (field === 'maskingStyle') (rule as any).maskingStyle = value;
+          if (field === 'enabled') rule.enabled = value === 'true';
+          else if (field === 'autoRedact') rule.autoRedact = value === 'true';
+          else if (field === 'maskingStyle') rule.maskingStyle = value as MaskingStyle;
 
           const updated = await upsertSensitivityRules(wsId, [rule]);
           const data = { updated: updated[0] };

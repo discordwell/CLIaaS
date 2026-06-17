@@ -13,7 +13,6 @@ import type { RuleConditions } from './conditions';
 import type { RuleAction } from './actions';
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasRuleBootstrapPromise: Promise<void> | undefined;
 }
 

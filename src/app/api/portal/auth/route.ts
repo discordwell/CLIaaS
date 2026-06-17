@@ -6,26 +6,13 @@ import { sendMagicLink } from '@/lib/portal/send-magic-link';
 import { parseJsonBody, safeErrorMessage } from '@/lib/parse-json-body';
 import { validateEmail } from '@/lib/email-validation';
 import { checkRateLimit, getRateLimitHeaders } from '@/lib/security/rate-limiter';
+import { getClientIp } from '@/lib/security/client-ip';
 
 export const dynamic = 'force-dynamic';
 
 // Rate limit configs
 const EMAIL_RATE_LIMIT = { windowMs: 5 * 60_000, maxRequests: 3 };
 const IP_RATE_LIMIT = { windowMs: 15 * 60_000, maxRequests: 10 };
-
-/** Extract client IP from proxy headers.
- *  Prefers x-real-ip (set by Caddy/Nginx from actual connection).
- *  Falls back to last entry of x-forwarded-for (appended by trusted proxy). */
-export function getClientIp(request: NextRequest): string {
-  const realIp = request.headers.get('x-real-ip');
-  if (realIp) return realIp.trim();
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) {
-    const parts = forwarded.split(',');
-    return parts[parts.length - 1].trim();
-  }
-  return 'unknown';
-}
 
 export async function POST(request: NextRequest) {
   try {

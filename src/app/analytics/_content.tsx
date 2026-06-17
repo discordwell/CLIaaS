@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 
 interface AnalyticsData {
   ticketsCreated: { date: string; count: number }[];
@@ -401,12 +402,12 @@ export default function AnalyticsPageContent() {
                   Build custom reports with 20+ metrics, multiple visualizations, and drill-down.
                 </p>
               </div>
-              <a
+              <Link
                 href="/reports"
                 className="border-2 border-white px-4 py-2 font-mono text-xs font-bold uppercase hover:bg-white hover:text-zinc-950"
               >
                 Open Report Builder
-              </a>
+              </Link>
             </div>
           </section>
 

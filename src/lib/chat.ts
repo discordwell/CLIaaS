@@ -43,9 +43,7 @@ function persistSessions(store: Map<string, ChatSession>): void {
 // ---- Global singleton storage ----
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasChats: Map<string, ChatSession> | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasChatsLoaded: boolean | undefined;
 }
 

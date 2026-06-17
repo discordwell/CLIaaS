@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { checkRateLimit, clearBucket, getRateLimitHeaders } from '@/lib/security/rate-limiter';
-import { getClientIp } from '../route';
+import { getClientIp } from '@/lib/security/client-ip';
 
 // Use the same configs as the route
 const EMAIL_RATE_LIMIT = { windowMs: 5 * 60_000, maxRequests: 3 };

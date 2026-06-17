@@ -174,7 +174,6 @@ class PresenceStore {
 
 // Singleton — survives hot reloads in dev
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasPresenceStore: PresenceStore | undefined;
 }
 

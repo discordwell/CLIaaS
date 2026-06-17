@@ -103,13 +103,9 @@ function persistConversations(store: Map<string, SlackConversation>): void {
 // ---- Global singleton storage ----
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasSlackMappings: Map<string, SlackChannelMapping> | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasSlackMappingsLoaded: boolean | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasSlackConvs: Map<string, SlackConversation> | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasSlackConvsLoaded: boolean | undefined;
 }
 

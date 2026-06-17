@@ -126,17 +126,11 @@ function persistConversations(store: Map<string, TeamsConversation>): void {
 // ---- Global singleton storage ----
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasTeamsConfigs: Map<string, TeamsConfig> | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasTeamsConfigsLoaded: boolean | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasTeamsMappings: Map<string, TeamsChannelMapping> | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasTeamsMappingsLoaded: boolean | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasTeamsConvs: Map<string, TeamsConversation> | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasTeamsConvsLoaded: boolean | undefined;
 }
 

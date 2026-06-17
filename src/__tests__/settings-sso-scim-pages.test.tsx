@@ -43,9 +43,11 @@ describe('Settings Layout', () => {
     // Layout is a server component exporting metadata + a default function.
     // We render its JSX output synchronously.
     const { container } = render(
-      React.createElement(SettingsLayout, {
-        children: React.createElement('div', { 'data-testid': 'child' }, 'CHILD'),
-      }),
+      React.createElement(
+        SettingsLayout,
+        null,
+        React.createElement('div', { 'data-testid': 'child' }, 'CHILD'),
+      ),
     );
 
     // Should have links to SSO and SCIM

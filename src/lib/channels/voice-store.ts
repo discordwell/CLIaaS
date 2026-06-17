@@ -66,13 +66,9 @@ function persistAgents(agents: VoiceAgent[]): void {
 // ---- Global singleton storage ----
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasVoiceCalls: Map<string, VoiceCall> | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasVoiceCallsLoaded: boolean | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasVoiceAgents: VoiceAgent[] | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasVoiceAgentsLoaded: boolean | undefined;
 }
 

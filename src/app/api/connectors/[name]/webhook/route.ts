@@ -233,8 +233,8 @@ function normalizeFreshdeskPayload(payload: Record<string, unknown>): Normalized
 }
 
 function normalizeZohoDeskPayload(payload: Record<string, unknown>): NormalizedEvent | null {
-  const module = payload.module as string | undefined;
-  if (module !== 'tickets') return null;
+  const moduleName = payload.module as string | undefined;
+  if (moduleName !== 'tickets') return null;
 
   const event = payload.event as string | undefined;
   const data = (payload.data ?? {}) as Record<string, unknown>;

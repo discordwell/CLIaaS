@@ -12,7 +12,6 @@ interface TokenEntry {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasIntermediateTokens: Map<string, TokenEntry> | undefined;
 }
 

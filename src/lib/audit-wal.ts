@@ -19,9 +19,7 @@ const MAX_ATTEMPTS = 5;
 const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasAuditWal: WalEntry<unknown>[] | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasSecureAuditWal: WalEntry<unknown>[] | undefined;
 }
 

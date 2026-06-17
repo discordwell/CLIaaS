@@ -21,7 +21,7 @@ export async function GET(
 
   // Look up the user's role
   let role: string = 'agent';
-  let customRoleId: string | null = null;
+  const customRoleId: string | null = null;
 
   if (process.env.DATABASE_URL) {
     try {

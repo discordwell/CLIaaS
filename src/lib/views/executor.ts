@@ -67,7 +67,7 @@ export function executeViewQuery(
   tickets: Ticket[],
   userId?: string,
 ): Ticket[] {
-  let filtered = tickets.filter((ticket) => {
+  const filtered = tickets.filter((ticket) => {
     if (query.conditions.length === 0) return true;
 
     if (query.combineMode === 'or') {

@@ -43,9 +43,7 @@ function persistConversations(
 // ---- Global singleton storage ----
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliasSocialCons: Map<string, SocialConversation> | undefined;
-  // eslint-disable-next-line no-var
   var __cliasSocialConsLoaded: boolean | undefined;
 }
 

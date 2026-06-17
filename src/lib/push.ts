@@ -45,9 +45,7 @@ export function isDemoMode(): boolean {
 const SUBSCRIPTIONS_FILE = 'push-subscriptions.jsonl';
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaaPushSubs: Map<string, PushSubscription> | undefined;
-  // eslint-disable-next-line no-var
   var __cliaaPushSubsLoaded: boolean | undefined;
 }
 

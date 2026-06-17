@@ -96,7 +96,6 @@ export const DEFAULT_ROUTING_CONFIG: RoutingConfig = {
 // ---------------------------------------------------------------------------
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasRRIndex: number | undefined;
 }
 
@@ -111,7 +110,6 @@ function nextRoundRobin(agentCount: number): number {
 // ---------------------------------------------------------------------------
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasAgentLoad: Record<string, number> | undefined;
 }
 

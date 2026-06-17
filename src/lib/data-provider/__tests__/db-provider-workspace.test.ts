@@ -29,7 +29,7 @@ const mockSchema = {
     name: 'workspaces.name',
     createdAt: 'workspaces.created_at',
   },
-} as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+} as any;  
 
 describe('getWorkspaceId', () => {
   afterEach(() => {

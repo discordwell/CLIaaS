@@ -41,9 +41,7 @@ function persistConversations(store: Map<string, SmsConversation>): void {
 // ---- Global singleton storage ----
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasSmsCons: Map<string, SmsConversation> | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasSmsConsLoaded: boolean | undefined;
 }
 

@@ -5,7 +5,6 @@
  * characters in the domain part to prevent phishing attacks.
  */
 
-// eslint-disable-next-line no-control-regex
 const NON_ASCII_RE = /[^\x00-\x7F]/;
 
 /**

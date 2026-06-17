@@ -3727,3 +3727,25 @@ TS treats teams as spawn-time configuration only (teamMissions scripts on entiti
 
 ## 2026-03-31T22:00Z — RNG Parity: 64/64 Seeds Match, 64/67 Raw Calls (95.5%)
 - Structure mission timers, entity fidget→NonCriticalRandom, trigger timing at tick 1.
+
+## 2026-04-30T01:30Z — SCG13EA t101 root cause: Greek E1 timer drift, not our STICKY (rotated from claudepad 2026-06-11)
+
+Earlier session note about SCG13EA t101 was wrong about WHICH unit was missing. Detailed investigation:
+
+- WASM has 7 calls at tick 101: positions 0-6
+- TS has 6 calls at tick 101: positions 0-5
+- Both engines' position 5 has seed 888565875 (matched by diff alignment)
+- WASM position 5 = infantry[188] (Greek E1 at 12,54)
+- TS position 5 = infantry[147] (USSR STICKY at 27,46) ← OUR unit
+- WASM position 6 = infantry[192] (USSR STICKY at 27,46) ← what I initially thought was "missing"
+
+So in WASM, TWO units fire at tick 101: a Greek E1 at (12,54) AND our STICKY USSR at (27,46). In TS, only our STICKY fires. The Greek E1 at (12,54) is the missing one.
+
+**Greek E1 at (12,54) post-step state:**
+- WASM: id=852091 mt=13 (consistent with fire at tick 101: 14 jitter=0, then -1 decrement = 13)
+- TS: id=144 mt=15 (consistent with: NO fire at tick 101, was 16, decremented to 15)
+
+**Conclusion:** TS's Greek E1 at (12,54) has its mission timer offset by 2 ticks from WASM. Likely originates from init-time RNG-ordering: TS's Mission_Guard init for this unit got a different jitter than WASM's, causing 2-tick drift.
+
+**Useful infrastructure landed during investigation:**
+- `commit 104745d2` "chore(random): pin Scenario/NonCriticalRandom singletons to globalThis" — defensive against Next.js code-splitting (verified harmless: `__rngTagControl` reads same callCount as `globalThis.__scenarioRandom.callCount`).

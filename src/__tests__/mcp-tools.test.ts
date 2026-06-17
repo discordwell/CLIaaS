@@ -154,7 +154,7 @@ function getRegisterFnName(moduleName: string): string {
 // 3. Load everything before tests run
 // ---------------------------------------------------------------------------
 
-let loadErrors: Array<{ module: string; error: string }> = [];
+const loadErrors: Array<{ module: string; error: string }> = [];
 
 beforeAll(async () => {
   const server = createSpyServer();

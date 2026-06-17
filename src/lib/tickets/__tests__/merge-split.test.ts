@@ -11,11 +11,11 @@ import type {
 } from '@/lib/data-provider/types';
 
 // Mock DB rows
-let tickets: Array<Record<string, unknown>> = [];
-let conversations: Array<Record<string, unknown>> = [];
-let messages: Array<Record<string, unknown>> = [];
-let mergeLog: Array<Record<string, unknown>> = [];
-let splitLog: Array<Record<string, unknown>> = [];
+const tickets: Array<Record<string, unknown>> = [];
+const conversations: Array<Record<string, unknown>> = [];
+const messages: Array<Record<string, unknown>> = [];
+const mergeLog: Array<Record<string, unknown>> = [];
+const splitLog: Array<Record<string, unknown>> = [];
 let idCounter = 0;
 
 function makeId() {
@@ -62,7 +62,7 @@ const mockSchema = {
 function createMockDb() {
   // Track the chain of operations
   let currentTable = '';
-  let currentConditions: unknown[] = [];
+  const currentConditions: unknown[] = [];
   let currentValues: Record<string, unknown> = {};
   let currentSet: Record<string, unknown> = {};
 

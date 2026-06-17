@@ -72,7 +72,7 @@ const SYSTEM_VIEWS: View[] = [
   },
 ];
 
-let views: View[] = [...SYSTEM_VIEWS];
+const views: View[] = [...SYSTEM_VIEWS];
 
 export async function listViews(userId?: string, workspaceId?: string): Promise<View[]> {
   if (workspaceId) {

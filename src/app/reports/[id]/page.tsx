@@ -1,10 +1,11 @@
 import FeatureGate from '@/components/FeatureGate';
 import ReportDetailContent from './_content';
 
-export default function ReportDetailPage({ params }: { params: { id: string } }) {
+export default async function ReportDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   return (
     <FeatureGate feature="custom_reports">
-      <ReportDetailContent id={params.id} />
+      <ReportDetailContent id={id} />
     </FeatureGate>
   );
 }

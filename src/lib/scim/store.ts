@@ -35,13 +35,9 @@ const GROUPS_FILE = 'scim-groups.jsonl';
 // ---- Global singleton with JSONL load ----
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasScimUsers: SCIMUserRecord[] | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasScimUsersLoaded: boolean | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasScimGroups: SCIMGroupRecord[] | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasScimGroupsLoaded: boolean | undefined;
 }
 
@@ -85,9 +81,7 @@ export interface SCIMAuditEntry {
 const AUDIT_FILE = 'scim-audit.jsonl';
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasScimAuditLog: SCIMAuditEntry[] | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasScimAuditLogLoaded: boolean | undefined;
 }
 

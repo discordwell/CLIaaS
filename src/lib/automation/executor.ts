@@ -25,9 +25,7 @@ export interface AuditEntry {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasAutomationRules: Rule[] | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasAutomationAudit: AuditEntry[] | undefined;
 }
 
@@ -133,7 +131,6 @@ export function executeRules(opts: ExecuteOptions): ExecutionResult[] {
 // ---- Loop prevention ----
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasAutomationDepth: number | undefined;
 }
 

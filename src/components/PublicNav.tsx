@@ -13,12 +13,12 @@ export default function PublicNav() {
           CLIaaS
         </Link>
         <div className="flex items-center gap-4">
-          <a
+          <Link
             href="/#pricing"
             className="hidden font-mono text-xs font-bold uppercase text-muted transition-colors hover:text-foreground sm:block"
           >
             Pricing
-          </a>
+          </Link>
           <Link
             href="/docs"
             className="hidden font-mono text-xs font-bold uppercase text-muted transition-colors hover:text-foreground sm:block"

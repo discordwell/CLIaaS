@@ -42,7 +42,6 @@ export interface MCPAuditEntry {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasAuditMCP: MCPAuditEntry[] | undefined;
 }
 

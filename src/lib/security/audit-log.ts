@@ -50,9 +50,7 @@ const JSONL_FILE = 'secure-audit-log.jsonl';
 const GENESIS_HASH = '0000000000000000000000000000000000000000000000000000000000000000';
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasSecureAudit: SecureAuditEntry[] | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasSecureAuditLoaded: boolean | undefined;
 }
 

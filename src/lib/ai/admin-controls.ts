@@ -23,7 +23,6 @@ export interface ChannelPolicy {
 const CHANNEL_POLICIES_FILE = 'ai-channel-policies.jsonl';
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasAIChannelPolicies: ChannelPolicy[] | undefined;
 }
 
@@ -77,7 +76,6 @@ const FAILURE_THRESHOLD = 5;
 const RECOVERY_TIMEOUT_MS = 60_000; // 1 minute
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasAICircuitBreaker: CircuitBreakerState | undefined;
 }
 

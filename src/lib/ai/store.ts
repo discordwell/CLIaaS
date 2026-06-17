@@ -52,9 +52,7 @@ export interface AIAgentConfigRecord {
 // ---- In-memory fallback ----
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasAIResolutions: AIResolutionRecord[] | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasAIAgentConfig: AIAgentConfigRecord | undefined;
 }
 

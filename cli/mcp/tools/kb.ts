@@ -83,7 +83,7 @@ export function registerKBTools(server: McpServer): void {
             topK: top,
             sourceType: 'kb_article',
           });
-          let suggestions = results.map(r => ({
+          const suggestions = results.map(r => ({
             sourceId: r.chunk.sourceId,
             title: r.chunk.sourceTitle,
             score: r.combinedScore,

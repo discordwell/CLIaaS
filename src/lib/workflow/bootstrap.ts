@@ -10,7 +10,6 @@
 import { syncWorkflowRules } from './sync';
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasWorkflowBootstrapPromise: Promise<void> | undefined;
 }
 

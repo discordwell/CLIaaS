@@ -15,7 +15,6 @@ export interface ROIMetrics {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasROIMetrics: {
     totalResolutions: number;
     aiResolved: number;

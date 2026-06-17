@@ -1,10 +1,11 @@
 import FeatureGate from '@/components/FeatureGate';
 import CampaignDetailContent from './_content';
 
-export default function CampaignDetailPage({ params }: { params: { id: string } }) {
+export default async function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   return (
     <FeatureGate feature="proactive_messaging">
-      <CampaignDetailContent campaignId={params.id} />
+      <CampaignDetailContent campaignId={id} />
     </FeatureGate>
   );
 }

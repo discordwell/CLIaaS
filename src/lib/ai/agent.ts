@@ -72,7 +72,6 @@ export interface AIAgentStats {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasAIAgentStats: AIAgentStats | undefined;
 }
 

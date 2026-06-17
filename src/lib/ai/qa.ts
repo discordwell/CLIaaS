@@ -314,7 +314,6 @@ export interface QAOverview {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasQAReports: QAReport[] | undefined;
 }
 

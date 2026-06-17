@@ -5,7 +5,7 @@
 import { getDb } from '@/db';
 import * as schema from '@/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
-import { detectPii, maskText, type PiiMatch, type MaskingStyle } from './pii-detector';
+import { detectPii, maskText, type PiiMatch, type MaskingStyle, type PiiType } from './pii-detector';
 import { getSensitivityRules } from './pii-rules';
 import { encryptPii, decryptPii, hashPii } from './pii-encryption';
 import { createLogger } from '@/lib/logger';
@@ -182,7 +182,7 @@ export async function redactDetection(
 
   const rules = await getSensitivityRules(workspaceId);
   const ruleMap = new Map(rules.map(r => [r.piiType, r]));
-  const style: MaskingStyle = ruleMap.get(detection.piiType as any)?.maskingStyle || 'full';
+  const style: MaskingStyle = ruleMap.get(detection.piiType as PiiType)?.maskingStyle || 'full';
 
   // Apply redaction to the entity
   await applyRedaction(detection.entityType, detection.entityId, detection.fieldName, fieldText, [match], style, workspaceId);

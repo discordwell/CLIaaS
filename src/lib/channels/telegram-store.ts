@@ -50,13 +50,9 @@ function persistConversations(store: Map<string, TelegramConversation>): void {
 // ---- Global singleton storage ----
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cliaasTelegramConfigs: Map<string, TelegramConfig> | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasTelegramConfigsLoaded: boolean | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasTelegramConvs: Map<string, TelegramConversation> | undefined;
-  // eslint-disable-next-line no-var
   var __cliaasTelegramConvsLoaded: boolean | undefined;
 }
 

@@ -146,7 +146,6 @@ export class RemoteProvider implements DataProvider {
     const results: T[] = [];
     let offset = 0;
 
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       const separator = path.includes('?') ? '&' : '?';
       const url = `${path}${separator}limit=${pageSize}&offset=${offset}`;
