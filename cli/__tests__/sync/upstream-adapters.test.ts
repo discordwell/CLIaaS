@@ -149,6 +149,19 @@ describe('Freshdesk adapter', () => {
       { status: 4, priority: 3 },
     );
   });
+
+  it('omits an unmapped status (on_hold) instead of reopening the ticket', async () => {
+    const { freshdeskUpdateTicket } = await import('../../connectors/freshdesk.js');
+    vi.mocked(freshdeskUpdateTicket).mockClear();
+    // Freshdesk has no "on hold" default status; the old `?? 2` fallback would
+    // send status:2 (Open), reopening a resolved/closed ticket.
+    await adapter.updateTicket('50', { status: 'on_hold', priority: 'high' });
+    expect(freshdeskUpdateTicket).toHaveBeenCalledWith(
+      { subdomain: 'myco', apiKey: 'fk' },
+      50,
+      { priority: 3 }, // no `status` key at all
+    );
+  });
 });
 
 describe('Groove adapter', () => {

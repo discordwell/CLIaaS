@@ -51,8 +51,48 @@ describe('HubSpot CRUD lifecycle (mocked)', () => {
       const body = JSON.parse(opts.body);
       expect(body.properties.subject).toBe('Test ticket');
       expect(body.properties.content).toBe('Content here');
-      expect(body.properties.hs_ticket_priority).toBe('high');
+      // HubSpot's hs_ticket_priority options are uppercase (LOW/MEDIUM/HIGH),
+      // not the raw CLIaaS value.
+      expect(body.properties.hs_ticket_priority).toBe('HIGH');
       expect(body.properties.hubspot_owner_id).toBe('owner-1');
+    });
+  });
+
+  describe('update', () => {
+    it('maps CLIaaS status/priority to HubSpot stage IDs and uppercase enums', async () => {
+      const { hubspotUpdateTicket } = await import('../../../connectors/hubspot.js');
+      mockFetch.mockResolvedValueOnce(jsonResponse({ id: 'hub-99' }));
+
+      await hubspotUpdateTicket(HUBSPOT_AUTH, 'hub-99', { status: 'closed', priority: 'normal' });
+
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toBe('https://api.hubapi.com/crm/v3/objects/tickets/hub-99');
+      expect(opts.method).toBe('PATCH');
+      const props = JSON.parse(opts.body).properties;
+      // "closed" → default-pipeline stage 4; "normal" → MEDIUM (not the raw strings)
+      expect(props.hs_pipeline_stage).toBe('4');
+      expect(props.hs_ticket_priority).toBe('MEDIUM');
+    });
+
+    it('maps open/urgent and never sends the raw CLIaaS strings', async () => {
+      const { hubspotUpdateTicket } = await import('../../../connectors/hubspot.js');
+      mockFetch.mockResolvedValueOnce(jsonResponse({ id: 'hub-99' }));
+
+      await hubspotUpdateTicket(HUBSPOT_AUTH, 'hub-99', { status: 'open', priority: 'urgent' });
+
+      const props = JSON.parse(mockFetch.mock.calls[0][1].body).properties;
+      expect(props.hs_pipeline_stage).toBe('1');
+      expect(props.hs_ticket_priority).toBe('HIGH'); // urgent → HIGH (URGENT not a default option)
+    });
+
+    it('omits the pipeline stage for on_hold (no default-pipeline equivalent → no reopen)', async () => {
+      const { hubspotUpdateTicket } = await import('../../../connectors/hubspot.js');
+      mockFetch.mockResolvedValueOnce(jsonResponse({ id: 'hub-99' }));
+
+      await hubspotUpdateTicket(HUBSPOT_AUTH, 'hub-99', { status: 'on_hold' });
+
+      const props = JSON.parse(mockFetch.mock.calls[0][1].body).properties;
+      expect(props.hs_pipeline_stage).toBeUndefined();
     });
   });
 

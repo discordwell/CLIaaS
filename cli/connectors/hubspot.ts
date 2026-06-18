@@ -212,6 +212,37 @@ function mapPriority(priority: string | undefined): TicketPriority {
   return 'normal';
 }
 
+// ---- Write-side mapping (CLIaaS → HubSpot) ----
+
+/**
+ * Map a CLIaaS priority to a HubSpot `hs_ticket_priority` option value.
+ * HubSpot's option values are uppercase (LOW/MEDIUM/HIGH) and case-sensitive,
+ * and "normal" is HubSpot's MEDIUM. URGENT is not a default option on every
+ * portal, so `urgent` maps to HIGH to avoid rejecting the write. Sending the
+ * raw CLIaaS value ("normal"/"high") writes an invalid option (the inverse of
+ * {@link mapPriority}).
+ */
+function priorityToHubspot(priority: string | undefined): string | undefined {
+  if (!priority) return undefined;
+  const map: Record<string, string> = { low: 'LOW', normal: 'MEDIUM', high: 'HIGH', urgent: 'HIGH' };
+  return map[priority.toLowerCase()] ?? 'MEDIUM';
+}
+
+/**
+ * Map a CLIaaS status to a HubSpot default-support-pipeline stage ID. HubSpot
+ * pipeline stages are numeric IDs, not status strings — the import side reads
+ * 1→open, 2→pending, 3/4→closed (see {@link mapPipelineStage}). `on_hold` has
+ * no default-pipeline equivalent, so it is left unset rather than written to a
+ * wrong stage (which would reopen or mis-close the ticket). Portals with a
+ * custom pipeline need their own stage map. Sending the raw CLIaaS status
+ * ("closed"/"open") writes an invalid stage ID that HubSpot rejects.
+ */
+function statusToHubspotStage(status: string | undefined): string | undefined {
+  if (!status) return undefined;
+  const map: Record<string, string> = { open: '1', pending: '2', solved: '4', closed: '4' };
+  return map[status.toLowerCase()];
+}
+
 // ---- Cursor pagination helper for HubSpot CRM endpoints ----
 
 function hubspotCursorUrl(basePath: string, properties: string): string {
@@ -733,7 +764,8 @@ export async function hubspotCreateTicket(auth: HubSpotAuth, subject: string, co
   pipelineStage?: string;
 }): Promise<{ id: string }> {
   const properties: Record<string, unknown> = { subject, content };
-  if (options?.priority) properties.hs_ticket_priority = options.priority;
+  const priority = priorityToHubspot(options?.priority);
+  if (priority) properties.hs_ticket_priority = priority;
   if (options?.ownerId) properties.hubspot_owner_id = options.ownerId;
   if (options?.pipelineStage) properties.hs_pipeline_stage = options.pipelineStage;
 
@@ -750,8 +782,10 @@ export async function hubspotUpdateTicket(auth: HubSpotAuth, ticketId: string, u
   assignee?: string;
 }): Promise<void> {
   const properties: Record<string, unknown> = {};
-  if (updates.status) properties.hs_pipeline_stage = updates.status;
-  if (updates.priority) properties.hs_ticket_priority = updates.priority;
+  const stage = statusToHubspotStage(updates.status);
+  if (stage) properties.hs_pipeline_stage = stage;
+  const priority = priorityToHubspot(updates.priority);
+  if (priority) properties.hs_ticket_priority = priority;
   if (updates.assignee) properties.hubspot_owner_id = updates.assignee;
 
   await createHubSpotClient(auth).request(`/crm/v3/objects/tickets/${ticketId}`, {

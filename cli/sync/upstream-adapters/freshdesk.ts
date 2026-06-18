@@ -34,8 +34,16 @@ export function createFreshdeskAdapter(auth: Record<string, string>): ConnectorW
     async updateTicket(externalId: string, updates: UpstreamTicketUpdate): Promise<void> {
       const { freshdeskUpdateTicket } = await import('../../connectors/freshdesk.js');
       const mapped: Record<string, unknown> = {};
-      if (updates.status) mapped.status = STATUS_MAP[updates.status] ?? 2;
-      if (updates.priority) mapped.priority = PRIORITY_MAP[updates.priority] ?? 2;
+      // Only send fields that map to a Freshdesk code. Freshdesk's default
+      // statuses are 2/3/4/5 with no "on hold"; coercing an unmapped status to
+      // 2 (Open) — the old `?? 2` fallback — would silently reopen a
+      // resolved/closed ticket. Leave such fields untouched instead.
+      if (updates.status && STATUS_MAP[updates.status] !== undefined) {
+        mapped.status = STATUS_MAP[updates.status];
+      }
+      if (updates.priority && PRIORITY_MAP[updates.priority] !== undefined) {
+        mapped.priority = PRIORITY_MAP[updates.priority];
+      }
       if (updates.tags) mapped.tags = updates.tags;
       await freshdeskUpdateTicket(fdAuth, Number(externalId), mapped);
     },
