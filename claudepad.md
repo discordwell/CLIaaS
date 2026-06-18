@@ -1,5 +1,22 @@
 # Session Summaries
 
+## 2026-06-17T23:05Z — Security: fixed critical SAML signature-verification bypass (assertion forgery) with xml-crypto
+
+`src/lib/auth/saml.ts` verified only the RSA signature over `<SignedInfo>` and **never bound `<DigestValue>` to the assertion** — so an attacker could keep a validly-signed `<SignedInfo>` and swap in a forged `<Assertion>` (any NameID/email/attributes) and authenticate as anyone. Proven exploitable: against the old code, a forged assertion (placeholder digest, `attacker@evil.com` NameID, real RSA signature over SignedInfo) returned `attacker@evil.com` and logged "signature verified successfully". The 2026-06-17T08:35Z session had flagged this as out-of-scope for a drive-by; this pass is the dedicated fix.
+
+**Fix** (rewrote `parseSamlResponse` + signature path on top of `xml-crypto` v6 — the standard XML-DSig lib with real exclusive-c14n + digest validation):
+- Real digest binding: a signature is accepted only when the `<DigestValue>` recomputed over the referenced element matches AND the `<SignedInfo>` RSA signature matches.
+- Verifying key hard-pinned to the provider's configured IdP cert via `publicCert` + `getCertFromKeyInfo: () => pem`; the document's own attacker-controlled `<KeyInfo>` is never trusted.
+- Identity extracted **only** from `getSignedReferences()` (cryptographically-verified content) → defeats signature-wrapping (injected sibling assertions are invisible).
+- Reject multiple distinct signed assertions (token substitution); an identical assertion signed twice (Response+Assertion level) collapses to one.
+- Enforce `<Conditions>` NotBefore/NotOnOrAfter with ±3-min clock-skew tolerance.
+- Reject DOCTYPE/DTD (XXE hardening). A provider without a certificate still cannot authenticate.
+- Deps added: `xml-crypto ^6.1.2`, `@xmldom/xmldom 0.8.13`, `xpath 0.0.33`.
+
+**Verification:** rewrote `saml.test.ts` (16→25 tests) with real `xml-crypto`-signed fixtures (emulating Okta/Azure) + attack regressions: tampered body, signature-wrapping, the exact legacy placeholder-digest forgery, wrong-key, unsigned, expired/not-yet-valid Conditions, Response-level signing, conflicting assertions, DOCTYPE. Proved fail-before/pass-after by running the legacy-forgery fixture against the old code (it accepted the forgery → `attacker@evil.com`). typecheck clean · lint 0 · `next build` green · auth+sso sweep 74 pass · broad `src/lib`+`src/__tests__` sweep 221 files / 3,138 pass (8 DB-integration skipped, need Docker). Adversarial security-review subagent verdict: correct, fail-closed, no bypass.
+
+**Follow-ups (defense-in-depth the original also lacked — not regressions; need config/storage plumbing):** `<AudienceRestriction>`/`<Recipient>` binding to the SP entityId, `InResponseTo` + assertion-ID replay cache. The `<Conditions>` time window is the current replay bound.
+
 ## 2026-06-17T08:35Z — Correctness & data-integrity sweep: 8 verified bug fixes (WFM/SLA, automation, SCIM, password, HelpCrunch), each with a regression test
 
 Audited non-EasterEgg business logic with parallel bug-hunting agents, independently re-verified every finding in the actual code, and fixed 8 contained correctness bugs. Each fix has a test proven to fail before / pass after (verified by `git stash`ing the source fixes and re-running):
@@ -352,33 +369,6 @@ WASM has same unit in GUARD — WASM transitioned MOVE→GUARD somewhere between
 2. When path is exhausted, set isDriving=false. Then `MOVEMENT_AI_MOVE_NAVCOM_GUARD` would also fire (since !isDriving + !moveTarget after some other clear).
 
 Both candidates need verification and may regress existing scenarios. The 1-tick init drift on Greek E1/USSR (62,78)/USSR STICKY is a separate, harder problem (RNG-ordering at scenario load).
-
-## 2026-05-01T00:30Z — Divergence verification post-fix + SCG13EA Greek E1 root cause confirmed
-
-**Playwright divergence after vessel/DriveClass commits (post-deploy):**
-| scenario | net |
-|---|---|
-| SCG01EA | 77 (no change) |
-| SCG03EA | 238 (no change) |
-| SCG04EA | 3 (no change) |
-| SCG06EA | 76 (no change) |
-| SCG07EA | 17 (no change, Δcalls still 7) |
-| SCG11EA | 19 (no change) |
-| SCG13EA | 101 (no change) |
-
-**Why no advancement:** the gate `mission===MOVE && Timer===0 && queue===null` only matches when PCP_END Commence pop happened mid-iter. PCP_END Commence requires MissionQueue=MOVE entering the iter. `assignMission(unit, MOVE)` clears queue when entity already in MOVE → so coordinateMove rarely sets queue=MOVE for already-moving units. The fix is dead code in the actual scenarios.
-
-**SCG13EA Greek E1 (12,54) probe results (script `test-scg13ea-greek-e1-init.ts`):**
-- Tick 100 end: WASM mt=0, TS mt=1 (TS 1 tick ahead in countdown)
-- Tick 101 end: WASM mt=13 (jitter=0), TS mt=15 (jitter=1)
-
-**Root cause:** at the FIRST Mission_Guard fire (tick 1), TS jitter=0 (mt=14) while WASM jitter=0 (mt=13 = 14-1 after Frame++ post-dispatch). The 1-tick offset persists. Then at subsequent fires, jitter values diverge because the RNG seed at dispatch time differs. The 2-tick drift accumulates by tick 101.
-
-**Why TS shows 14 vs WASM shows 13 immediately post-dispatch at tick 1:** WASM uses CDTimerClass (Frame-based), where `remaining = Started+Duration - CurrentFrame`. After Frame++ at end of tick, remaining decreases by 1. TS uses simple integer with decrement at start of next tick. So TS's mt=14 is "current value", WASM's remaining=13 is "after end-of-tick frame increment".
-
-**Functionally equivalent for fire timing** (both fire 14 ticks after dispatch), but the DISPLAYED value differs — and crucially, when an entity's INITIAL mt is set differently (e.g. from init RNG ordering), the offset propagates.
-
-**SCG13 t101 structural fix would be:** audit init-time RNG ordering to make TS's per-entity jitter values match WASM's at scenario load. This requires per-call instrumentation + comparison. Not a quick fix.
 
 # Key Findings
 

@@ -427,7 +427,7 @@ BullMQ + Redis for reliable background processing with graceful fallback to inli
 ## Authentication & Security
 
 ### SSO & JIT Provisioning
-- SAML 2.0: XML signature verification, assertion parsing
+- SAML 2.0: XML-DSig signature verification via `xml-crypto` (real exclusive-c14n + digest binding). The verifying key is pinned to the provider's configured IdP certificate (the document's own `<KeyInfo>` is never trusted), identity is extracted **only** from cryptographically-verified content (defeats signature-wrapping), the `<Conditions>` validity window (NotBefore/NotOnOrAfter, with clock-skew tolerance) is enforced, and DTD/DOCTYPE declarations are rejected (XXE hardening). A provider without a certificate cannot authenticate.
 - OIDC: Authorization Code flow with PKCE
 - JIT provisioning: `src/lib/auth/sso-session.ts` — auto-creates user accounts on first SSO login when `jit_enabled` is true on the SSO provider, assigns `default_role` from provider config
 - SCIM audit trail: `GET /api/scim/audit` — queryable log of all SCIM provisioning actions (user create/update/deactivate, group membership changes)

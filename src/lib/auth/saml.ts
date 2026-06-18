@@ -1,9 +1,20 @@
 import crypto from 'crypto';
 import { XMLParser } from 'fast-xml-parser';
+import { DOMParser } from '@xmldom/xmldom';
+import * as xpath from 'xpath';
+import { SignedXml } from 'xml-crypto';
 import type { SSOProvider } from './sso-config';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('saml');
+
+const DSIG_NS = 'http://www.w3.org/2000/09/xmldsig#';
+
+/**
+ * Tolerance applied to assertion validity-window checks to absorb clock drift
+ * between the IdP and this SP. SAML deployments commonly allow a few minutes.
+ */
+const CLOCK_SKEW_MS = 3 * 60 * 1000;
 
 // ---- Types ----
 
@@ -45,105 +56,87 @@ function resolveElement(
 // ---- Signature Verification ----
 
 /**
- * Verify an XML digital signature against an IdP X.509 certificate.
+ * Cryptographically verify the enveloped XML-DSig signature(s) of a SAML
+ * document against the configured IdP X.509 certificate and return the
+ * canonicalized XML of every element that was actually signed.
  *
- * This implements practical verification for the common SAML case:
- * enveloped signature with exclusive XML canonicalization and RSA-SHA256.
+ * Security properties (why this matters):
+ *  - The signature is validated with a *real* XML canonicalization + digest
+ *    implementation (xml-crypto), so the `<DigestValue>` in `<SignedInfo>` is
+ *    recomputed over the referenced content and compared. A signature is only
+ *    accepted when both the digest matches the signed element AND the RSA
+ *    signature over `<SignedInfo>` matches. This closes the classic SAML
+ *    signature-forgery hole where only `<SignedInfo>` was checked and the
+ *    assertion body could be swapped freely.
+ *  - The verifying key is hard-pinned to the provider's configured certificate.
+ *    The document's own `<KeyInfo>` (attacker-controlled) is never trusted.
+ *  - Only the *verified* content is returned. Callers MUST read identity from
+ *    this content and never from the raw response, which defeats XML
+ *    signature-wrapping attacks (a forged assertion injected alongside a valid
+ *    one is simply not part of the returned, signed content).
  *
- * NOTE: Full XML c14n (Canonical XML) is complex and has many edge cases
- * (namespace inheritance, attribute sorting, whitespace handling, etc.).
- * A production deployment handling many IdPs should use a dedicated library
- * like xml-crypto for complete c14n support. This implementation handles
- * the most common case: extracting the raw SignedInfo element from the XML
- * and verifying the RSA-SHA256 signature over it.
+ * @returns the canonical XML of each validly-signed reference; empty when the
+ *          document is not validly signed by `certificate`.
  */
-export function verifyXmlSignature(
-  xml: string,
-  certificate: string
-): boolean {
-  // Extract the SignedInfo element (raw XML) for signature verification.
-  // We need the canonical form of SignedInfo as it appeared in the document.
-  const signedInfoMatch = xml.match(
-    /<ds:SignedInfo[\s\S]*?<\/ds:SignedInfo>/
-  );
-  if (!signedInfoMatch) {
-    // Also try without namespace prefix
-    const altMatch = xml.match(
-      /<SignedInfo[\s\S]*?<\/SignedInfo>/
-    );
-    if (!altMatch) {
-      log.warn('No SignedInfo element found in SAML response');
-      return false;
-    }
-    return verifySignedInfo(altMatch[0], xml, certificate, '');
-  }
-  return verifySignedInfo(signedInfoMatch[0], xml, certificate, 'ds:');
-}
-
-function verifySignedInfo(
-  signedInfoXml: string,
-  fullXml: string,
-  certificate: string,
-  nsPrefix: string
-): boolean {
-  // Extract SignatureValue
-  const sigValueTag = nsPrefix ? `${nsPrefix}SignatureValue` : 'SignatureValue';
-  const sigValueRegex = new RegExp(
-    `<${sigValueTag}[^>]*>([\\s\\S]*?)<\\/${sigValueTag}>`
-  );
-  const sigValueMatch = fullXml.match(sigValueRegex);
-  if (!sigValueMatch) {
-    log.warn('No SignatureValue element found in SAML response');
-    return false;
-  }
-  const signatureValue = sigValueMatch[1].replace(/\s+/g, '');
-
-  // Determine signature algorithm from SignatureMethod
-  const sigMethodTag = nsPrefix ? `${nsPrefix}SignatureMethod` : 'SignatureMethod';
-  const sigMethodRegex = new RegExp(`<${sigMethodTag}[^>]*Algorithm="([^"]+)"`);
-  const sigMethodMatch = fullXml.match(sigMethodRegex);
-  const algorithm = sigMethodMatch?.[1] || '';
-
-  // Map XML signature algorithm URI to Node.js algorithm name
-  let nodeAlgorithm: string;
-  if (algorithm.includes('rsa-sha256') || algorithm.includes('rsa-sha2-256')) {
-    nodeAlgorithm = 'RSA-SHA256';
-  } else if (algorithm.includes('rsa-sha1')) {
-    nodeAlgorithm = 'RSA-SHA1';
-  } else if (algorithm.includes('rsa-sha384')) {
-    nodeAlgorithm = 'RSA-SHA384';
-  } else if (algorithm.includes('rsa-sha512')) {
-    nodeAlgorithm = 'RSA-SHA512';
-  } else {
-    // Default to SHA256
-    nodeAlgorithm = 'RSA-SHA256';
-  }
-
-  // Build PEM-formatted certificate
+export function verifySignedContent(xml: string, certificate: string): string[] {
   const pem = formatCertificatePem(certificate);
 
-  // Perform basic exclusive c14n on SignedInfo:
-  // - Ensure the ds namespace is declared on the SignedInfo element if it was
-  //   inherited from a parent in the original document.
-  let canonicalSignedInfo = signedInfoXml;
-  if (
-    nsPrefix === 'ds:' &&
-    !signedInfoXml.includes('xmlns:ds=')
-  ) {
-    canonicalSignedInfo = signedInfoXml.replace(
-      '<ds:SignedInfo',
-      '<ds:SignedInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#"'
-    );
+  let doc: Document;
+  try {
+    doc = new DOMParser({ errorHandler: () => undefined }).parseFromString(
+      xml,
+      'text/xml'
+    ) as unknown as Document;
+  } catch (err) {
+    log.warn({ err }, 'SAML response is not well-formed XML');
+    return [];
   }
 
-  try {
-    const verifier = crypto.createVerify(nodeAlgorithm);
-    verifier.update(canonicalSignedInfo, 'utf-8');
-    return verifier.verify(pem, signatureValue, 'base64');
-  } catch (err) {
-    log.warn({ err }, 'Signature verification crypto error');
-    return false;
+  const selected = xpath.select(
+    `//*[local-name(.)='Signature' and namespace-uri(.)='${DSIG_NS}']`,
+    doc as unknown as Node
+  );
+  const signatureNodes = (
+    Array.isArray(selected) ? selected : selected ? [selected] : []
+  ) as Node[];
+  if (signatureNodes.length === 0) {
+    return [];
   }
+
+  const verified: string[] = [];
+  for (const node of signatureNodes) {
+    if (!node || typeof node !== 'object') continue;
+    try {
+      const sig = new SignedXml({
+        publicCert: pem,
+        // Defense in depth: never derive the verifying key from the document's
+        // own <KeyInfo>; always use the pinned provider certificate.
+        getCertFromKeyInfo: () => pem,
+      });
+      sig.loadSignature(node as unknown as Parameters<typeof sig.loadSignature>[0]);
+      if (sig.checkSignature(xml)) {
+        verified.push(...sig.getSignedReferences());
+      }
+    } catch (err) {
+      // A single invalid/forged signature node should not abort verification of
+      // any other (legitimately signed) signature present in the document.
+      log.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        'SAML signature node failed verification'
+      );
+    }
+  }
+  return verified;
+}
+
+/**
+ * Backwards-compatible boolean wrapper around {@link verifySignedContent}.
+ * Returns true when the document carries at least one signature that validates
+ * against the certificate. Prefer {@link verifySignedContent} when you need to
+ * act on the signed content (to avoid signature-wrapping pitfalls).
+ */
+export function verifyXmlSignature(xml: string, certificate: string): boolean {
+  return verifySignedContent(xml, certificate).length > 0;
 }
 
 /**
@@ -215,12 +208,13 @@ export function buildAuthnRequest(
 // ---- Response parsing ----
 
 /**
- * Parse a SAML Response (base64-encoded XML from the IdP).
+ * Parse and validate a SAML Response (base64-encoded XML from the IdP).
  *
- * Uses fast-xml-parser for proper XML parsing and performs cryptographic
- * signature verification when the provider has a certificate configured.
- * If no certificate is configured (demo mode), verification is skipped
- * with a warning.
+ * Verification is mandatory: the provider must have an IdP certificate, the
+ * response must carry a signature that validates against it, and identity is
+ * extracted *only* from the cryptographically-verified assertion. The
+ * assertion validity window (`<Conditions>` NotBefore/NotOnOrAfter) is enforced
+ * against verified content with a small clock-skew tolerance.
  */
 export async function parseSamlResponse(
   samlResponse: string,
@@ -228,6 +222,14 @@ export async function parseSamlResponse(
 ): Promise<SamlUser> {
   // Decode the base64 response
   const xml = Buffer.from(samlResponse, 'base64').toString('utf-8');
+
+  // Reject DTDs outright. SAML responses must not contain a DOCTYPE; allowing
+  // one opens the door to XXE / entity-expansion attacks against the parsers.
+  if (/<!DOCTYPE/i.test(xml)) {
+    throw new Error(
+      'Invalid SAML response: DOCTYPE declarations are not permitted'
+    );
+  }
 
   // Parse XML using fast-xml-parser
   const parsed = xmlParser.parse(xml);
@@ -255,39 +257,140 @@ export async function parseSamlResponse(
     }
   }
 
-  // Signature verification
-  if (provider.certificate) {
-    const hasSignature =
-      xml.includes('<ds:Signature') || xml.includes('<Signature');
-    if (hasSignature) {
-      const valid = verifyXmlSignature(xml, provider.certificate);
-      if (!valid) {
-        throw new Error(
-          'SAML signature verification failed: invalid signature'
-        );
-      }
-      log.info('SAML response signature verified successfully');
-    } else {
-      // Provider has a certificate but response has no signature — reject
-      throw new Error(
-        'SAML signature verification failed: response is not signed but provider requires signature verification'
-      );
-    }
-  } else {
+  // Signature verification is mandatory.
+  if (!provider.certificate) {
     throw new Error(
       'SAML signature verification failed: no IdP certificate configured. ' +
       'Configure the IdP X.509 certificate on this SSO provider before enabling SAML authentication.'
     );
   }
 
-  // Extract Assertion
-  const assertion = resolveElement(response, 'Assertion') as
-    | Record<string, unknown>
-    | undefined;
-  if (!assertion) {
-    throw new Error('Invalid SAML response: missing Assertion element');
+  const verifiedContents = verifySignedContent(xml, provider.certificate);
+  if (verifiedContents.length === 0) {
+    const hasSignature =
+      xml.includes('<ds:Signature') || xml.includes('<Signature');
+    throw new Error(
+      hasSignature
+        ? 'SAML signature verification failed: invalid signature'
+        : 'SAML signature verification failed: response is not signed but provider requires signature verification'
+    );
+  }
+  log.info('SAML response signature verified successfully');
+
+  // Gather every Assertion *within the verified content only*. Reading identity
+  // from anywhere else would reopen signature-wrapping attacks.
+  const assertions = collectVerifiedAssertions(verifiedContents);
+  if (assertions.length === 0) {
+    throw new Error(
+      'SAML signature verification failed: signature does not cover an Assertion'
+    );
   }
 
+  // A login Response carries exactly one subject. If multiple distinct signed
+  // assertions are present (e.g. an attacker appended a second provider-signed
+  // assertion captured elsewhere), the identity is ambiguous — fail closed
+  // rather than silently picking one. An identical assertion signed twice
+  // (Response-level + Assertion-level, a legitimate IdP option) collapses to one.
+  const users = assertions.map(extractUserFromAssertion);
+  const distinctSubjects = new Set(users.map((u) => u.nameId));
+  if (distinctSubjects.size > 1) {
+    throw new Error(
+      'SAML signature verification failed: conflicting signed assertions'
+    );
+  }
+
+  // Enforce the assertion validity window from verified content.
+  validateConditions(assertions[0]);
+
+  return users[0];
+}
+
+/**
+ * Parse each verified reference and collect every SAML Assertion found, whether
+ * the signed reference was the Assertion itself or the enclosing Response.
+ */
+function collectVerifiedAssertions(
+  verifiedContents: string[]
+): Record<string, unknown>[] {
+  const assertions: Record<string, unknown>[] = [];
+  for (const content of verifiedContents) {
+    let tree: Record<string, unknown>;
+    try {
+      tree = xmlParser.parse(content);
+    } catch {
+      continue;
+    }
+    const assertion = locateAssertion(tree);
+    if (assertion) assertions.push(assertion);
+  }
+  return assertions;
+}
+
+function locateAssertion(
+  tree: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  const asObject = (value: unknown): Record<string, unknown> | undefined => {
+    const candidate = Array.isArray(value) ? value[0] : value;
+    return candidate && typeof candidate === 'object'
+      ? (candidate as Record<string, unknown>)
+      : undefined;
+  };
+
+  // Signed reference was the Assertion directly.
+  const direct = asObject(resolveElement(tree, 'Assertion'));
+  if (direct) return direct;
+
+  // Signed reference was the whole Response; descend into it.
+  const response = asObject(resolveElement(tree, 'Response'));
+  if (response) {
+    const nested = asObject(resolveElement(response, 'Assertion'));
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+/**
+ * Enforce `<Conditions>` NotBefore / NotOnOrAfter on the (verified) assertion.
+ * Missing timestamps are tolerated (some minimal IdPs omit them); present-but-
+ * violated timestamps are rejected, with a small clock-skew allowance.
+ */
+function validateConditions(assertion: Record<string, unknown>): void {
+  const raw = resolveElement(assertion, 'Conditions');
+  const conditionsList = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  const now = Date.now();
+
+  for (const entry of conditionsList) {
+    if (!entry || typeof entry !== 'object') continue;
+    const cond = entry as Record<string, unknown>;
+
+    const notBefore = cond['@_NotBefore'];
+    if (typeof notBefore === 'string') {
+      const t = Date.parse(notBefore);
+      if (!Number.isNaN(t) && now + CLOCK_SKEW_MS < t) {
+        throw new Error(
+          'SAML assertion is not yet valid (NotBefore condition not met)'
+        );
+      }
+    }
+
+    const notOnOrAfter = cond['@_NotOnOrAfter'];
+    if (typeof notOnOrAfter === 'string') {
+      const t = Date.parse(notOnOrAfter);
+      if (!Number.isNaN(t) && now - CLOCK_SKEW_MS >= t) {
+        throw new Error(
+          'SAML assertion has expired (NotOnOrAfter condition exceeded)'
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Extract the {@link SamlUser} from a (verified) Assertion subtree.
+ */
+function extractUserFromAssertion(
+  assertion: Record<string, unknown>
+): SamlUser {
   // Extract NameID from Subject
   const subject = resolveElement(assertion, 'Subject') as
     | Record<string, unknown>
@@ -300,6 +403,8 @@ export async function parseSamlResponse(
   let nameId: string;
   if (typeof nameIdValue === 'string') {
     nameId = nameIdValue.trim();
+  } else if (typeof nameIdValue === 'number' || typeof nameIdValue === 'boolean') {
+    nameId = String(nameIdValue).trim();
   } else if (
     nameIdValue &&
     typeof nameIdValue === 'object' &&
@@ -340,21 +445,23 @@ export async function parseSamlResponse(
         attrObj,
         'AttributeValue'
       );
+      // Multi-valued attributes parse as arrays; take the first value.
+      const firstValue = Array.isArray(rawValue) ? rawValue[0] : rawValue;
       let value: string;
-      if (typeof rawValue === 'string') {
-        value = rawValue.trim();
-      } else if (typeof rawValue === 'number' || typeof rawValue === 'boolean') {
-        value = String(rawValue);
+      if (typeof firstValue === 'string') {
+        value = firstValue.trim();
+      } else if (typeof firstValue === 'number' || typeof firstValue === 'boolean') {
+        value = String(firstValue);
       } else if (
-        rawValue &&
-        typeof rawValue === 'object' &&
-        '#text' in (rawValue as Record<string, unknown>)
+        firstValue &&
+        typeof firstValue === 'object' &&
+        '#text' in (firstValue as Record<string, unknown>)
       ) {
         value = String(
-          (rawValue as Record<string, unknown>)['#text']
+          (firstValue as Record<string, unknown>)['#text']
         ).trim();
       } else {
-        value = rawValue != null ? String(rawValue) : '';
+        value = firstValue != null ? String(firstValue) : '';
       }
       attributes[name] = value;
     }
