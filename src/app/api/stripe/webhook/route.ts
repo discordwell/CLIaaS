@@ -1,6 +1,7 @@
 import { safeErrorMessage } from '@/lib/parse-json-body';
 import { NextResponse } from 'next/server';
 import { createLogger } from '@/lib/logger';
+import { resolveSubscriptionPeriodEnd, resolveInvoiceSubscriptionId } from '@/lib/billing/stripe-events';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,8 +77,11 @@ async function handleStripeEvent(event: { id: string; type: string; data: { obje
       const tenantId = (obj.metadata as Record<string, string>)?.tenantId;
       const subscriptionId = obj.subscription as string;
       if (tenantId && subscriptionId) {
-        // Resolve plan from the subscription's price
+        // Resolve plan + billing period from the subscription's price
         let plan: string | undefined;
+        let periodEnd: number | null = null;
+        let cancelAtPeriodEnd = false;
+        let resolvedSub = false;
         try {
           const stripe = (await import('@/lib/billing/stripe')).getStripe();
           if (stripe) {
@@ -87,6 +91,9 @@ async function handleStripeEvent(event: { id: string; type: string; data: { obje
             else if (priceId === process.env.STRIPE_PRICE_PRO) plan = 'pro';
             // Legacy
             else if (priceId === process.env.STRIPE_PRICE_STARTER) plan = 'starter';
+            periodEnd = resolveSubscriptionPeriodEnd(sub);
+            cancelAtPeriodEnd = sub.cancel_at_period_end ?? false;
+            resolvedSub = true;
           }
         } catch {
           logger.warn({ subscriptionId }, 'Could not resolve plan from subscription');
@@ -97,6 +104,14 @@ async function handleStripeEvent(event: { id: string; type: string; data: { obje
             stripeSubscriptionId: subscriptionId,
             stripeSubscriptionStatus: 'active',
             ...(plan ? { plan } : {}),
+            // Only persist period/cancel when we actually fetched the
+            // subscription, so a retrieval failure doesn't null out the date.
+            ...(resolvedSub
+              ? {
+                  currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
+                  cancelAtPeriodEnd,
+                }
+              : {}),
           })
           .where(eq(tenants.id, tenantId));
         logger.info({ tenantId, subscriptionId, plan }, 'Checkout completed');
@@ -107,8 +122,10 @@ async function handleStripeEvent(event: { id: string; type: string; data: { obje
     case 'customer.subscription.updated': {
       const subId = obj.id as string;
       const status = obj.status as string;
-      const periodEnd = obj.current_period_end as number;
-      const cancelAt = obj.cancel_at_period_end as boolean;
+      // current_period_end moved from the Subscription to its items in the
+      // clover API version; resolve from both shapes (see stripe-events.ts).
+      const periodEnd = resolveSubscriptionPeriodEnd(obj);
+      const cancelAt = (obj.cancel_at_period_end as boolean) ?? false;
 
       // Find tenant by subscription ID
       const [tenant] = await db
@@ -164,7 +181,9 @@ async function handleStripeEvent(event: { id: string; type: string; data: { obje
     }
 
     case 'invoice.payment_failed': {
-      const subId = obj.subscription as string;
+      // invoice.subscription moved under parent.subscription_details in the
+      // clover API version; resolve from both shapes (see stripe-events.ts).
+      const subId = resolveInvoiceSubscriptionId(obj);
       if (subId) {
         const [tenant] = await db
           .select({ id: tenants.id })
