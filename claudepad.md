@@ -1,5 +1,18 @@
 # Session Summaries
 
+## 2026-06-18T06:40Z — Billing webhook (Stripe clover-API field relocations) + HubSpot/Freshdesk writeback mapping — 2 verified bug classes, each with tests
+
+Audited non-EasterEgg business logic with parallel bug-hunting agents (billing, connectors; the RBAC/api-keys and compliance/PII/audit agents were blocked mid-run by the model's cyber-content safety filter and returned nothing — a future pass could re-scope those). Independently re-verified every finding in source — including reading the pinned Stripe SDK's own type defs and the HubSpot import-side maps — and fixed two contained bug classes. Each fix has tests proven fail-before/pass-after by reverting the source.
+
+- **Stripe webhook clover-API field relocations** (`src/app/api/stripe/webhook/route.ts` + new `src/lib/billing/stripe-events.ts`): the SDK is pinned to API version `2026-01-28.clover`, in which `Subscription.current_period_end` moved onto subscription items and `Invoice.subscription` moved under `invoice.parent.subscription_details.subscription` (verified directly in `node_modules/stripe/types/*.d.ts` — the top-level fields are gone). The handler read the now-undefined top-level fields, so every `customer.subscription.updated` silently wiped the tenant's renewal date to null (the billing page's "Renews:" date), and `invoice.payment_failed` never marked the tenant `past_due` (failed payments unreflected). New helpers `resolveSubscriptionPeriodEnd`/`resolveInvoiceSubscriptionId` read the clover location first with a legacy fallback (webhook payloads serialize with the *account's* API version, not the SDK's) and unwrap expanded objects. Also now persist `currentPeriodEnd`/`cancelAtPeriodEnd` on `checkout.session.completed` (only when the subscription retrieval succeeded, so a transient Stripe error can't null the date). 11 new helper tests.
+- **HubSpot/Freshdesk upstream writeback mapping** (`cli/connectors/hubspot.ts`, `cli/sync/upstream-adapters/freshdesk.ts`): HubSpot writeback forwarded raw CLIaaS values — `hs_ticket_priority='normal'/'high'` (HubSpot options are uppercase LOW/MEDIUM/HIGH; "normal" is MEDIUM) and `hs_pipeline_stage='closed'` (stages are numeric IDs) — so every status/priority change was an invalid value HubSpot rejected, silently never landing despite the outbox row being marked pushed. Added `priorityToHubspot`/`statusToHubspotStage` (default-support-pipeline IDs 1/2/4; `on_hold` left unset rather than mis-mapped), the inverse of import-side `mapPriority`/`mapPipelineStage`. Freshdesk's `?? 2` status fallback coerced an unmapped status (`on_hold`, which Freshdesk's default 2/3/4/5 don't have) to 2 (Open), reopening resolved/closed tickets; now unmappable fields are skipped while the rest of the update still syncs.
+
+**Process:** parallel bug-hunting agents → independent source re-verification → fix + test → adversarial code-review subagent on the diff (verdict: no regressions; it flagged a comment/precedence nit in the invoice helper and a missing `?? false` on `cancelAt`, both fixed before commit).
+
+**Verification:** clean `tsc --noEmit` exit 0 (caught and fixed test-fixture excess-property errors a stale incremental buildinfo had masked) · lint 0 errors (1 pre-existing `HSConversationThread` warning) · fail-before/pass-after proven by `git stash`ing the source fixes (old code → null period-end / `'closed'`/`'high'` writes / on_hold reopen) · billing suite 48 pass · connectors+sync 377 pass · broad cli+src cross-cutting sweep 134 files / 2,254 pass, 0 fail. EasterEgg untouched. Committed in 2 themed commits; not pushed (orchestrator handles push).
+
+**NOT fixed — flagged:** HubSpot status writeback targets the *default* support pipeline; custom-pipeline portals need a configurable stage map (the import side carries the same assumption). The RBAC/api-keys and compliance/PII/audit bug-hunts never completed (safety filter) — worth re-scoping in a later pass.
+
 ## 2026-06-17T23:05Z — Security: fixed critical SAML signature-verification bypass (assertion forgery) with xml-crypto
 
 `src/lib/auth/saml.ts` verified only the RSA signature over `<SignedInfo>` and **never bound `<DigestValue>` to the assertion** — so an attacker could keep a validly-signed `<SignedInfo>` and swap in a forged `<Assertion>` (any NameID/email/attributes) and authenticate as anyone. Proven exploitable: against the old code, a forged assertion (placeholder digest, `attacker@evil.com` NameID, real RSA signature over SignedInfo) returned `attacker@evil.com` and logged "signature verified successfully". The 2026-06-17T08:35Z session had flagged this as out-of-scope for a drive-by; this pass is the dedicated fix.
@@ -345,30 +358,6 @@ So WASM ALSO has queued MOVE for this unit. The difference: WASM's Commence gate
 3. **Match C++ Commence gate exactly** — replace niat with a Doing-based check (`doing === 'stand_ready' || doing === 'nothing'`). Requires Doing transitions to be C++-faithful.
 
 Option 3 is the cleanest port. Currently TS's `entity.doingAI` transitions Doing through some states (Phase 7A landed for `walk → stand_ready`). More transitions need C++-faithful porting.
-
-## 2026-05-01T00:50Z — SCG13EA t101 expanded root cause: TS USSR E1 (61,67) stuck in MOVE
-
-**Probe findings via `test-scg13ea-all-fires.ts`:** at tick 100 end, WASM has 4 E1/E3 about to fire at tick 101; TS has only 2.
-
-**Per-unit divergence:**
-| unit | WASM | TS |
-|---|---|---|
-| Greek E1 (12,54) | GUARD mt=0 | GUARD mt=1 (1-tick offset) |
-| USSR E1 (61,67) | GUARD mt=0 | **MOVE mt=15** (wrong mission!) |
-| USSR E1 (62,78) | GUARD mt=1 | GUARD mt=2 (1-tick offset) |
-| USSR STICKY (27,46) | STICKY mt=0 | STICKY mt=1 (1-tick offset) |
-
-**Critical finding for USSR E1 (61,67):** Stuck in MOVE with `mt=15, mq=null, moveTarget=(15744,20352), isDriving=true, path=[], pathIdx=0, team=2`.
-
-The unit has a moveTarget but EMPTY PATH and isDriving=true. Cannot move (no path) but isDriving=true blocks `MOVEMENT_AI_MOVE_NAVCOM_GUARD` and pre-Commence gates.
-
-WASM has same unit in GUARD — WASM transitioned MOVE→GUARD somewhere between scenario start and tick 100. TS missed that transition.
-
-**Structural fix candidates (one of):**
-1. When infantry's path empties mid-MOVE with moveTarget still set, re-attempt findPath. If fails, clear moveTarget + isDriving → next tick MOVEMENT_AI_MOVE_NAVCOM_GUARD triggers Enter_Idle_Mode.
-2. When path is exhausted, set isDriving=false. Then `MOVEMENT_AI_MOVE_NAVCOM_GUARD` would also fire (since !isDriving + !moveTarget after some other clear).
-
-Both candidates need verification and may regress existing scenarios. The 1-tick init drift on Greek E1/USSR (62,78)/USSR STICKY is a separate, harder problem (RNG-ordering at scenario load).
 
 # Key Findings
 

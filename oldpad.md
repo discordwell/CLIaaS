@@ -1,5 +1,29 @@
 # Archived Session Summaries
 
+## 2026-05-01T00:50Z — SCG13EA t101 expanded root cause: TS USSR E1 (61,67) stuck in MOVE
+
+**Probe findings via `test-scg13ea-all-fires.ts`:** at tick 100 end, WASM has 4 E1/E3 about to fire at tick 101; TS has only 2.
+
+**Per-unit divergence:**
+| unit | WASM | TS |
+|---|---|---|
+| Greek E1 (12,54) | GUARD mt=0 | GUARD mt=1 (1-tick offset) |
+| USSR E1 (61,67) | GUARD mt=0 | **MOVE mt=15** (wrong mission!) |
+| USSR E1 (62,78) | GUARD mt=1 | GUARD mt=2 (1-tick offset) |
+| USSR STICKY (27,46) | STICKY mt=0 | STICKY mt=1 (1-tick offset) |
+
+**Critical finding for USSR E1 (61,67):** Stuck in MOVE with `mt=15, mq=null, moveTarget=(15744,20352), isDriving=true, path=[], pathIdx=0, team=2`.
+
+The unit has a moveTarget but EMPTY PATH and isDriving=true. Cannot move (no path) but isDriving=true blocks `MOVEMENT_AI_MOVE_NAVCOM_GUARD` and pre-Commence gates.
+
+WASM has same unit in GUARD — WASM transitioned MOVE→GUARD somewhere between scenario start and tick 100. TS missed that transition.
+
+**Structural fix candidates (one of):**
+1. When infantry's path empties mid-MOVE with moveTarget still set, re-attempt findPath. If fails, clear moveTarget + isDriving → next tick MOVEMENT_AI_MOVE_NAVCOM_GUARD triggers Enter_Idle_Mode.
+2. When path is exhausted, set isDriving=false. Then `MOVEMENT_AI_MOVE_NAVCOM_GUARD` would also fire (since !isDriving + !moveTarget after some other clear).
+
+Both candidates need verification and may regress existing scenarios. The 1-tick init drift on Greek E1/USSR (62,78)/USSR STICKY is a separate, harder problem (RNG-ordering at scenario load).
+
 ## 2026-05-01T00:30Z — Divergence verification post-fix + SCG13EA Greek E1 root cause confirmed
 
 **Playwright divergence after vessel/DriveClass commits (post-deploy):**
