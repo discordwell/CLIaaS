@@ -52,12 +52,15 @@ export async function scanEntity(
 
     // Determine masking style from rules
     const ruleMap = new Map(rules.map(r => [r.piiType, r]));
+    const styleFor = (m: PiiMatch): MaskingStyle => ruleMap.get(m.piiType)?.maskingStyle || 'full';
+    const autoRedactMatches: PiiMatch[] = [];
 
     for (const match of matches) {
       const rule = ruleMap.get(match.piiType);
       const style: MaskingStyle = rule?.maskingStyle || 'full';
       const maskedValue = maskText(text.slice(match.start, match.end), [{ ...match, start: 0, end: match.end - match.start }], style);
       const autoRedact = rule?.autoRedact ?? false;
+      if (autoRedact) autoRedactMatches.push(match);
 
       const encrypted = encryptPii(match.text);
 
@@ -83,11 +86,6 @@ export async function scanEntity(
             .returning();
 
           detections.push(toDetectionRecord(row));
-
-          // If auto-redact, apply immediately
-          if (autoRedact) {
-            await applyRedaction(entityType, entityId, fieldName, text, [match], style, workspaceId);
-          }
         } catch (err) {
           logger.error({ entityType, entityId, fieldName, error: err instanceof Error ? err.message : 'Unknown' }, 'Failed to persist PII detection');
         }
@@ -112,6 +110,13 @@ export async function scanEntity(
           createdAt: new Date().toISOString(),
         });
       }
+    }
+
+    // Apply all auto-redactions for this field in a single pass. Redacting
+    // one match at a time rebuilds the field from the original text each time,
+    // so only the last match would survive — leaking every other detected PII.
+    if (autoRedactMatches.length > 0 && db) {
+      await applyRedaction(entityType, entityId, fieldName, text, autoRedactMatches, 'full', workspaceId, styleFor);
     }
 
     // Update entity has_pii flag
@@ -319,11 +324,12 @@ async function applyRedaction(
   matches: PiiMatch[],
   style: MaskingStyle,
   workspaceId: string,
+  styleFor?: (match: PiiMatch) => MaskingStyle,
 ): Promise<void> {
   const db = getDb();
   if (!db) return;
 
-  const masked = maskText(originalText, matches, style);
+  const masked = maskText(originalText, matches, style, styleFor);
 
   try {
     switch (entityType) {

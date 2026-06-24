@@ -193,7 +193,39 @@ export function detectPiiRegex(text: string, rules?: PiiSensitivityRule[]): PiiM
     }
   }
 
-  return matches;
+  return resolveOverlappingMatches(matches);
+}
+
+/**
+ * Collapse redundant overlapping matches.
+ *
+ * Different patterns frequently match the same span — e.g. "A12345678" matches
+ * both the passport (`[A-Z]\d{8}`) and driver's-license (`[A-Z]\d{7,8}`) rules.
+ * Reporting both produces duplicate detection rows and, once masked, garbled
+ * output. We keep only matches that are not fully contained within another
+ * (larger / higher-confidence) match. Partially-overlapping and disjoint
+ * matches are preserved so masking never leaves part of a span exposed.
+ */
+function resolveOverlappingMatches(matches: PiiMatch[]): PiiMatch[] {
+  if (matches.length <= 1) return matches;
+
+  // Dominant matches first: widest span, then highest confidence.
+  const ranked = [...matches].sort((a, b) => {
+    const lenA = a.end - a.start;
+    const lenB = b.end - b.start;
+    if (lenB !== lenA) return lenB - lenA;
+    if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+    return a.start - b.start;
+  });
+
+  const kept: PiiMatch[] = [];
+  for (const m of ranked) {
+    const contained = kept.some(k => m.start >= k.start && m.end <= k.end);
+    if (!contained) kept.push(m);
+  }
+
+  // Restore positional ordering for a stable, predictable result.
+  return kept.sort((a, b) => a.start - b.start || a.end - b.end);
 }
 
 /** Full PII detection pipeline (regex, optionally AI in future). */
@@ -222,16 +254,45 @@ function maskMatch(matchText: string, piiType: PiiType, style: MaskingStyle): st
   }
 }
 
-/** Apply masking to text, replacing all matches with masked values. */
-export function maskText(text: string, matches: PiiMatch[], style: MaskingStyle = 'full'): string {
+/**
+ * Apply masking to text, replacing all matches with masked values.
+ *
+ * Overlapping or duplicate matches are merged into a single coverage region
+ * before replacement, so redaction never leaves a fragment of one match exposed
+ * (a PII leak) or produces garbled output from compounding offset shifts. The
+ * highest-confidence match in a region supplies the redaction label.
+ *
+ * Pass `styleFor` to choose a masking style per match (e.g. from per-type
+ * sensitivity rules); otherwise the single `style` argument applies to all.
+ */
+export function maskText(
+  text: string,
+  matches: PiiMatch[],
+  style: MaskingStyle = 'full',
+  styleFor?: (match: PiiMatch) => MaskingStyle,
+): string {
   if (matches.length === 0) return text;
 
-  // Sort by start position descending so we can replace from end to start
-  const sorted = [...matches].sort((a, b) => b.start - a.start);
-  let result = text;
+  // Merge overlapping/duplicate spans into contiguous coverage regions.
+  const sorted = [...matches].sort((a, b) => a.start - b.start || a.end - b.end);
+  const regions: Array<{ start: number; end: number; rep: PiiMatch }> = [];
   for (const m of sorted) {
-    const masked = maskMatch(m.text, m.piiType, style);
-    result = result.slice(0, m.start) + masked + result.slice(m.end);
+    const last = regions[regions.length - 1];
+    if (last && m.start < last.end) {
+      if (m.end > last.end) last.end = m.end;
+      if (m.confidence > last.rep.confidence) last.rep = m;
+    } else {
+      regions.push({ start: m.start, end: m.end, rep: m });
+    }
+  }
+
+  // Replace from end to start so earlier offsets stay valid.
+  let result = text;
+  for (let i = regions.length - 1; i >= 0; i--) {
+    const r = regions[i];
+    const st = styleFor ? styleFor(r.rep) : style;
+    const masked = maskMatch(text.slice(r.start, r.end), r.rep.piiType, st);
+    result = result.slice(0, r.start) + masked + result.slice(r.end);
   }
   return result;
 }

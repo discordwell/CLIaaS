@@ -200,6 +200,71 @@ describe('PII Detector (Compliance)', () => {
     it('returns original text for empty matches', () => {
       expect(maskText('hello', [], 'full')).toBe('hello');
     });
+
+    it('merges duplicate-span matches into one clean redaction', () => {
+      // Two rules matching the exact same span (e.g. passport + drivers_license).
+      // The pre-fix implementation produced garbled output like
+      // "[REDACTED-DRIVERS-LICENSE]-PASSPORT]" from compounding offset shifts.
+      const matches: PiiMatch[] = [
+        { piiType: 'passport', text: 'A12345678', start: 6, end: 15, confidence: 0.75, method: 'regex' },
+        { piiType: 'drivers_license', text: 'A12345678', start: 6, end: 15, confidence: 0.70, method: 'regex' },
+      ];
+      const result = maskText('ID is A12345678 on file', matches, 'full');
+      expect(result).toBe('ID is [REDACTED-PASSPORT] on file');
+      // The garbled pre-fix output contained both labels spliced together.
+      expect(result).not.toContain('DRIVERS-LICENSE');
+    });
+
+    it('covers the full union of partially overlapping matches (no leak)', () => {
+      // ssn [3,18) and phone [10,18) overlap; their union must be fully masked.
+      const text = 'PRE' + 'X'.repeat(15) + 'POST';
+      const matches: PiiMatch[] = [
+        { piiType: 'ssn', text: 'X'.repeat(10), start: 3, end: 13, confidence: 0.9, method: 'regex' },
+        { piiType: 'phone', text: 'X'.repeat(8), start: 10, end: 18, confidence: 0.8, method: 'regex' },
+      ];
+      const result = maskText(text, matches, 'full');
+      // Highest-confidence match (ssn) labels the merged region; no stray X leaks.
+      expect(result).toBe('PRE[REDACTED-SSN]POST');
+      expect(result).not.toContain('X');
+    });
+
+    it('applies a per-match masking style via styleFor', () => {
+      const matches: PiiMatch[] = [
+        { piiType: 'ssn', text: '123-45-6789', start: 0, end: 11, confidence: 0.95, method: 'regex' },
+        { piiType: 'credit_card', text: '4111111111111111', start: 12, end: 28, confidence: 0.98, method: 'regex' },
+      ];
+      const result = maskText('123-45-6789 4111111111111111', matches, 'full',
+        (m) => (m.piiType === 'credit_card' ? 'partial' : 'full'));
+      expect(result).toBe('[REDACTED-SSN] ***1111');
+    });
+  });
+
+  describe('overlapping detection resolution', () => {
+    it('collapses the passport/drivers_license same-span collision to one match', () => {
+      // "A12345678" matches both passport (\\b[A-Z]\\d{8}\\b) and
+      // drivers_license (\\b[A-Z]\\d{7,8}\\b) over the identical span.
+      const matches = detectPiiRegex('License A12345678 expires');
+      const collisions = matches.filter(
+        m => m.piiType === 'passport' || m.piiType === 'drivers_license',
+      );
+      expect(collisions).toHaveLength(1);
+      expect(collisions[0].piiType).toBe('passport'); // higher confidence wins
+    });
+
+    it('masks a detected same-span collision cleanly end-to-end', () => {
+      const text = 'License A12345678 expires';
+      const result = maskText(text, detectPiiRegex(text), 'full');
+      expect(result).toBe('License [REDACTED-PASSPORT] expires');
+    });
+
+    it('keeps disjoint matches of the same general shape distinct', () => {
+      // Two separate passport-like tokens must both be detected & masked.
+      const text = 'A12345678 and B87654321';
+      const matches = detectPiiRegex(text);
+      const passports = matches.filter(m => m.piiType === 'passport');
+      expect(passports).toHaveLength(2);
+      expect(maskText(text, matches, 'full')).toBe('[REDACTED-PASSPORT] and [REDACTED-PASSPORT]');
+    });
   });
 
   describe('getDefaultRules', () => {
