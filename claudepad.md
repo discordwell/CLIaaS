@@ -1,5 +1,20 @@
 # Session Summaries
 
+## 2026-06-24T03:45Z — Business-hours core rewrite: cross-midnight (overnight) windows + DST-correct day math (the SLA-critical bug 3 prior passes deferred), with tests
+
+Took on the contained, high-value `src/lib/wfm/business-hours.ts` bugs that prior passes (2026-06-17 / 2026-06-23) flagged as "warranting a dedicated reviewed effort" — they feed SLA breach math (`src/lib/sla.ts`) and routing (`routing/availability.ts`, `routing/engine.ts`). Confirmed no validation anywhere rejects `end < start` schedules (the API POST and CLI store them as-is), so overnight configs could already be persisted and were silently broken; supporting them is strictly additive. Rewrote the module around one correct primitive rather than patching five functions independently.
+
+- **Cross-midnight windows never opened**: a window like `22:00–06:00` (end ≤ start) was treated as closed by every function (`isWithinBusinessHours`'s `cur < start || cur >= end` is always true; the day-walk produced `windowEnd < windowStart` → zero overlap). 24/7 (`00:00–24:00`), overnight shifts, and follow-the-sun schedules all silently reported closed / 0 business-minutes.
+- **DST day-advance double-counted / misplaced**: the day-walk advanced the cursor by a fixed `(24 - hours)*3600000 - mins*60000`, assuming 24-hour days. On a 25-hour fall-back day it landed back inside the same day and re-counted its windows (≈2× minutes — verified 960 vs 480); on a 23-hour spring-forward day it misplaced the window by an hour for ranges straddling the transition (120 vs 180).
+
+**Fix:** new `wallTimeToUtc` (standard two-pass `Intl`-offset resolution, formatter cached per timezone) converts each window boundary's local wall-clock to an absolute UTC instant — DST-correct, and an overnight window's close is computed on the *next* calendar day. A `businessIntervals` generator yields merged, chronologically-sorted absolute open-intervals (adjacent/overlapping windows and overnight tails fuse), backing up one local day so a prior evening's overnight tail is caught. All five public functions (`isWithinBusinessHours`, `getElapsedBusinessMinutes`, `nextBusinessHourStart`, `nextBusinessHourClose`, `addBusinessMinutes`) became thin wrappers over it. Public API unchanged. A window (and its holiday status) is owned by the local day it starts on — identical to prior behavior for non-overnight windows. Full-day/partial-day holiday handling preserved (partial via generic interval subtraction).
+
+**Verification:** the 25 original business-hours tests + 4 SLA-business-hours tests pass unchanged against the rewrite. Added 17 tests (overnight membership/elapsed/add/next-start/next-close incl. array format; DST fall-back no-double-count + spring-forward placement + post-fall-back add; 24/7; 24/5 multi-day contiguous block). Proved fail-before/pass-after by `git stash`ing only the source — 9 of the new tests fail on old code (all overnight cases, the fall-back double-count 960→480, spring-forward 120→180, and the 24/5 close Tue-vs-Sat). typecheck exit 0 · lint 0 on changed files · broad non-EasterEgg vitest 313 files (310 pass, 3 skipped) / 4,112 pass, 18 skipped, 0 fail. EasterEgg untouched.
+
+**Adversarial code-review subagent** verified the DST/overnight core empirically (both transitions, extreme zones, split-window holidays, the `24:00` sentinel, 2-year ranges) and caught one bug I introduced: `nextBusinessHourClose` capped its scan at 3 days, so a long *contiguous* block (24/5, chained overnight) truncated to a fabricated, `from`-dependent close (surfaced via the check route/CLI/MCP `business_hours_check` — user-facing, not the SLA path). Fixed by scanning two weeks (covers any weekly-periodic block); added the 24/5 regression test. Its other note (invalid `Date` inputs throw) is pre-existing and unchanged — left alone.
+
+**NOT changed — flagged:** true-24/7 has no meaningful "next close"; `nextBusinessHourClose` returns the far edge of the 2-week scan for it (documented in-code). Invalid-`Date` inputs still throw (pre-existing; would need input guards in `sla.ts` / the check route). Overlapping windows defined within a single day still merge in elapsed math (correct), but the API/CLI offer no validation to reject genuinely malformed schedules — a possible future hardening.
+
 ## 2026-06-23T21:55Z — Compliance PII-redaction correctness (3 bugs) + automation changed_to create-firing fix, each with tests
 
 Audited non-EasterEgg business logic (re-scoping the compliance/PII + automation areas a prior pass flagged). Independently verified every finding in source, fixed three contained PII-redaction bugs plus one automation-condition bug, each with a fail-before/pass-after test.
@@ -325,29 +340,6 @@ Subsequent flow: existing mq=MOVE Commence pop next tick → Mission_Move Enter_
 - The unit needs to land in m=GUARD at tick 100 end so Mission_Guard fires at tick 101 (tag 60043 — the missing call).
 
 Phase 7B scaffolding is in place; future session can add per-Class DoControls or Doing transitions to extend coverage. All 51,379 vitest pass; divergence preserved at baseline.
-
-## 2026-05-01T02:00Z — niat=15 experiment regressed SCG03EA + SCG06EA (reverted)
-
-**Tried** increasing `nonInterruptAnimTicks` from 8 to 15 in `team.ts:560` to extend Commence-block duration matching WASM's observed 9+ tick gating for SCG13EA USSR E1 (61,67).
-
-**Vitest:** all 51,379 pass with niat=15.
-
-**Playwright divergence (deployed and tested):**
-| scenario | baseline | niat=15 | net |
-|---|---|---|---|
-| SCG01EA | 77 | 77 | 0 |
-| SCG03EA | 238 | **10** | **-228** |
-| SCG04EA | 3 | 3 | 0 |
-| SCG06EA | 76 | **11** | **-65** |
-| SCG07EA | 17 | 17 | 0 |
-| SCG11EA | 19 | 19 | 0 |
-| SCG13EA | 101 | 101 (Δcalls 1→4) | worse |
-
-**Reverted** in `baab9e64`. The niat proxy's value is sensitive — increasing it for ALL infantry team activations delays Mission_Move dispatch for scenarios where it should fire on time. Need a more nuanced fix:
-- Per-team-type adjustment, OR
-- Proper Doing-state tracking that mirrors C++'s per-unit Interrupt flag
-
-Real fix requires modeling the Doing transition table (DoControls) and gating Commence on `Doing == DO_NOTHING || MasterDoControls[Doing].Interrupt` — substantial port.
 
 # Key Findings
 

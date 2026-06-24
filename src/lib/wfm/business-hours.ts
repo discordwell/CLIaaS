@@ -6,6 +6,27 @@
  * Handles both schedule formats:
  * - Array of { day, startTime, endTime } (BusinessHoursWindow[])
  * - Record<string, Array<{ start, end }>> keyed by dayOfWeek number
+ *
+ * Design — one correct core, five thin wrappers:
+ * Every public function is expressed in terms of `businessIntervals()`, a
+ * generator that yields the *absolute* (UTC) [start, end) instants the business
+ * is open, in chronological order, with adjacent/overlapping windows merged.
+ * Building those instants with a real wall-clock→UTC conversion
+ * (`wallTimeToUtc`) makes the module correct across two cases the previous
+ * day-walk got wrong:
+ *   1. Cross-midnight ("overnight") windows, e.g. 22:00–06:00, where the close
+ *      time is on the *following* calendar day. A window whose end <= start is
+ *      treated as wrapping past midnight.
+ *   2. Daylight-saving transitions. The old code advanced the day cursor by a
+ *      fixed `(24 - hours)` hours, which double-counted on 25-hour fall-back
+ *      days and skipped an hour on 23-hour spring-forward days. Computing each
+ *      window boundary from its wall-clock time resolves the offset per instant.
+ *
+ * A window is owned by the local calendar day it is scheduled on; its overnight
+ * tail and its holiday status both follow that start day (so a holiday declared
+ * on Tuesday does not retroactively cancel the tail of a shift that opened
+ * Monday night). For non-overnight windows this is identical to the prior
+ * behavior, since the window starts and ends on the same day.
  */
 
 import type { BusinessHoursConfig, HolidayEntry } from './types';
@@ -18,22 +39,64 @@ const DAY_NAME_TO_NUM: Record<string, number> = {
   thursday: 4, friday: 5, saturday: 6,
 };
 
-function getTimeInZone(timezone: string, date: Date): { dayOfWeek: number; hours: number; minutes: number } {
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    hour: 'numeric',
-    minute: 'numeric',
-    weekday: 'short',
-    hour12: false,
-    hourCycle: 'h23',
-  });
-  const parts = fmt.formatToParts(date);
-  const weekday = parts.find(p => p.type === 'weekday')?.value ?? '';
-  const dayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-  const dayOfWeek = dayMap[weekday] ?? 0;
-  const hours = parseInt(parts.find(p => p.type === 'hour')?.value ?? '0', 10);
-  const minutes = parseInt(parts.find(p => p.type === 'minute')?.value ?? '0', 10);
-  return { dayOfWeek, hours, minutes };
+const MS_PER_MINUTE = 60_000;
+const MS_PER_DAY = 86_400_000;
+
+/** Cached one-per-timezone formatter used to read a timezone's UTC offset. */
+const offsetFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+function offsetFormatter(timezone: string): Intl.DateTimeFormat {
+  let fmt = offsetFormatterCache.get(timezone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false, hourCycle: 'h23',
+    });
+    offsetFormatterCache.set(timezone, fmt);
+  }
+  return fmt;
+}
+
+/**
+ * Offset, in milliseconds, that the timezone is ahead of UTC at `instant`.
+ * (e.g. America/New_York in winter returns -5h.) Computed by formatting the
+ * instant as wall-clock in the zone and diffing against the same fields read
+ * as if they were UTC.
+ */
+function getZoneOffsetMs(timezone: string, instant: number): number {
+  const parts = offsetFormatter(timezone).formatToParts(new Date(instant));
+  const map: Record<string, number> = {};
+  for (const p of parts) {
+    if (p.type !== 'literal') map[p.type] = parseInt(p.value, 10);
+  }
+  let hour = map.hour ?? 0;
+  if (hour === 24) hour = 0; // some engines emit '24' at midnight under h23
+  const asUtc = Date.UTC(map.year, (map.month ?? 1) - 1, map.day ?? 1, hour, map.minute ?? 0, map.second ?? 0);
+  return asUtc - instant;
+}
+
+/**
+ * Convert a wall-clock time (year/month/day + minutes-into-the-day) in a given
+ * timezone to the absolute UTC instant (ms). Uses the standard two-pass offset
+ * resolution so that DST transitions are handled correctly — the second pass
+ * re-reads the offset at the candidate instant, which fixes boundaries that
+ * straddle a transition. `minutes` may be >= 1440 (e.g. 1440 == "24:00"), in
+ * which case the result rolls into the next day, exactly as Date.UTC overflow
+ * dictates.
+ */
+function wallTimeToUtc(timezone: string, year: number, month: number, day: number, minutes: number): number {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  const guess = Date.UTC(year, month - 1, day, hour, minute);
+  const offset1 = getZoneOffsetMs(timezone, guess);
+  let utc = guess - offset1;
+  const offset2 = getZoneOffsetMs(timezone, utc);
+  if (offset2 !== offset1) {
+    utc = guess - offset2;
+  }
+  return utc;
 }
 
 function getDateInZone(timezone: string, date: Date): string {
@@ -46,6 +109,35 @@ function timeToMinutes(t: string): number {
 }
 
 interface TimeWindow { start: string; end: string }
+interface AbsInterval { start: number; end: number } // epoch ms, [start, end)
+
+function ymdFromDateStr(dateStr: string): { y: number; mo: number; d: number } {
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  return { y, mo, d };
+}
+
+function addDays(y: number, mo: number, d: number, delta: number): { y: number; mo: number; d: number } {
+  const dt = new Date(Date.UTC(y, mo - 1, d + delta));
+  return { y: dt.getUTCFullYear(), mo: dt.getUTCMonth() + 1, d: dt.getUTCDate() };
+}
+
+function fmtDate(y: number, mo: number, d: number): string {
+  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+/** Gregorian day-of-week (0=Sun) for a local calendar date. */
+function dayOfWeekFor(y: number, mo: number, d: number): number {
+  return new Date(Date.UTC(y, mo - 1, d)).getUTCDay();
+}
+
+/** Subtract a [bStart, bEnd) range from an interval, yielding 0–2 intervals. */
+function subtractRange(seg: AbsInterval, bStart: number, bEnd: number): AbsInterval[] {
+  if (bEnd <= seg.start || bStart >= seg.end) return [seg];
+  const out: AbsInterval[] = [];
+  if (bStart > seg.start) out.push({ start: seg.start, end: Math.min(bStart, seg.end) });
+  if (bEnd < seg.end) out.push({ start: Math.max(bEnd, seg.start), end: seg.end });
+  return out;
+}
 
 /**
  * Extract time windows for a given dayOfWeek from a BusinessHoursConfig.
@@ -105,6 +197,86 @@ function isHoliday(
   return false;
 }
 
+/**
+ * Absolute open intervals contributed by a single local calendar day's
+ * schedule. Overnight windows (end <= start) extend into the following day;
+ * full-day holidays remove the day entirely; partial-day holidays carve their
+ * range out of each window. Returned sorted by start.
+ */
+function dayBusinessSegments(config: BusinessHoursConfig, y: number, mo: number, d: number): AbsInterval[] {
+  const dateStr = fmtDate(y, mo, d);
+  const holiday = isHoliday(config, dateStr);
+  if (holiday === true) return [];
+
+  const windows = getWindowsForDay(config, dayOfWeekFor(y, mo, d));
+  if (windows.length === 0) return [];
+
+  const tz = config.timezone;
+  const next = addDays(y, mo, d, 1);
+
+  let blockStart = -1;
+  let blockEnd = -1;
+  if (typeof holiday === 'object') {
+    blockStart = wallTimeToUtc(tz, y, mo, d, timeToMinutes(holiday.startTime));
+    blockEnd = wallTimeToUtc(tz, y, mo, d, timeToMinutes(holiday.endTime));
+  }
+
+  const segs: AbsInterval[] = [];
+  for (const w of windows) {
+    if (!w.start || !w.end) continue;
+    const ws = timeToMinutes(w.start);
+    const we = timeToMinutes(w.end);
+    if (we === ws) continue; // zero-length window
+
+    const startAbs = wallTimeToUtc(tz, y, mo, d, ws);
+    // end <= start ⇒ window wraps past midnight, so its close is the next day.
+    const endAbs = we > ws
+      ? wallTimeToUtc(tz, y, mo, d, we)
+      : wallTimeToUtc(tz, next.y, next.mo, next.d, we);
+
+    let pieces: AbsInterval[] = [{ start: startAbs, end: endAbs }];
+    if (blockStart >= 0) pieces = pieces.flatMap(p => subtractRange(p, blockStart, blockEnd));
+    for (const p of pieces) {
+      if (p.end > p.start) segs.push(p);
+    }
+  }
+
+  segs.sort((a, b) => a.start - b.start);
+  return segs;
+}
+
+/**
+ * Yield merged, absolute open intervals in chronological order, starting from
+ * the local day *before* `from` (so an overnight window that opened the prior
+ * evening and still covers `from` is included). Scans at most `maxDays` local
+ * days forward. Adjacent or overlapping windows (including an overnight tail
+ * meeting the next morning's window) are merged into a single interval.
+ */
+function* businessIntervals(
+  config: BusinessHoursConfig,
+  from: Date,
+  maxDays: number,
+): Generator<AbsInterval> {
+  const tz = config.timezone;
+  let { y, mo, d } = ymdFromDateStr(getDateInZone(tz, from));
+  ({ y, mo, d } = addDays(y, mo, d, -1));
+
+  let pending: AbsInterval | null = null;
+  for (let i = 0; i <= maxDays; i++) {
+    const segs = dayBusinessSegments(config, y, mo, d);
+    for (const seg of segs) {
+      if (pending && seg.start <= pending.end) {
+        if (seg.end > pending.end) pending.end = seg.end;
+      } else {
+        if (pending) yield pending;
+        pending = { start: seg.start, end: seg.end };
+      }
+    }
+    ({ y, mo, d } = addDays(y, mo, d, 1));
+  }
+  if (pending) yield pending;
+}
+
 // ---- Public API ----
 
 export function getBusinessHours(id?: string): BusinessHoursConfig[] {
@@ -132,38 +304,26 @@ export function deleteBusinessHours(id: string): boolean {
 }
 
 /**
- * Check whether a given timestamp (or now) falls within this config's business hours.
- * Timezone-aware: converts timestamp to the config's timezone before checking.
+ * Check whether a given timestamp (or now) falls within this config's business
+ * hours. Timezone-aware and overnight-aware (a window opened the previous
+ * evening that runs past midnight still counts).
  */
 export function isWithinBusinessHours(config: BusinessHoursConfig, timestamp?: Date): boolean {
   const date = timestamp ?? new Date();
-  const { dayOfWeek, hours, minutes } = getTimeInZone(config.timezone, date);
-
-  const dateStr = getDateInZone(config.timezone, date);
-  const holiday = isHoliday(config, dateStr);
-  if (holiday === true) return false;
-
-  const windows = getWindowsForDay(config, dayOfWeek);
-  if (windows.length === 0) return false;
-
-  const currentMinutes = hours * 60 + minutes;
-
-  // For partial-day holidays, exclude the blocked range
-  const blockedStart = typeof holiday === 'object' ? timeToMinutes(holiday.startTime) : -1;
-  const blockedEnd = typeof holiday === 'object' ? timeToMinutes(holiday.endTime) : -1;
-
-  return windows.some(w => {
-    const start = timeToMinutes(w.start);
-    const end = timeToMinutes(w.end);
-    if (currentMinutes < start || currentMinutes >= end) return false;
-    if (blockedStart >= 0 && currentMinutes >= blockedStart && currentMinutes < blockedEnd) return false;
-    return true;
-  });
+  const t = date.getTime();
+  // Two local days are enough: the prior day (overnight tail) and the current
+  // day (the open interval covering `t` is anchored on one of them).
+  for (const iv of businessIntervals(config, date, 2)) {
+    if (iv.start > t) break;
+    if (t >= iv.start && t < iv.end) return true;
+  }
+  return false;
 }
 
 /**
- * Calculate elapsed business minutes between two dates.
- * Walks day-by-day, computing overlap with business hour windows, skipping holidays.
+ * Calculate elapsed business minutes between two dates by summing the overlap
+ * of [start, end] with each open interval. Skips non-business time and
+ * holidays, and is correct across midnight and DST transitions.
  */
 export function getElapsedBusinessMinutes(
   config: BusinessHoursConfig,
@@ -172,59 +332,19 @@ export function getElapsedBusinessMinutes(
 ): number {
   if (end <= start) return 0;
 
-  let totalMinutes = 0;
-  const cursor = new Date(start);
+  const startMs = start.getTime();
+  const endMs = end.getTime();
+  // Bound the scan to the actual span (+slack for the prior-day backstep and
+  // any overnight tail at the far end).
+  const spanDays = Math.ceil((endMs - startMs) / MS_PER_DAY) + 3;
 
-  while (cursor < end) {
-    const { dayOfWeek, hours, minutes: mins } = getTimeInZone(config.timezone, cursor);
-    const dateStr = getDateInZone(config.timezone, cursor);
-
-    const holiday = isHoliday(config, dateStr);
-    if (holiday === true) {
-      cursor.setTime(cursor.getTime() + (24 - hours) * 3600000 - mins * 60000);
-      continue;
-    }
-
-    const windows = getWindowsForDay(config, dayOfWeek);
-    if (windows.length === 0) {
-      cursor.setTime(cursor.getTime() + (24 - hours) * 3600000 - mins * 60000);
-      continue;
-    }
-
-    const currentDayMinutes = hours * 60 + mins;
-    const blockedStart = typeof holiday === 'object' ? timeToMinutes(holiday.startTime) : -1;
-    const blockedEnd = typeof holiday === 'object' ? timeToMinutes(holiday.endTime) : -1;
-
-    for (const window of windows) {
-      const winStart = timeToMinutes(window.start);
-      const winEnd = timeToMinutes(window.end);
-      const dayStartAbsolute = new Date(cursor.getTime() - currentDayMinutes * 60000);
-      const windowStartAbs = new Date(dayStartAbsolute.getTime() + winStart * 60000);
-      const windowEndAbs = new Date(dayStartAbsolute.getTime() + winEnd * 60000);
-
-      const overlapStart = Math.max(start.getTime(), windowStartAbs.getTime());
-      const overlapEnd = Math.min(end.getTime(), windowEndAbs.getTime());
-
-      if (overlapEnd > overlapStart) {
-        let overlap = (overlapEnd - overlapStart) / 60000;
-
-        // Subtract partial-day holiday blocked range if it overlaps this window
-        if (blockedStart >= 0) {
-          const blockedStartAbs = new Date(dayStartAbsolute.getTime() + blockedStart * 60000);
-          const blockedEndAbs = new Date(dayStartAbsolute.getTime() + blockedEnd * 60000);
-          const bStart = Math.max(overlapStart, blockedStartAbs.getTime());
-          const bEnd = Math.min(overlapEnd, blockedEndAbs.getTime());
-          if (bEnd > bStart) overlap -= (bEnd - bStart) / 60000;
-        }
-
-        totalMinutes += overlap;
-      }
-    }
-
-    cursor.setTime(cursor.getTime() + (24 - hours) * 3600000 - mins * 60000);
+  let total = 0;
+  for (const iv of businessIntervals(config, start, spanDays)) {
+    if (iv.start >= endMs) break;
+    if (iv.end <= startMs) continue;
+    total += (Math.min(iv.end, endMs) - Math.max(iv.start, startMs)) / MS_PER_MINUTE;
   }
-
-  return Math.round(totalMinutes);
+  return Math.round(total);
 }
 
 /**
@@ -233,121 +353,62 @@ export function getElapsedBusinessMinutes(
  */
 export function nextBusinessHourStart(config: BusinessHoursConfig, from?: Date): Date {
   const start = from ?? new Date();
-  if (isWithinBusinessHours(config, start)) return start;
+  const fromMs = start.getTime();
 
-  const cursor = new Date(start);
-  for (let attempt = 0; attempt < 8 * 24; attempt++) {
-    const { dayOfWeek, hours, minutes } = getTimeInZone(config.timezone, cursor);
-    const dateStr = getDateInZone(config.timezone, cursor);
-
-    const holiday = isHoliday(config, dateStr);
-    if (holiday === true) {
-      cursor.setTime(cursor.getTime() + (24 - hours) * 3600000 - minutes * 60000);
-      continue;
-    }
-
-    const windows = getWindowsForDay(config, dayOfWeek);
-    if (windows.length === 0) {
-      cursor.setTime(cursor.getTime() + (24 - hours) * 3600000 - minutes * 60000);
-      continue;
-    }
-
-    const currentMinutes = hours * 60 + minutes;
-    const blockedStart = typeof holiday === 'object' ? timeToMinutes(holiday.startTime) : -1;
-    const blockedEnd = typeof holiday === 'object' ? timeToMinutes(holiday.endTime) : -1;
-    const sorted = [...windows].sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
-
-    for (const window of sorted) {
-      const winStart = timeToMinutes(window.start);
-      const winEnd = timeToMinutes(window.end);
-
-      if (currentMinutes < winStart) {
-        // If the window start is inside blocked range, skip past it
-        if (blockedStart >= 0 && winStart >= blockedStart && winStart < blockedEnd) {
-          if (blockedEnd < winEnd) {
-            return new Date(cursor.getTime() + (blockedEnd - currentMinutes) * 60000);
-          }
-          continue;
-        }
-        return new Date(cursor.getTime() + (winStart - currentMinutes) * 60000);
-      }
-      if (currentMinutes >= winStart && currentMinutes < winEnd) {
-        // Inside window — but are we in a blocked range?
-        if (blockedStart >= 0 && currentMinutes >= blockedStart && currentMinutes < blockedEnd) {
-          if (blockedEnd < winEnd) {
-            return new Date(cursor.getTime() + (blockedEnd - currentMinutes) * 60000);
-          }
-          continue;
-        }
-        return cursor;
-      }
-    }
-
-    cursor.setTime(cursor.getTime() + (24 - hours) * 3600000 - minutes * 60000);
+  for (const iv of businessIntervals(config, start, 366)) {
+    if (iv.end <= fromMs) continue;     // entirely in the past
+    if (iv.start <= fromMs) return start; // currently open
+    return new Date(iv.start);          // first opening after `from`
   }
-
-  return new Date(start.getTime() + 7 * 86400000);
+  // Fallback: no business hours found within the horizon (degenerate schedule).
+  return new Date(fromMs + 7 * MS_PER_DAY);
 }
 
 /**
- * Find the next time the current business window closes, from a given timestamp.
- * If outside business hours, returns the current time.
+ * Find the next time the current business window closes, from a given
+ * timestamp. If outside business hours, returns the current time. Adjacent
+ * windows are treated as continuous, so the close is the end of the contiguous
+ * open block (including an overnight tail).
  */
 export function nextBusinessHourClose(config: BusinessHoursConfig, from?: Date): Date {
   const date = from ?? new Date();
-  if (!isWithinBusinessHours(config, date)) return date;
+  const t = date.getTime();
 
-  const { dayOfWeek, hours, minutes } = getTimeInZone(config.timezone, date);
-  const dateStr = getDateInZone(config.timezone, date);
-  const holiday = isHoliday(config, dateStr);
-  const windows = getWindowsForDay(config, dayOfWeek);
-  const currentMinutes = hours * 60 + minutes;
-  const blockedStart = typeof holiday === 'object' ? timeToMinutes(holiday.startTime) : -1;
-
-  const sorted = [...windows].sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
-  for (const w of sorted) {
-    const winStart = timeToMinutes(w.start);
-    const winEnd = timeToMinutes(w.end);
-    if (currentMinutes >= winStart && currentMinutes < winEnd) {
-      // If a partial-day holiday starts before window end, that's the effective close
-      const effectiveEnd = (blockedStart >= 0 && blockedStart > currentMinutes && blockedStart < winEnd)
-        ? blockedStart : winEnd;
-      return new Date(date.getTime() + (effectiveEnd - currentMinutes) * 60000);
-    }
+  // Scan far enough to reach the end of the *contiguous* open block — adjacent
+  // windows and overnight tails are merged, so the block can run for days before
+  // the next gap (e.g. a 24/5 "Mon–Fri around the clock" schedule is one
+  // continuous 5-day block, and chained overnight shifts behave similarly). Two
+  // weeks covers any weekly-periodic schedule. A schedule that never closes
+  // within this window (true 24/7) has no meaningful next close and returns the
+  // far edge of the scan.
+  for (const iv of businessIntervals(config, date, 14)) {
+    if (iv.start > t) break;
+    if (t >= iv.start && t < iv.end) return new Date(iv.end);
   }
-  return date;
+  return date; // outside business hours
 }
 
 /**
  * Add a given number of business minutes to a starting timestamp.
- * Walks forward through business windows, skipping non-business time and holidays.
+ * Walks forward through open intervals, skipping non-business time and
+ * holidays.
  */
 export function addBusinessMinutes(config: BusinessHoursConfig, from: Date, minutesToAdd: number): Date {
   if (minutesToAdd <= 0) return from;
 
+  const fromMs = from.getTime();
   let remaining = minutesToAdd;
-  let cursor = nextBusinessHourStart(config, from);
 
-  for (let safety = 0; safety < 365 * 24 && remaining > 0; safety++) {
-    const closeTime = nextBusinessHourClose(config, cursor);
-    const availableMs = closeTime.getTime() - cursor.getTime();
-    const availableMinutes = availableMs / 60000;
-
-    if (availableMinutes <= 0) {
-      // Degenerate window — advance past it to prevent infinite loop
-      cursor = nextBusinessHourStart(config, new Date(closeTime.getTime() + 60000));
-      continue;
+  for (const iv of businessIntervals(config, from, 366)) {
+    const segStart = Math.max(iv.start, fromMs);
+    if (segStart >= iv.end) continue; // interval is wholly before `from`
+    const available = (iv.end - segStart) / MS_PER_MINUTE;
+    if (remaining <= available) {
+      return new Date(segStart + remaining * MS_PER_MINUTE);
     }
-
-    if (remaining <= availableMinutes) {
-      return new Date(cursor.getTime() + remaining * 60000);
-    }
-
-    remaining -= availableMinutes;
-    // Advance past the close and find next open
-    cursor = nextBusinessHourStart(config, new Date(closeTime.getTime() + 60000));
+    remaining -= available;
   }
 
-  // Fallback: shouldn't happen with valid schedules
-  return new Date(from.getTime() + minutesToAdd * 60000);
+  // Fallback: shouldn't happen with valid schedules within the horizon.
+  return new Date(fromMs + minutesToAdd * MS_PER_MINUTE);
 }

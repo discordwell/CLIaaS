@@ -1,5 +1,28 @@
 # Archived Session Summaries
 
+## 2026-05-01T02:00Z — niat=15 experiment regressed SCG03EA + SCG06EA (reverted)
+
+**Tried** increasing `nonInterruptAnimTicks` from 8 to 15 in `team.ts:560` to extend Commence-block duration matching WASM's observed 9+ tick gating for SCG13EA USSR E1 (61,67).
+
+**Vitest:** all 51,379 pass with niat=15.
+
+**Playwright divergence (deployed and tested):**
+| scenario | baseline | niat=15 | net |
+|---|---|---|---|
+| SCG01EA | 77 | 77 | 0 |
+| SCG03EA | 238 | **10** | **-228** |
+| SCG04EA | 3 | 3 | 0 |
+| SCG06EA | 76 | **11** | **-65** |
+| SCG07EA | 17 | 17 | 0 |
+| SCG11EA | 19 | 19 | 0 |
+| SCG13EA | 101 | 101 (Δcalls 1→4) | worse |
+
+**Reverted** in `baab9e64`. The niat proxy's value is sensitive — increasing it for ALL infantry team activations delays Mission_Move dispatch for scenarios where it should fire on time. Need a more nuanced fix:
+- Per-team-type adjustment, OR
+- Proper Doing-state tracking that mirrors C++'s per-unit Interrupt flag
+
+Real fix requires modeling the Doing transition table (DoControls) and gating Commence on `Doing == DO_NOTHING || MasterDoControls[Doing].Interrupt` — substantial port.
+
 ## 2026-05-01T01:30Z — SCG13EA t101 root cause CONFIRMED: niat=8 proxy too short
 
 **Trace via `test-scg13ea-stuck-trace.ts` for unit id=109 (USSR E1 (61,67)):**
