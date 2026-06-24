@@ -85,9 +85,12 @@ function evaluateCondition(condition: Condition, ticket: TicketContext): boolean
       return false;
 
     case 'changed_to':
-      if (condition.field === 'status') return ticket.status === String(targetVal) && ticket.previousStatus !== ticket.status;
-      if (condition.field === 'priority') return ticket.priority === String(targetVal) && ticket.previousPriority !== ticket.priority;
-      if (condition.field === 'assignee') return ticket.assignee === String(targetVal) && ticket.previousAssignee !== ticket.assignee;
+      // Like `changed`, require a known previous value so the rule fires on an
+      // actual transition — not on ticket creation, where there is no prior
+      // state and `previous* !== current` is vacuously true.
+      if (condition.field === 'status') return ticket.previousStatus !== undefined && ticket.status === String(targetVal) && ticket.previousStatus !== ticket.status;
+      if (condition.field === 'priority') return ticket.previousPriority !== undefined && ticket.priority === String(targetVal) && ticket.previousPriority !== ticket.priority;
+      if (condition.field === 'assignee') return ticket.previousAssignee !== undefined && ticket.assignee === String(targetVal) && ticket.previousAssignee !== ticket.assignee;
       return false;
 
     case 'in':

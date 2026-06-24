@@ -339,6 +339,26 @@ describe('Automation Conditions', () => {
     expect(evaluateConditions(conds, baseTicket({ previousStatus: 'open', status: 'pending' }))).toBe(false);
     expect(evaluateConditions(conds, baseTicket({ previousStatus: 'solved', status: 'solved' }))).toBe(false);
   });
+
+  it('changed_to does not fire on ticket creation (no previous value)', () => {
+    // A "changed_to open" rule must not match a brand-new ticket that was
+    // simply created with status open — there was no transition. (Parity with
+    // the `changed` operator, which already guards against an undefined prior.)
+    const statusConds: RuleConditions = {
+      all: [{ field: 'status', operator: 'changed_to', value: 'open' }],
+    };
+    expect(evaluateConditions(statusConds, baseTicket({ event: 'create', status: 'open' }))).toBe(false);
+
+    const prioConds: RuleConditions = {
+      all: [{ field: 'priority', operator: 'changed_to', value: 'normal' }],
+    };
+    expect(evaluateConditions(prioConds, baseTicket({ event: 'create', priority: 'normal' }))).toBe(false);
+
+    const assigneeConds: RuleConditions = {
+      all: [{ field: 'assignee', operator: 'changed_to', value: 'alice' }],
+    };
+    expect(evaluateConditions(assigneeConds, baseTicket({ event: 'create', assignee: 'alice' }))).toBe(false);
+  });
 });
 
 // ============================================================
