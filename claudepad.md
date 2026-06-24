@@ -1,5 +1,19 @@
 # Session Summaries
 
+## 2026-06-23T21:55Z — Compliance PII-redaction correctness (3 bugs) + automation changed_to create-firing fix, each with tests
+
+Audited non-EasterEgg business logic (re-scoping the compliance/PII + automation areas a prior pass flagged). Independently verified every finding in source, fixed three contained PII-redaction bugs plus one automation-condition bug, each with a fail-before/pass-after test.
+
+- **PII masking corruption + leak** (`src/lib/compliance/pii-detector.ts`): `maskText` replaced matches end-to-start with no overlap handling, so two rules matching the same span (e.g. "A12345678" hits both passport `[A-Z]\d{8}` and drivers_license `[A-Z]\d{7,8}`) produced garbled output like `[REDACTED-DRIVERS-LICENSE]-PASSPORT]`. Rewrote `maskText` to merge overlapping/duplicate spans into coverage regions (highest-confidence match supplies the label) so redaction never garbles or leaves a span fragment exposed; added optional per-match `styleFor`. Added `resolveOverlappingMatches` to `detectPiiRegex` so fully-contained duplicate matches no longer create duplicate detection rows.
+- **Auto-redaction multi-PII leak** (`src/lib/compliance/pii-masking.ts`): `scanEntity` called `applyRedaction` once per match, each masking the *original* field text with only that one match and overwriting `bodyRedacted` — so a message with ≥2 auto-redactable PII items kept only the LAST one redacted and leaked the rest. Now batches all auto-redact matches for a field into a single redaction pass (per-match styles preserved via `styleFor`).
+- **Automation `changed_to` fired on ticket creation** (`src/lib/automation/conditions.ts`): the operator only checked `previous !== current`, but on a `create` event `previousStatus` is undefined and `undefined !== 'open'` is true, so "status changed_to open" matched every new open ticket. Added the `previous* !== undefined` guard the sibling `changed` operator already had (status/priority/assignee).
+
+**Process:** parallel bug-hunting agents (SLA/business-hours, automation/segments) + direct source reading → independent re-verification → fix + test → adversarial code-review subagent on the diff (verdict: all three correct; a 500k-case fuzz confirmed the overlap pipeline never leaves a matched byte unmasked; two non-blocking notes).
+
+**Verification:** typecheck exit 0 · lint 0 errors on changed files · fail-before/pass-after proven by `git stash`ing the source fixes (7 PII tests + the changed_to test all fail on old code) · broad non-EasterEgg vitest 313 files / 4,095 pass, 18 skipped, 0 fail. EasterEgg untouched. Committed in 2 themed commits; not pushed (orchestrator handles push).
+
+**NOT fixed — flagged, out of scope:** business-hours (`src/lib/wfm/business-hours.ts`) has two real bugs — (1) cross-midnight windows (`end < start`, e.g. 22:00–06:00) are treated as never-open by `isWithinBusinessHours`/`getElapsedBusinessMinutes`, but the schedule model assumes `start < end` and the "correct" semantics are a product decision (validate-and-reject vs. support overnight); (2) the day-advance step assumes 24h days, so the autumn DST fall-back date double-counts late-day windows. Both touch the core day-walk used by 5 functions + SLA and warrant a dedicated reviewed effort. Also: automation `contains` is case-sensitive for array (tag) fields but case-insensitive for strings, and segment `in`/`not_in` can't match array-valued fields — both arguable-by-design, left alone. The executor collapses `previousAssignee: null`→`undefined`, so neither `changed` nor `changed_to` detects an unassigned→X first-assignment (pre-existing, parity-correct).
+
 ## 2026-06-18T06:40Z — Billing webhook (Stripe clover-API field relocations) + HubSpot/Freshdesk writeback mapping — 2 verified bug classes, each with tests
 
 Audited non-EasterEgg business logic with parallel bug-hunting agents (billing, connectors; the RBAC/api-keys and compliance/PII/audit agents were blocked mid-run by the model's cyber-content safety filter and returned nothing — a future pass could re-scope those). Independently re-verified every finding in source — including reading the pinned Stripe SDK's own type defs and the HubSpot import-side maps — and fixed two contained bug classes. Each fix has tests proven fail-before/pass-after by reverting the source.
@@ -334,30 +348,6 @@ Phase 7B scaffolding is in place; future session can add per-Class DoControls or
 - Proper Doing-state tracking that mirrors C++'s per-unit Interrupt flag
 
 Real fix requires modeling the Doing transition table (DoControls) and gating Commence on `Doing == DO_NOTHING || MasterDoControls[Doing].Interrupt` — substantial port.
-
-## 2026-05-01T01:30Z — SCG13EA t101 root cause CONFIRMED: niat=8 proxy too short
-
-**Trace via `test-scg13ea-stuck-trace.ts` for unit id=109 (USSR E1 (61,67)):**
-- Tick 91: team=2 attached (was teamless before)
-- Tick 92: niat=7 set (team activation set nonInterruptAnimTicks=8, decrement to 7 same tick)
-- Tick 94: missionQueue=MOVE set by team coordinator
-- Ticks 92-98: niat decrements 7→6→5→4→3→2→1
-- Tick 99: niat=0 → STAGE E pops MOVE queue → m=MOVE, mt=0
-- Tick 100: m=MOVE, mt=15, drv=true (Mission_Move dispatched, jitter=1)
-- Onwards: stuck moving south at 10 leptons/tick toward target 12 cells away
-
-**WASM same unit at tick 95:** m=5 (GUARD), mq=2 (MOVE queued), nlx/nly set, drv=false, **doing=16**.
-
-So WASM ALSO has queued MOVE for this unit. The difference: WASM's Commence gate (infantry.cpp:1208) requires `Doing == DO_NOTHING || MasterDoControls[Doing].Interrupt`. WASM's `doing=16` is non-interruptible, so Commence never pops MOVE. Unit stays in GUARD indefinitely.
-
-**TS proxy (team.ts:559-560):** `nonInterruptAnimTicks = 8` for infantry on team activation. Comment claims 8 = `Count=3 × Rate=2 + 2 buffer`. But WASM's actual gating extends MUCH longer (≥9 ticks per the trace, possibly indefinitely until something changes Doing).
-
-**Structural fix candidates:**
-1. **Extend niat** from 8 to a much larger value (e.g., 15-20) for team-activated infantry. Risk: regresses other scenarios where Mission_Move should dispatch sooner.
-2. **Properly model Doing transitions** so that Doing=DO_GESTURE1/2 stays non-interruptible until the actual animation completes (tracked separately from niat).
-3. **Match C++ Commence gate exactly** — replace niat with a Doing-based check (`doing === 'stand_ready' || doing === 'nothing'`). Requires Doing transitions to be C++-faithful.
-
-Option 3 is the cleanest port. Currently TS's `entity.doingAI` transitions Doing through some states (Phase 7A landed for `walk → stand_ready`). More transitions need C++-faithful porting.
 
 # Key Findings
 

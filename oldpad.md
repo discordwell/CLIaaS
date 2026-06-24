@@ -1,5 +1,29 @@
 # Archived Session Summaries
 
+## 2026-05-01T01:30Z — SCG13EA t101 root cause CONFIRMED: niat=8 proxy too short
+
+**Trace via `test-scg13ea-stuck-trace.ts` for unit id=109 (USSR E1 (61,67)):**
+- Tick 91: team=2 attached (was teamless before)
+- Tick 92: niat=7 set (team activation set nonInterruptAnimTicks=8, decrement to 7 same tick)
+- Tick 94: missionQueue=MOVE set by team coordinator
+- Ticks 92-98: niat decrements 7→6→5→4→3→2→1
+- Tick 99: niat=0 → STAGE E pops MOVE queue → m=MOVE, mt=0
+- Tick 100: m=MOVE, mt=15, drv=true (Mission_Move dispatched, jitter=1)
+- Onwards: stuck moving south at 10 leptons/tick toward target 12 cells away
+
+**WASM same unit at tick 95:** m=5 (GUARD), mq=2 (MOVE queued), nlx/nly set, drv=false, **doing=16**.
+
+So WASM ALSO has queued MOVE for this unit. The difference: WASM's Commence gate (infantry.cpp:1208) requires `Doing == DO_NOTHING || MasterDoControls[Doing].Interrupt`. WASM's `doing=16` is non-interruptible, so Commence never pops MOVE. Unit stays in GUARD indefinitely.
+
+**TS proxy (team.ts:559-560):** `nonInterruptAnimTicks = 8` for infantry on team activation. Comment claims 8 = `Count=3 × Rate=2 + 2 buffer`. But WASM's actual gating extends MUCH longer (≥9 ticks per the trace, possibly indefinitely until something changes Doing).
+
+**Structural fix candidates:**
+1. **Extend niat** from 8 to a much larger value (e.g., 15-20) for team-activated infantry. Risk: regresses other scenarios where Mission_Move should dispatch sooner.
+2. **Properly model Doing transitions** so that Doing=DO_GESTURE1/2 stays non-interruptible until the actual animation completes (tracked separately from niat).
+3. **Match C++ Commence gate exactly** — replace niat with a Doing-based check (`doing === 'stand_ready' || doing === 'nothing'`). Requires Doing transitions to be C++-faithful.
+
+Option 3 is the cleanest port. Currently TS's `entity.doingAI` transitions Doing through some states (Phase 7A landed for `walk → stand_ready`). More transitions need C++-faithful porting.
+
 ## 2026-05-01T00:50Z — SCG13EA t101 expanded root cause: TS USSR E1 (61,67) stuck in MOVE
 
 **Probe findings via `test-scg13ea-all-fires.ts`:** at tick 100 end, WASM has 4 E1/E3 about to fire at tick 101; TS has only 2.
