@@ -52,6 +52,33 @@ describe('PII Detector (Compliance)', () => {
       const matches = detectPiiRegex('Amex: 378282246310005');
       expect(matches.some(m => m.piiType === 'credit_card')).toBe(true);
     });
+
+    it('detects Amex in standard 4-6-5 spacing', () => {
+      // Regression: the card-printed Amex grouping has a 6-digit middle and a
+      // 5-digit tail, which the old four-digit-block-only regex never matched —
+      // leaking the full card number into stored/exported text.
+      const matches = detectPiiRegex('My Amex is 3782 822463 10005, please charge it');
+      expect(matches.some(m => m.piiType === 'credit_card')).toBe(true);
+    });
+
+    it('detects Amex in 4-6-5 spacing with dashes', () => {
+      const matches = detectPiiRegex('Card 3782-822463-10005 on file');
+      expect(matches.some(m => m.piiType === 'credit_card')).toBe(true);
+    });
+
+    it('masks a 4-6-5 Amex end-to-end so no raw card survives', () => {
+      const text = 'My Amex is 3782 822463 10005, please charge it';
+      const result = maskText(text, detectPiiRegex(text), 'full');
+      expect(result).not.toContain('822463');
+      expect(result).not.toContain('10005');
+      expect(result).toContain('[REDACTED-CREDIT-CARD]');
+    });
+
+    it('does not treat a 10-digit phone number as a credit card', () => {
+      // The broader separator handling must not over-match short digit runs.
+      const matches = detectPiiRegex('Call me at 555-123-4567');
+      expect(matches.filter(m => m.piiType === 'credit_card')).toHaveLength(0);
+    });
   });
 
   describe('Luhn validation', () => {

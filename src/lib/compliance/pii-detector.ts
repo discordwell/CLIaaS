@@ -37,8 +37,12 @@ export interface PiiSensitivityRule {
 // SSN: xxx-xx-xxxx (exclude 000/666/9xx area numbers)
 const SSN_PATTERN = /\b(?!000|666|9\d{2})\d{3}-\d{2}-\d{4}\b/g;
 
-// Credit card: 13-19 digits optionally grouped
-const CC_PATTERN = /\b(?:\d{4}[-\s]?){3,4}\d{1,4}\b/g;
+// Credit card: 13-19 digits, optionally grouped with single space/dash
+// separators. Matches arbitrary groupings (4-4-4-4 Visa/MC, 4-6-5 Amex,
+// 4-6-4 Diners, contiguous, etc.) rather than only blocks of four — the old
+// `(?:\d{4}[-\s]?){3,4}` form silently missed standard Amex spacing like
+// "3782 822463 10005". The Luhn + length(13-19) gate below filters candidates.
+const CC_PATTERN = /\b(?:\d[-\s]?){12,18}\d\b/g;
 
 // Phone (US): various formats
 const PHONE_PATTERN = /\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g;
