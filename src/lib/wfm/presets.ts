@@ -13,23 +13,49 @@ export interface HolidayPreset {
   getEntries: (year: number) => Omit<HolidayCalendarEntry, 'id'>[];
 }
 
+// All holiday dates are computed and formatted in UTC. Dates MUST be built with
+// `Date.UTC(...)` (and read with `getUTC*`) so they agree with `fmt()` below,
+// which serializes via `toISOString()` (UTC). Building with the local-time
+// `new Date(y, m, d)` constructor instead drifts the result one calendar day
+// whenever the runtime timezone has a positive UTC offset (e.g. a server set to
+// Australia/Sydney), because local midnight falls on the previous UTC day.
+
 /** Get the nth occurrence of a weekday in a month (1-indexed). */
 function nthWeekdayOfMonth(year: number, month: number, weekday: number, nth: number): Date {
-  const first = new Date(year, month, 1);
-  let dayOffset = (weekday - first.getDay() + 7) % 7;
+  const first = new Date(Date.UTC(year, month, 1));
+  let dayOffset = (weekday - first.getUTCDay() + 7) % 7;
   dayOffset += (nth - 1) * 7;
-  return new Date(year, month, 1 + dayOffset);
+  return new Date(Date.UTC(year, month, 1 + dayOffset));
 }
 
 /** Get last occurrence of a weekday in a month. */
 function lastWeekdayOfMonth(year: number, month: number, weekday: number): Date {
-  const last = new Date(year, month + 1, 0); // last day of month
-  const dayOffset = (last.getDay() - weekday + 7) % 7;
-  return new Date(year, month, last.getDate() - dayOffset);
+  const last = new Date(Date.UTC(year, month + 1, 0)); // last day of month
+  const dayOffset = (last.getUTCDay() - weekday + 7) % 7;
+  return new Date(Date.UTC(year, month, last.getUTCDate() - dayOffset));
 }
 
 function fmt(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+/** Compute Easter Sunday (Gregorian) as a UTC date. */
+function easterSunday(year: number): Date {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31) - 1;
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(Date.UTC(year, month, day));
 }
 
 function entry(name: string, date: string, recurring = false): Omit<HolidayCalendarEntry, 'id'> {
@@ -62,22 +88,7 @@ export const HOLIDAY_PRESETS: HolidayPreset[] = [
     country: 'GB',
     description: 'England and Wales bank holidays',
     getEntries: (year: number) => {
-      // Easter calculation (Anonymous Gregorian algorithm)
-      const a = year % 19;
-      const b = Math.floor(year / 100);
-      const c = year % 100;
-      const d = Math.floor(b / 4);
-      const e = b % 4;
-      const f = Math.floor((b + 8) / 25);
-      const g = Math.floor((b - f + 1) / 3);
-      const h = (19 * a + b - d - g + 15) % 30;
-      const i = Math.floor(c / 4);
-      const k = c % 4;
-      const l = (32 + 2 * e + 2 * i - h - k) % 7;
-      const m = Math.floor((a + 11 * h + 22 * l) / 451);
-      const month = Math.floor((h + l - 7 * m + 114) / 31) - 1;
-      const day = ((h + l - 7 * m + 114) % 31) + 1;
-      const easter = new Date(year, month, day);
+      const easter = easterSunday(year);
       const goodFriday = new Date(easter.getTime() - 2 * 86400000);
       const easterMonday = new Date(easter.getTime() + 86400000);
 
@@ -100,24 +111,12 @@ export const HOLIDAY_PRESETS: HolidayPreset[] = [
     description: 'Canadian federal statutory holidays',
     getEntries: (year: number) => [
       entry("New Year's Day", `${year}-01-01`),
-      entry('Good Friday', (() => {
-        const a = year % 19, b = Math.floor(year / 100), c = year % 100;
-        const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
-        const g = Math.floor((b - f + 1) / 3);
-        const h = (19 * a + b - d - g + 15) % 30;
-        const i = Math.floor(c / 4), k = c % 4;
-        const l = (32 + 2 * e + 2 * i - h - k) % 7;
-        const m = Math.floor((a + 11 * h + 22 * l) / 451);
-        const month = Math.floor((h + l - 7 * m + 114) / 31) - 1;
-        const day = ((h + l - 7 * m + 114) % 31) + 1;
-        const easter = new Date(year, month, day);
-        return fmt(new Date(easter.getTime() - 2 * 86400000));
-      })()),
+      entry('Good Friday', fmt(new Date(easterSunday(year).getTime() - 2 * 86400000))),
       entry('Victoria Day', fmt((() => {
-        // Monday before May 25
-        const may25 = new Date(year, 4, 25);
-        const daysBefore = may25.getDay() === 1 ? 7 : (may25.getDay() + 6) % 7;
-        return new Date(year, 4, 25 - daysBefore);
+        // Monday on or before May 24 (the Monday preceding May 25).
+        const may25 = new Date(Date.UTC(year, 4, 25));
+        const daysBefore = may25.getUTCDay() === 1 ? 7 : (may25.getUTCDay() + 6) % 7;
+        return new Date(Date.UTC(year, 4, 25 - daysBefore));
       })())),
       entry('Canada Day', `${year}-07-01`),
       entry('Labour Day', fmt(nthWeekdayOfMonth(year, 8, 1, 1))),            // 1st Monday Sep
@@ -134,16 +133,7 @@ export const HOLIDAY_PRESETS: HolidayPreset[] = [
     country: 'AU',
     description: 'Australian national public holidays',
     getEntries: (year: number) => {
-      const a = year % 19, b = Math.floor(year / 100), c = year % 100;
-      const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
-      const g = Math.floor((b - f + 1) / 3);
-      const h = (19 * a + b - d - g + 15) % 30;
-      const i = Math.floor(c / 4), k = c % 4;
-      const l = (32 + 2 * e + 2 * i - h - k) % 7;
-      const m = Math.floor((a + 11 * h + 22 * l) / 451);
-      const month = Math.floor((h + l - 7 * m + 114) / 31) - 1;
-      const day = ((h + l - 7 * m + 114) % 31) + 1;
-      const easter = new Date(year, month, day);
+      const easter = easterSunday(year);
       const goodFriday = new Date(easter.getTime() - 2 * 86400000);
       const easterSaturday = new Date(easter.getTime() - 86400000);
       const easterMonday = new Date(easter.getTime() + 86400000);
