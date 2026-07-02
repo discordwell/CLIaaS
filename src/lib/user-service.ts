@@ -53,10 +53,12 @@ export async function updateUser(
     throw new Error('Cannot demote the workspace owner');
   }
 
-  // Seat availability check when changing to a paid role
+  // Seat availability check when changing to a paid role. Pass the user's
+  // current role so a seat-neutral re-role within the same seat class (e.g.
+  // agent -> admin) is not rejected when the workspace is at its seat cap.
   if (data.role && data.role !== target.role && tenantId) {
     const { checkSeatAvailability } = await import('@/lib/rbac/seat-check');
-    const seat = await checkSeatAvailability(workspaceId, tenantId, data.role);
+    const seat = await checkSeatAvailability(workspaceId, tenantId, data.role, target.role);
     if (!seat.allowed) {
       throw new Error(seat.reason ?? 'Seat limit reached');
     }
