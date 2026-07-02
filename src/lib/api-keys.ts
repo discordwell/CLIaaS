@@ -148,6 +148,8 @@ export async function validateApiKey(rawKey: string): Promise<AuthUser | null> {
       userName: users.name,
       userEmail: users.email,
       userRole: users.role,
+      userStatus: users.status,
+      userTenantId: users.tenantId,
     })
     .from(apiKeys)
     .innerJoin(users, eq(users.id, apiKeys.createdBy))
@@ -158,6 +160,11 @@ export async function validateApiKey(rawKey: string): Promise<AuthUser | null> {
   if (!row) return null;
   if (row.revokedAt) return null;
   if (row.expiresAt && row.expiresAt < new Date()) return null;
+  // A key is only as alive as the user behind it: sign-in requires
+  // status === 'active', and offboarding (admin remove -> 'disabled',
+  // SCIM deprovision -> 'inactive') must cut off API access too, not
+  // just interactive sessions.
+  if (row.userStatus !== 'active') return null;
 
   // Update lastUsedAt (fire and forget with logging)
   db.update(apiKeys)
@@ -169,8 +176,12 @@ export async function validateApiKey(rawKey: string): Promise<AuthUser | null> {
   return {
     id: row.createdBy,
     email: row.userEmail ?? '',
-    role: (row.userRole as 'owner' | 'admin' | 'agent') ?? 'agent',
+    role: (row.userRole as AuthUser['role']) ?? 'agent',
     workspaceId: row.workspaceId,
+    // Billing/seat-limit routes key off user.tenantId; without it an
+    // API-key request would silently skip those checks (session JWTs
+    // carry it, so the two auth paths must agree).
+    tenantId: row.userTenantId ?? undefined,
     authType: 'api-key',
     scopes: row.scopes ?? [],
   };
