@@ -168,6 +168,24 @@ describe('Automation Conditions', () => {
     expect(evaluateConditions(conds, baseTicket({ tags: ['billing'] }))).toBe(false);
   });
 
+  // Regression: array (`tags`) contains/not_contains must be case-insensitive,
+  // matching the documented behavior of the string branch of the same operator.
+  // Tags are not case-folded on the automation path, so a mixed-case tag like
+  // "Billing" must still match a `contains "billing"` rule, and a
+  // `not_contains "vip"` rule must NOT fire on a ["VIP"] ticket.
+  it('tag contains is case-insensitive', () => {
+    const conds: RuleConditions = { all: [{ field: 'tags', operator: 'contains', value: 'billing' }] };
+    expect(evaluateConditions(conds, baseTicket({ tags: ['Billing'] }))).toBe(true);
+    expect(evaluateConditions(conds, baseTicket({ tags: ['VIP', 'Refund'] }))).toBe(false);
+  });
+
+  it('tag not-contains is case-insensitive', () => {
+    const conds: RuleConditions = { all: [{ field: 'tags', operator: 'not_contains', value: 'vip' }] };
+    // Must treat ["VIP"] as containing "vip" -> not_contains is false (rule does not fire).
+    expect(evaluateConditions(conds, baseTicket({ tags: ['VIP'] }))).toBe(false);
+    expect(evaluateConditions(conds, baseTicket({ tags: ['standard'] }))).toBe(true);
+  });
+
   // ---- Subject / body text matching ----
 
   it('subject contains text (case-insensitive)', () => {

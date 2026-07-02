@@ -51,11 +51,20 @@ function evaluateCondition(condition: Condition, ticket: TicketContext): boolean
       return String(fieldVal) !== String(targetVal);
 
     case 'contains':
-      if (Array.isArray(fieldVal)) return fieldVal.includes(String(targetVal));
+      // Array fields (e.g. `tags`) match case-insensitively, like the string
+      // branch below — otherwise a `tags contains "billing"` rule would silently
+      // miss a `["Billing"]` tag (tags are not case-folded on the automation path).
+      if (Array.isArray(fieldVal)) {
+        const needle = String(targetVal).toLowerCase();
+        return fieldVal.some(v => String(v).toLowerCase() === needle);
+      }
       return String(fieldVal ?? '').toLowerCase().includes(String(targetVal).toLowerCase());
 
     case 'not_contains':
-      if (Array.isArray(fieldVal)) return !fieldVal.includes(String(targetVal));
+      if (Array.isArray(fieldVal)) {
+        const needle = String(targetVal).toLowerCase();
+        return !fieldVal.some(v => String(v).toLowerCase() === needle);
+      }
       return !String(fieldVal ?? '').toLowerCase().includes(String(targetVal).toLowerCase());
 
     case 'starts_with':
