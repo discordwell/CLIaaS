@@ -137,4 +137,61 @@ describe('schedule-checker', () => {
     const count = await checkSchedules();
     expect(count).toBe(0);
   });
+
+  // Number of whole days between a computed nextRunAt and "today at hourUtc".
+  // computeNextRun zeroes minutes/seconds and sets hourUtc, so this is exact.
+  function daysUntil(nextRunAt: string, hourUtc: number): number {
+    const base = new Date();
+    base.setUTCMinutes(0, 0, 0);
+    base.setUTCHours(hourUtc);
+    return Math.round((new Date(nextRunAt).getTime() - base.getTime()) / 86400000);
+  }
+
+  it('advances a weekly schedule without dayOfWeek by exactly 7 days', async () => {
+    const schedule = {
+      id: 'sched-weekly-noday',
+      reportId: 'report-w',
+      frequency: 'weekly',
+      hourUtc: 9,
+      // dayOfWeek intentionally omitted
+      format: 'csv' as const,
+      recipients: ['frank@test.com'],
+      enabled: true,
+      lastSentAt: null,
+      nextRunAt: new Date(Date.now() - 60000).toISOString(),
+    };
+    registerMemorySchedule(schedule);
+
+    await checkSchedules();
+
+    // Regression: the initial "+1 (skip today)" used to combine with "+7",
+    // scheduling the next run 8 days out and drifting the weekday each cycle.
+    expect(daysUntil(schedule.nextRunAt!, 9)).toBe(7);
+  });
+
+  it('advances a weekly schedule with dayOfWeek to the next matching weekday', async () => {
+    const today = new Date().getUTCDay();
+    const targetDay = (today + 2) % 7; // 2 days ahead, within the coming week
+    const schedule = {
+      id: 'sched-weekly-day',
+      reportId: 'report-wd',
+      frequency: 'weekly',
+      hourUtc: 9,
+      dayOfWeek: targetDay,
+      format: 'csv' as const,
+      recipients: ['grace@test.com'],
+      enabled: true,
+      lastSentAt: null,
+      nextRunAt: new Date(Date.now() - 60000).toISOString(),
+    };
+    registerMemorySchedule(schedule);
+
+    await checkSchedules();
+
+    const next = new Date(schedule.nextRunAt!);
+    expect(next.getUTCDay()).toBe(targetDay);
+    const days = daysUntil(schedule.nextRunAt!, 9);
+    expect(days).toBeGreaterThanOrEqual(1);
+    expect(days).toBeLessThanOrEqual(7);
+  });
 });

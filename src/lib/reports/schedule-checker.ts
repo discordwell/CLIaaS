@@ -43,10 +43,14 @@ function computeNextRun(frequency: string, hourUtc: number, dayOfWeek?: number, 
       next.setUTCDate(next.getUTCDate() + 1);
       break;
     case 'weekly':
-      next.setUTCDate(next.getUTCDate() + 1);
       if (dayOfWeek !== undefined) {
+        // Skip today (we just ran), then advance to the next matching weekday.
+        next.setUTCDate(next.getUTCDate() + 1);
         while (next.getUTCDay() !== dayOfWeek) next.setUTCDate(next.getUTCDate() + 1);
       } else {
+        // No specific day: next run is exactly one week out (same weekday/time).
+        // The `+1` above must NOT apply here, or the run lands 8 days later and
+        // the weekday drifts forward every cycle.
         next.setUTCDate(next.getUTCDate() + 7);
       }
       break;
