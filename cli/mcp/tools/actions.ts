@@ -814,18 +814,12 @@ export function registerActionTools(server: McpServer): void {
           return errorResult('Either ruleId or conditions/actions required');
         }
 
-        const ticketCtx = {
-          id: String(ticket.id ?? 'test-1'),
-          subject: String(ticket.subject ?? ''),
-          status: String(ticket.status ?? 'open'),
-          priority: String(ticket.priority ?? 'normal'),
-          assignee: ticket.assignee != null ? String(ticket.assignee) : null,
-          requester: String(ticket.requester ?? ''),
-          tags: Array.isArray(ticket.tags) ? ticket.tags.map(String) : [],
-          createdAt: String(ticket.createdAt ?? new Date().toISOString()),
-          updatedAt: String(ticket.updatedAt ?? new Date().toISOString()),
-          event: ticket.event as 'create' | 'update' | 'reply' | 'status_change' | 'assignment' | undefined,
-        };
+        // Forward every field the condition evaluator can read (source,
+        // previous_*/event, hours_since_*, message_body, custom fields) — not
+        // just the base fields — so a dry-run of a rule keyed on those matches
+        // correctly instead of evaluating against `undefined`.
+        const { buildSampleTicketContext } = await import('@/lib/automation/ticket-from-event.js');
+        const ticketCtx = buildSampleTicketContext(ticket);
 
         const result = evaluateRule(rule as Parameters<typeof evaluateRule>[0], ticketCtx);
         return textResult({
