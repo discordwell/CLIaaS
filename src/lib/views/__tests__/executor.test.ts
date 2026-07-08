@@ -84,6 +84,28 @@ describe('executeViewQuery', () => {
     expect(executeViewQuery(query, tickets)).toHaveLength(2);
   });
 
+  it('matches tag "is" case-insensitively (like scalar is)', () => {
+    // Scalar `status is "Open"` already matches "open"; tag `is` must behave the
+    // same, or a `tag is "Billing"` view silently drops `["billing"]` tickets.
+    const query: ViewQuery = {
+      conditions: [{ field: 'tag', operator: 'is', value: 'Billing' }],
+      combineMode: 'and',
+    };
+    const result = executeViewQuery(query, tickets);
+    expect(result).toHaveLength(2);
+    expect(result.map(t => t.id).sort()).toEqual(['1', '4']);
+  });
+
+  it('matches tag "is_not" case-insensitively', () => {
+    // 'BILLING' present (as 'billing') -> those tickets are excluded.
+    const query: ViewQuery = {
+      conditions: [{ field: 'tag', operator: 'is_not', value: 'BILLING' }],
+      combineMode: 'and',
+    };
+    const ids = executeViewQuery(query, tickets).map(t => t.id).sort();
+    expect(ids).toEqual(['2', '3', '5']); // 1 and 4 (tagged 'billing') excluded
+  });
+
   it('filters by tag is_empty', () => {
     const query: ViewQuery = {
       conditions: [{ field: 'tag', operator: 'is_empty' }],

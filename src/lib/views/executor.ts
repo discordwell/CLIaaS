@@ -23,9 +23,13 @@ function evaluateCondition(ticket: Ticket, condition: ViewCondition, userId?: st
 
   // Handle array fields (tags)
   if (Array.isArray(fieldValue)) {
+    // Tags match case-insensitively, consistent with the scalar `is`/`is_not`
+    // below and with automation/conditions.ts — a `tag is "Billing"` view must
+    // still match a ticket tagged `["billing"]` (tags are not case-folded).
+    const needle = resolvedValue.toLowerCase();
     switch (operator) {
-      case 'is': return fieldValue.includes(resolvedValue);
-      case 'is_not': return !fieldValue.includes(resolvedValue);
+      case 'is': return fieldValue.some(v => v.toLowerCase() === needle);
+      case 'is_not': return !fieldValue.some(v => v.toLowerCase() === needle);
       case 'contains': return fieldValue.some(v => v.toLowerCase().includes(resolvedValue.toLowerCase()));
       case 'not_contains': return !fieldValue.some(v => v.toLowerCase().includes(resolvedValue.toLowerCase()));
       case 'is_empty': return fieldValue.length === 0;

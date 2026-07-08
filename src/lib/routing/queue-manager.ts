@@ -39,10 +39,20 @@ function evaluateCondition(condition: RoutingCondition, ticket: Ticket): boolean
     case 'not_equals':
       return String(fieldVal) !== String(target);
     case 'contains':
-      if (Array.isArray(fieldVal)) return fieldVal.includes(String(target));
+      // Array fields (e.g. `tags`) match case-insensitively, like the string
+      // branch below and like automation/conditions.ts — otherwise a
+      // `tags contains "Billing"` rule silently misses a `["billing"]` tag and
+      // the ticket routes to the wrong queue (tags are not case-folded here).
+      if (Array.isArray(fieldVal)) {
+        const needle = String(target).toLowerCase();
+        return fieldVal.some(v => String(v).toLowerCase() === needle);
+      }
       return String(fieldVal ?? '').toLowerCase().includes(String(target).toLowerCase());
     case 'not_contains':
-      if (Array.isArray(fieldVal)) return !fieldVal.includes(String(target));
+      if (Array.isArray(fieldVal)) {
+        const needle = String(target).toLowerCase();
+        return !fieldVal.some(v => String(v).toLowerCase() === needle);
+      }
       return !String(fieldVal ?? '').toLowerCase().includes(String(target).toLowerCase());
     case 'in':
       return Array.isArray(target) ? target.includes(String(fieldVal)) : false;

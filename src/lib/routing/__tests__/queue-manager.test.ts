@@ -56,6 +56,26 @@ describe('evaluateConditions', () => {
   it('returns true for empty conditions', () => {
     expect(evaluateConditions({}, makeTicket())).toBe(true);
   });
+
+  it('matches tag "contains" case-insensitively', () => {
+    // Rule value is capitalized; the ticket tag is lowercase. Tags are not
+    // case-folded on ingest, so routing must compare case-insensitively (parity
+    // with automation/conditions.ts) or the ticket routes to the wrong queue.
+    const result = evaluateConditions(
+      { all: [{ field: 'tags', operator: 'contains', value: 'Billing' }] },
+      makeTicket({ tags: ['billing'] }),
+    );
+    expect(result).toBe(true);
+  });
+
+  it('matches tag "not_contains" case-insensitively', () => {
+    // 'Billing' is present (as 'billing'), so not_contains must be false.
+    const result = evaluateConditions(
+      { all: [{ field: 'tags', operator: 'not_contains', value: 'Billing' }] },
+      makeTicket({ tags: ['billing'] }),
+    );
+    expect(result).toBe(false);
+  });
 });
 
 describe('evaluateRules', () => {
