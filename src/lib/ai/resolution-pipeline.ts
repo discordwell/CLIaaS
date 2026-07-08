@@ -71,6 +71,11 @@ export async function resolveTicket(
   const dbConfig = options?.configOverride;
   const globalConfig = getPipelineConfig();
 
+  // Always a fresh object: the channel-policy block below mutates
+  // `config.confidenceThreshold` / `config.autoSend` per ticket. Spreading
+  // `globalConfig` (rather than aliasing it) keeps those per-ticket overrides
+  // from leaking into the shared singleton — and into DEFAULT_PIPELINE_CONFIG —
+  // which would otherwise corrupt the threshold/auto-send for every later ticket.
   const config: PipelineConfig = dbConfig ? {
     enabled: dbConfig.enabled,
     confidenceThreshold: dbConfig.confidenceThreshold,
@@ -81,7 +86,7 @@ export async function resolveTicket(
     kbContext: dbConfig.kbContext,
     autoSend: dbConfig.mode === 'auto',
     approvalTimeoutMs: 0,
-  } : globalConfig;
+  } : { ...globalConfig };
 
   const workspaceId = options?.workspaceId ?? 'default';
 
