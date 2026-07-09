@@ -57,6 +57,20 @@ export interface SLACheckResult {
   }>;
 }
 
+/**
+ * Canonical default first-response SLA targets, in minutes, keyed by ticket
+ * priority. This is the single source of truth for the built-in per-priority
+ * targets: the demo policies below and the reports engine's SLA-compliance
+ * metric both read it, so a first-response target can never be defined in one
+ * place and silently diverge in the other.
+ */
+export const DEFAULT_FIRST_RESPONSE_TARGET_MINUTES: Record<string, number> = {
+  urgent: 15,
+  high: 60,
+  normal: 240,
+  low: 480,
+};
+
 // ---- In-memory policy store (demo mode) ----
 
 const demoPolicies: SLAPolicy[] = [];
@@ -73,7 +87,7 @@ function ensureDefaults(): void {
       id: 'sla-urgent',
       name: 'Urgent Priority',
       conditions: { priority: ['urgent'] },
-      targets: { firstResponse: 15, resolution: 240 },
+      targets: { firstResponse: DEFAULT_FIRST_RESPONSE_TARGET_MINUTES.urgent, resolution: 240 },
       escalation: [
         { afterMinutes: 10, action: 'notify', to: 'manager' },
         { afterMinutes: 30, action: 'escalate', to: 'senior-agent' },
@@ -86,7 +100,7 @@ function ensureDefaults(): void {
       id: 'sla-high',
       name: 'High Priority',
       conditions: { priority: ['high'] },
-      targets: { firstResponse: 60, resolution: 480 },
+      targets: { firstResponse: DEFAULT_FIRST_RESPONSE_TARGET_MINUTES.high, resolution: 480 },
       escalation: [
         { afterMinutes: 45, action: 'notify', to: 'team-lead' },
         { afterMinutes: 120, action: 'escalate', to: 'senior-agent' },
@@ -98,7 +112,7 @@ function ensureDefaults(): void {
       id: 'sla-normal',
       name: 'Normal Priority',
       conditions: { priority: ['normal'] },
-      targets: { firstResponse: 240, resolution: 1440 },
+      targets: { firstResponse: DEFAULT_FIRST_RESPONSE_TARGET_MINUTES.normal, resolution: 1440 },
       escalation: [
         { afterMinutes: 180, action: 'notify', to: 'team-lead' },
       ],
@@ -109,7 +123,7 @@ function ensureDefaults(): void {
       id: 'sla-low',
       name: 'Low Priority',
       conditions: { priority: ['low'] },
-      targets: { firstResponse: 480, resolution: 2880 },
+      targets: { firstResponse: DEFAULT_FIRST_RESPONSE_TARGET_MINUTES.low, resolution: 2880 },
       escalation: [],
       enabled: true,
       createdAt: new Date().toISOString(),

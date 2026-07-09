@@ -7,6 +7,7 @@
 
 import { getMetric, type MetricDefinition } from './metrics';
 import type { Ticket, Message } from '@/lib/data-provider/types';
+import { DEFAULT_FIRST_RESPONSE_TARGET_MINUTES } from '@/lib/sla';
 
 export interface ReportDefinition {
   metric: string;
@@ -356,8 +357,6 @@ function computeSlaCompliance(
   messages: Message[],
   groupBy: string[],
 ): ReportResult {
-  const SLA_FIRST_RESPONSE_HOURS = 1;
-
   const messagesByTicket = new Map<string, Message[]>();
   for (const m of messages) {
     const existing = messagesByTicket.get(m.ticketId) ?? [];
@@ -371,8 +370,15 @@ function computeSlaCompliance(
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     const firstReply = msgs.find(m => m.type === 'reply' && m.author !== t.requester);
     if (firstReply) {
-      const hours = hoursBetween(t.createdAt, firstReply.createdAt);
-      compliance.push({ ticket: t, met: hours <= SLA_FIRST_RESPONSE_HOURS });
+      // Classify against the per-priority first-response target the SLA engine
+      // actually enforces (DEFAULT_FIRST_RESPONSE_TARGET_MINUTES), not a flat 1h.
+      // The old flat target inverted the result for every priority but `high`: an
+      // urgent ticket answered in 45m scored "met" though its real target is 15m,
+      // and a low ticket answered in 90m scored "breached" though its is 480m.
+      const elapsedMinutes = hoursBetween(t.createdAt, firstReply.createdAt) * 60;
+      const targetMinutes = DEFAULT_FIRST_RESPONSE_TARGET_MINUTES[t.priority]
+        ?? DEFAULT_FIRST_RESPONSE_TARGET_MINUTES.normal;
+      compliance.push({ ticket: t, met: elapsedMinutes <= targetMinutes });
     }
   }
 
