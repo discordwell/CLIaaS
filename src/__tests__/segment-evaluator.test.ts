@@ -70,6 +70,27 @@ describe('evaluateCustomer', () => {
     expect(evaluateCustomer(customers[1], query)).toBe(true);
   });
 
+  it('contains/not_contains match array tags case-insensitively', () => {
+    // Tags are not case-folded on ingest, so a query value must match regardless
+    // of casing — parity with automation/conditions.ts, routing/queue-manager.ts,
+    // and views/executor.ts. Regression: raw Array.includes('vip') missed ['VIP'],
+    // silently dropping the customer from the segment (and mis-targeting campaigns).
+    const c: EvaluableCustomer = { id: 'x', tags: ['VIP', 'Early-Adopter'] };
+    expect(evaluateCustomer(c, { conditions: [{ field: 'tags', operator: 'contains', value: 'vip' }] })).toBe(true);
+    expect(evaluateCustomer(c, { conditions: [{ field: 'tags', operator: 'contains', value: 'VIP' }] })).toBe(true);
+    expect(evaluateCustomer(c, { conditions: [{ field: 'tags', operator: 'contains', value: 'early-adopter' }] })).toBe(true);
+    expect(evaluateCustomer(c, { conditions: [{ field: 'tags', operator: 'not_contains', value: 'vip' }] })).toBe(false);
+    // Still an exact (not substring) membership test, just case-insensitive.
+    expect(evaluateCustomer(c, { conditions: [{ field: 'tags', operator: 'contains', value: 'vi' }] })).toBe(false);
+  });
+
+  it('contains/not_contains match scalar string fields case-insensitively', () => {
+    const c: EvaluableCustomer = { id: 'x', tags: [], name: 'Alice Chen' };
+    expect(evaluateCustomer(c, { conditions: [{ field: 'name', operator: 'contains', value: 'alice' }] })).toBe(true);
+    expect(evaluateCustomer(c, { conditions: [{ field: 'name', operator: 'contains', value: 'CHEN' }] })).toBe(true);
+    expect(evaluateCustomer(c, { conditions: [{ field: 'name', operator: 'not_contains', value: 'ALICE' }] })).toBe(false);
+  });
+
   it('in operator checks value in array', () => {
     const query: SegmentQuery = { conditions: [{ field: 'plan', operator: 'in', value: ['pro', 'enterprise'] }] };
     expect(evaluateCustomer(customers[0], query)).toBe(true);

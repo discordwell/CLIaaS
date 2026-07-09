@@ -100,20 +100,29 @@ function evaluateCondition(customer: EvaluableCustomer, condition: SegmentCondit
     case 'lte':
       return compareOrdered(operator, fieldValue, value);
     case 'contains': {
+      // Array fields (e.g. `tags`) match case-insensitively, in parity with the
+      // sibling condition engines — automation/conditions.ts, routing/
+      // queue-manager.ts, and views/executor.ts all case-fold tag arrays because
+      // tags are not case-folded on ingest. Otherwise a `tags contains "vip"`
+      // segment silently misses a customer tagged `["VIP"]`, undercounting the
+      // segment and mis-targeting campaigns built on it. The scalar string branch
+      // uses a case-insensitive substring match, like those same modules.
       if (Array.isArray(fieldValue)) {
-        return fieldValue.includes(value);
+        const needle = String(value).toLowerCase();
+        return fieldValue.some(v => String(v).toLowerCase() === needle);
       }
       if (typeof fieldValue === 'string' && typeof value === 'string') {
-        return fieldValue.includes(value);
+        return fieldValue.toLowerCase().includes(value.toLowerCase());
       }
       return false;
     }
     case 'not_contains': {
       if (Array.isArray(fieldValue)) {
-        return !fieldValue.includes(value);
+        const needle = String(value).toLowerCase();
+        return !fieldValue.some(v => String(v).toLowerCase() === needle);
       }
       if (typeof fieldValue === 'string' && typeof value === 'string') {
-        return !fieldValue.includes(value);
+        return !fieldValue.toLowerCase().includes(value.toLowerCase());
       }
       return true;
     }
